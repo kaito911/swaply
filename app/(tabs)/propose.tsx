@@ -73,7 +73,7 @@ export default function ProposeScreen() {
   )
 
   const receivedOffers = useMemo(() => {
-    return offers.filter((offer) => offer.target_card?.owner_user_id === userId)
+    return offers.filter((offer) => offer.receiver_user_id === userId)
   }, [offers, userId])
 
   const sentOffers = useMemo(() => {
@@ -81,9 +81,7 @@ export default function ProposeScreen() {
   }, [offers, userId])
 
   const inProgressOffers = useMemo(() => {
-    return offers.filter(
-      (offer) => offer.status === 'accepted' || offer.status === 'completed'
-    )
+    return offers.filter((offer) => offer.status === 'accepted')
   }, [offers])
 
   const visibleOffers = useMemo(() => {
@@ -114,10 +112,7 @@ export default function ProposeScreen() {
                 Alert.alert('承認しました', '取引が開始されました。')
               } catch (error: any) {
                 console.error('[ProposeScreen][handleAccept]', error)
-                Alert.alert(
-                  'エラー',
-                  error?.message || '承認に失敗しました'
-                )
+                Alert.alert('エラー', error?.message || '承認に失敗しました')
               } finally {
                 setActingOfferId(null)
               }
@@ -147,10 +142,7 @@ export default function ProposeScreen() {
                 Alert.alert('辞退しました')
               } catch (error: any) {
                 console.error('[ProposeScreen][handleDecline]', error)
-                Alert.alert(
-                  'エラー',
-                  error?.message || '辞退に失敗しました'
-                )
+                Alert.alert('エラー', error?.message || '辞退に失敗しました')
               } finally {
                 setActingOfferId(null)
               }
@@ -163,7 +155,7 @@ export default function ProposeScreen() {
   )
 
   const handleOpenTrade = useCallback(async (offer: Offer) => {
-    if (offer.status !== 'accepted' && offer.status !== 'completed') {
+    if (offer.status !== 'accepted') {
       Alert.alert('まだ開けません', 'この提案はまだ取引画面を開ける状態ではありません。')
       return
     }
@@ -242,11 +234,10 @@ export default function ProposeScreen() {
     return (
       <View style={styles.list}>
         {visibleOffers.map((offer) => {
-          const isReceived = offer.target_card?.owner_user_id === userId
+          const isReceived = offer.receiver_user_id === userId
           const isPendingReceived = isReceived && offer.status === 'pending'
           const isActing = actingOfferId === offer.id
-          const canOpenTrade =
-            offer.status === 'accepted' || offer.status === 'completed'
+          const canOpenTrade = offer.status === 'accepted'
           const isOpeningTrade = openingTradeOfferId === offer.id
 
           const proposerCardNames = getProposerCardNames(offer)
@@ -286,7 +277,7 @@ export default function ProposeScreen() {
                 <Text style={styles.partnerName}>
                   {isReceived
                     ? getProfileName(offer.proposer)
-                    : getProfileName(offer.target_card?.owner)}
+                    : getProfileName(offer.receiver)}
                 </Text>
               </View>
 
@@ -307,6 +298,15 @@ export default function ProposeScreen() {
                   <Text style={styles.tradeValue}>{receiverCardNames}</Text>
                 </View>
               </View>
+
+              {offer.adjustment_amount !== null ? (
+                <View style={styles.adjustmentBox}>
+                  <Text style={styles.adjustmentLabel}>調整金</Text>
+                  <Text style={styles.adjustmentValue}>
+                    ¥{offer.adjustment_amount.toLocaleString()}
+                  </Text>
+                </View>
+              ) : null}
 
               {offer.message ? (
                 <View style={styles.messageBox}>
@@ -354,11 +354,7 @@ export default function ProposeScreen() {
                     onPress={() => handleOpenTrade(offer)}
                   >
                     <Text style={styles.tradeOpenButtonText}>
-                      {isOpeningTrade
-                        ? '取引画面を開いています...'
-                        : offer.status === 'completed'
-                        ? '取引詳細を見る'
-                        : '取引画面へ進む'}
+                      {isOpeningTrade ? '取引画面を開いています...' : '取引画面へ進む'}
                     </Text>
                   </Pressable>
 
@@ -474,10 +470,8 @@ function getProfileName(profile?: SimpleProfileLike | null): string {
 }
 
 function getProposerCardNames(offer: Offer): string {
-  const targetCardId = offer.target_card?.id
-
   const proposerItems =
-    offer.items?.filter((item) => item.card_id !== targetCardId) ?? []
+    offer.items?.filter((item) => item.role === 'proposer') ?? []
 
   if (proposerItems.length === 0) {
     return 'カード情報なし'
@@ -489,13 +483,16 @@ function getProposerCardNames(offer: Offer): string {
 }
 
 function getReceiverCardNames(offer: Offer): string {
-  const targetName = offer.target_card?.name
+  const receiverItems =
+    offer.items?.filter((item) => item.role === 'receiver') ?? []
 
-  if (targetName && targetName.trim().length > 0) {
-    return targetName
+  if (receiverItems.length === 0) {
+    return offer.target_card?.name || 'カード情報なし'
   }
 
-  return 'カード情報なし'
+  return receiverItems
+    .map((item) => item.card?.name || 'カード情報なし')
+    .join(' / ')
 }
 
 function formatDate(value: string): string {
@@ -527,10 +524,6 @@ function getFooterNote(status: OfferStatus): string {
     return 'この提案はキャンセル済みです。'
   }
 
-  if (status === 'completed') {
-    return 'この取引は完了済みです。取引詳細を確認できます。'
-  }
-
   return '返答待ちの提案です。'
 }
 
@@ -553,13 +546,6 @@ function getStatusBadgeStyle(status: OfferStatus) {
     return {
       badge: styles.statusDeclinedBadge,
       text: styles.statusDeclinedText,
-    }
-  }
-
-  if (status === 'completed') {
-    return {
-      badge: styles.statusCompletedBadge,
-      text: styles.statusCompletedText,
     }
   }
 
@@ -727,12 +713,6 @@ const styles = StyleSheet.create({
   statusDeclinedText: {
     color: '#B91C1C',
   },
-  statusCompletedBadge: {
-    backgroundColor: '#EFF6FF',
-  },
-  statusCompletedText: {
-    color: '#1D4ED8',
-  },
   statusCancelledBadge: {
     backgroundColor: '#F4F4F5',
   },
@@ -781,6 +761,24 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#6D5EF5',
+  },
+  adjustmentBox: {
+    marginBottom: 14,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+  },
+  adjustmentLabel: {
+    fontSize: 12,
+    color: '#9A3412',
+  },
+  adjustmentValue: {
+    marginTop: 6,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#C2410C',
   },
   messageBox: {
     marginBottom: 14,

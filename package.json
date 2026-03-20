@@ -10,7 +10,10 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run lint"
+    "check": "npm run typecheck && npm run lint",
+    "build": "expo export",
+    "ci:validate": "npm run typecheck && npm run lint && npm run build",
+    "ci:local": "npm run typecheck && npm run lint"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

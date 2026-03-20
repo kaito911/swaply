@@ -1,4 +1,3 @@
-// lib/supabase.ts
 import { createClient } from '@supabase/supabase-js'
 import { Card, Offer, Profile } from './types'
 
@@ -215,11 +214,16 @@ export async function createOffer(params: {
     throw new Error('自分の出品には提案できません')
   }
 
+  const normalizedAdjustmentAmount =
+    params.adjustmentAmount == null ? null : Math.max(0, Math.min(1000, params.adjustmentAmount))
+
   const { data: offer, error: offerError } = await supabase
     .from('offers')
     .insert({
       proposer_user_id: params.proposerId,
+      receiver_user_id: params.receiverId,
       target_card_id: params.receiverCardId,
+      adjustment_amount: normalizedAdjustmentAmount,
       status: 'pending',
       message: params.message,
     })
@@ -234,10 +238,12 @@ export async function createOffer(params: {
     {
       offer_id: offer.id,
       card_id: params.proposerCardId,
+      role: 'proposer',
     },
     {
       offer_id: offer.id,
       card_id: params.receiverCardId,
+      role: 'receiver',
     },
   ])
 
@@ -270,6 +276,7 @@ export async function fetchMyOffers(userId: string): Promise<Offer[]> {
       `
       *,
       proposer:profiles!offers_proposer_user_id_fkey(*),
+      receiver:profiles!offers_receiver_user_id_fkey(*),
       target_card:cards!offers_target_card_id_fkey(
         *,
         owner:profiles(*)
@@ -280,6 +287,7 @@ export async function fetchMyOffers(userId: string): Promise<Offer[]> {
       )
     `
     )
+    .or(`proposer_user_id.eq.${userId},receiver_user_id.eq.${userId}`)
     .order('created_at', { ascending: false })
 
   if (error) {
@@ -287,13 +295,7 @@ export async function fetchMyOffers(userId: string): Promise<Offer[]> {
     return []
   }
 
-  const offers = (data ?? []) as Offer[]
-
-  return offers.filter((offer) => {
-    const proposerId = offer.proposer_user_id
-    const receiverId = offer.target_card?.owner_user_id
-    return proposerId === userId || receiverId === userId
-  })
+  return (data ?? []) as Offer[]
 }
 
 // ─────────────────────────────────────────

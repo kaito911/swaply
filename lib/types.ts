@@ -1,25 +1,28 @@
 // lib/types.ts
 
 export type TrustBadgeLevel = 'none' | 'bronze' | 'silver' | 'gold'
+
 export type CardStatus = 'active' | 'inactive' | 'reserved' | 'traded'
 export type CardCondition = 'mint' | 'near_mint' | 'good' | 'fair' | 'poor'
 export type UserMode = 'oshi' | 'trading_card' | 'collection'
+
 export type OfferStatus =
   | 'pending'
   | 'accepted'
   | 'declined'
   | 'cancelled'
-  | 'completed'
+
+export type OfferItemRole = 'proposer' | 'receiver'
 
 export type TradeStatus =
-  | 'matched'
-  | 'adjustment_held'
-  | 'waiting_ship'
-  | 'partial_shipped'
-  | 'both_shipped'
-  | 'waiting_receipt'
+  | 'pending'
+  | 'in_transit'
+  | 'partially_received'
   | 'completed'
-  | 'auto_cancelled'
+  | 'cancelled'
+  | 'disputed'
+
+export type ShipmentStatus = 'pending' | 'shipped' | 'received' | 'cancelled'
 
 // ─────────────────────────────────────────
 // profiles
@@ -72,6 +75,7 @@ export interface OfferItem {
   id: string
   offer_id: string
   card_id: string
+  role: OfferItemRole
   created_at?: string
   card?: Card
 }
@@ -82,19 +86,39 @@ export interface OfferItem {
 export interface Offer {
   id: string
   proposer_user_id: string
+  receiver_user_id: string
   target_card_id: string
+  adjustment_amount: number | null
   status: OfferStatus
   message: string | null
   created_at: string
   updated_at?: string
 
   proposer?: Profile
+  receiver?: Profile
   target_card?: Card
   items?: OfferItem[]
 }
 
 // ─────────────────────────────────────────
-// trades（暫定）
+// shipments
+// ─────────────────────────────────────────
+export interface Shipment {
+  id: string
+  trade_id: string
+  sender_user_id: string
+  recipient_user_id: string
+  tracking_number: string | null
+  carrier: string | null
+  status: ShipmentStatus
+  shipped_at: string | null
+  received_at: string | null
+  created_at: string
+  updated_at?: string
+}
+
+// ─────────────────────────────────────────
+// trades
 // ─────────────────────────────────────────
 export interface Trade {
   id: string
@@ -102,7 +126,13 @@ export interface Trade {
   status: TradeStatus
   ship_deadline_at: string | null
   created_at: string
+  updated_at?: string
+  accepted_at?: string | null
+  completed_at?: string | null
+  cancelled_at?: string | null
+
   offer?: Offer
+  shipments?: Shipment[]
 }
 
 // ─────────────────────────────────────────
@@ -116,7 +146,13 @@ export function computeTrustBadge(
 ): TrustBadgeLevel {
   const { trade_count, ship_rate, reply_median_hours, trouble_count } = profile
 
-  if (trade_count >= 150 && ship_rate >= 97) return 'gold'
+  if (
+    trade_count >= 150 &&
+    ship_rate >= 97 &&
+    trouble_count === 0
+  ) {
+    return 'gold'
+  }
 
   if (
     trade_count >= 50 &&
@@ -127,7 +163,11 @@ export function computeTrustBadge(
     return 'silver'
   }
 
-  if (trade_count >= 10 && ship_rate >= 90 && trouble_count === 0) {
+  if (
+    trade_count >= 10 &&
+    ship_rate >= 90 &&
+    trouble_count === 0
+  ) {
     return 'bronze'
   }
 
@@ -153,18 +193,22 @@ export const OFFER_STATUS_LABELS: Record<OfferStatus, string> = {
   accepted: '成立',
   declined: '辞退',
   cancelled: 'キャンセル',
-  completed: '完了',
 }
 
 export const TRADE_STATUS_LABELS: Record<TradeStatus, string> = {
-  matched: '成立済み',
-  adjustment_held: '調整金仮確保済み',
-  waiting_ship: '発送待ち',
-  partial_shipped: '片側発送済み',
-  both_shipped: '双方発送済み',
-  waiting_receipt: '受取待ち',
+  pending: '取引開始',
+  in_transit: '発送進行中',
+  partially_received: '一部受取済み',
   completed: '完了',
-  auto_cancelled: '自動キャンセル',
+  cancelled: 'キャンセル',
+  disputed: '問題対応中',
+}
+
+export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
+  pending: '発送待ち',
+  shipped: '発送済み',
+  received: '受取済み',
+  cancelled: 'キャンセル',
 }
 
 export function formatReplyTime(hours: number): string {

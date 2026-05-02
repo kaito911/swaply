@@ -1,3 +1,5 @@
+// ⚠️ DEPRECATED: このファイルは旧実装です。href: null で非表示になっています。
+// 将来的に削除予定です。
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
@@ -147,7 +149,7 @@ const styles = StyleSheet.create({
     color: "#6b7280",
   },
   listContent: {
-    paddingBottom: 32,
+    paddingBottom: 120,
   },
   card: {
     marginBottom: 14,

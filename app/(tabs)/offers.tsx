@@ -1,3 +1,6 @@
+// ⚠️ DEPRECATED: このファイルは旧実装です。現役の実装は propose.tsx を参照してください。
+// このファイルは href: null で非表示になっており、実際には使われていません。
+// 将来的に削除予定です。
 // app/(tabs)/offers.tsx
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
@@ -239,7 +242,7 @@ const styles = StyleSheet.create({
     color: "#6b7280",
   },
   listContent: {
-    paddingBottom: 32,
+    paddingBottom: 120,
   },
   offerCard: {
     borderWidth: 1,

@@ -319,12 +319,12 @@ export default function OfferCreateScreen() {
     }
     if (selectedMyCard == null) return
 
-    const parsedAdjustment =
+    const rawAmount =
       showDiff && adjustmentAmount.trim().length > 0
         ? Number(adjustmentAmount.replace(/[^\d]/g, ''))
         : null
 
-    if (parsedAdjustment !== null && Number.isNaN(parsedAdjustment)) {
+    if (rawAmount !== null && Number.isNaN(rawAmount)) {
       Alert.alert('入力エラー', '調整金は数字で入力してください')
       return
     }
@@ -332,8 +332,8 @@ export default function OfferCreateScreen() {
     if (
       targetCard.allows_adjustment &&
       targetCard.adjustment_max != null &&
-      parsedAdjustment != null &&
-      parsedAdjustment > targetCard.adjustment_max
+      rawAmount != null &&
+      rawAmount > targetCard.adjustment_max
     ) {
       Alert.alert(
         '入力エラー',
@@ -341,6 +341,14 @@ export default function OfferCreateScreen() {
       )
       return
     }
+
+    // 提案者支払 → 負、受信者支払 → 正（counter.tsx と同じ符号規約）
+    const parsedAdjustment: number | null =
+      rawAmount == null || rawAmount === 0
+        ? null
+        : adjustmentPayer === 'proposer'
+        ? -rawAmount
+        : rawAmount
 
     try {
       setSubmitting(true)
@@ -623,9 +631,103 @@ export default function OfferCreateScreen() {
           </View>
         </View>
 
-        {/* ── 調整金（一時非表示） ── */}
-        {/* TODO: offers テーブルに adjustment_amount / adjustment_payer カラム追加後に復活 */}
-        {/* state: showDiff / adjustmentAmount / adjustmentPayer / chkDiff は保持済み */}
+        {/* ── 調整金（任意） ── */}
+        <View style={styles.section}>
+          <Pressable
+            style={styles.toggleRow}
+            onPress={() => {
+              setShowDiff((prev) => {
+                if (prev) {
+                  setAdjustmentAmount('')
+                  setChkDiff(false)
+                }
+                return !prev
+              })
+            }}
+          >
+            <Ionicons
+              name={showDiff ? 'remove-circle-outline' : 'add-circle-outline'}
+              size={18}
+              color={colors.primary}
+            />
+            <Text style={styles.toggleLabel}>
+              {showDiff ? '調整金を取り消す' : '調整金を提案する（任意）'}
+            </Text>
+          </Pressable>
+
+          {showDiff && (
+            <>
+              <Text style={styles.payerLabel}>支払う方向</Text>
+              <View style={styles.payerRow}>
+                <Pressable
+                  style={[
+                    styles.payerBtn,
+                    styles.payerBtnLeft,
+                    adjustmentPayer === 'proposer' && styles.payerBtnSelected,
+                  ]}
+                  onPress={() => setAdjustmentPayer('proposer')}
+                >
+                  <Text
+                    style={[
+                      styles.payerBtnText,
+                      adjustmentPayer === 'proposer' &&
+                        styles.payerBtnTextSelected,
+                    ]}
+                  >
+                    あなた → 相手
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.payerBtn,
+                    styles.payerBtnRight,
+                    adjustmentPayer === 'receiver' && styles.payerBtnSelected,
+                  ]}
+                  onPress={() => setAdjustmentPayer('receiver')}
+                >
+                  <Text
+                    style={[
+                      styles.payerBtnText,
+                      adjustmentPayer === 'receiver' &&
+                        styles.payerBtnTextSelected,
+                    ]}
+                  >
+                    相手 → あなた
+                  </Text>
+                </Pressable>
+              </View>
+
+              <TextInput
+                value={adjustmentAmount}
+                onChangeText={setAdjustmentAmount}
+                placeholder="例: 500"
+                placeholderTextColor={colors.textTertiary}
+                keyboardType="number-pad"
+                style={styles.input}
+                maxLength={4}
+              />
+              <Text style={styles.counterText}>
+                {targetCard.adjustment_max != null
+                  ? `上限 ¥${targetCard.adjustment_max.toLocaleString()}`
+                  : '上限未設定'}
+              </Text>
+
+              <Pressable
+                style={styles.checkRow}
+                onPress={() => setChkDiff((prev) => !prev)}
+              >
+                <View style={[styles.checkbox, chkDiff && styles.checkboxChecked]}>
+                  {chkDiff && (
+                    <Ionicons name="checkmark" size={12} color={colors.textInverse} />
+                  )}
+                </View>
+                <Text style={styles.checkText}>
+                  調整金の発生に同意します
+                </Text>
+              </Pressable>
+            </>
+          )}
+        </View>
 
         {/* ── メッセージ（コラプシブル） ── */}
         <View style={styles.section}>

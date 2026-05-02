@@ -289,12 +289,21 @@ export default function OfferDetailScreen() {
           </View>
         </View>
 
-        {/* 差額 */}
+        {/* 調整金 */}
         {offer.adjustment_amount != null && offer.adjustment_amount !== 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>差額</Text>
+            <Text style={styles.sectionLabel}>調整金</Text>
             <Text style={styles.bodyText}>
-              ¥{offer.adjustment_amount.toLocaleString()}
+              {(() => {
+                const amount = offer.adjustment_amount
+                const absText = `¥${Math.abs(amount).toLocaleString()}`
+                const proposerPays = amount < 0
+                const youPay =
+                  (isReceived && !proposerPays) ||
+                  (!isReceived && proposerPays)
+                const direction = youPay ? 'あなた → 相手' : '相手 → あなた'
+                return `調整金 ${absText}（${direction}）`
+              })()}
             </Text>
           </View>
         )}

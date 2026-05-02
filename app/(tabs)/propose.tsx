@@ -1,4 +1,5 @@
-// app/(tabs)/propose.tsx
+import { TradeStats } from '@/components/TradeStats'
+import { TrustBadge } from '@/components/TrustBadge'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useMemo, useState } from 'react'
 import {
@@ -13,23 +14,76 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { acceptOffer, declineOffer, fetchMyOffers } from '@/lib/supabase'
-import { OFFER_STATUS_LABELS, type Offer, type OfferStatus } from '@/lib/types'
+import {
+  computeTrustBadge,
+  OFFER_STATUS_LABELS,
+  TRADE_STATUS_LABELS,
+  type Offer,
+  type OfferStatus,
+  type Profile,
+  type TradeStatus,
+} from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
+import { useBadge } from '@/providers/BadgeProvider'
 
-type OfferTabKey = 'received' | 'sent' | 'inProgress'
+// ─────────────────────────────────────────
+// Trust サマリー行（受信/送信カード共通）
+// ─────────────────────────────────────────
+
+function TrustSummaryRow({ profile }: { profile: Profile }) {
+  const level = computeTrustBadge({
+    trade_count: profile.trade_count,
+    ship_rate: profile.ship_rate,
+    reply_median_hours: profile.reply_median_hours,
+    trouble_count: profile.trouble_count,
+  })
+  return (
+    <View style={trustRowStyles.row}>
+      <TrustBadge level={level} size="sm" />
+      <TradeStats
+        tradeCount={profile.trade_count}
+        shipRate={profile.ship_rate}
+        replyMedianHours={profile.reply_median_hours}
+        layout="row"
+      />
+    </View>
+  )
+}
+
+const trustRowStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+})
+
+// ─────────────────────────────────────────
+
+type OfferTabKey = 'proposal' | 'inProgress'
+
+type ProposalSubTabKey = 'received' | 'sent'
+
+type OfferWithTrade = Offer & {
+  trade?: {
+    id: string
+    status: TradeStatus
+  } | null
+}
 
 type SimpleProfileLike = {
   display_name?: string | null
   handle?: string | null
-  username?: string | null
-  full_name?: string | null
 }
 
 export default function ProposeScreen() {
   const { session } = useAuthContext()
+  const { refreshBadge } = useBadge()
 
-  const [activeTab, setActiveTab] = useState<OfferTabKey>('received')
-  const [offers, setOffers] = useState<Offer[]>([])
+  const [activeTab, setActiveTab] = useState<OfferTabKey>('proposal')
+  const [proposalSubTab, setProposalSubTab] = useState<ProposalSubTabKey>('received')
+  const [offers, setOffers] = useState<OfferWithTrade[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [actingOfferId, setActingOfferId] = useState<string | null>(null)
@@ -53,7 +107,7 @@ export default function ProposeScreen() {
           setLoading(true)
         }
 
-        const data = await fetchMyOffers(userId)
+        const data = (await fetchMyOffers(userId)) as OfferWithTrade[]
         setOffers(data)
       } catch (error) {
         console.error('[ProposeScreen][loadOffers]', error)
@@ -72,29 +126,47 @@ export default function ProposeScreen() {
     }, [loadOffers])
   )
 
+  // 提案サブタブ「届いた提案」: 自分が受信した pending
   const receivedOffers = useMemo(() => {
-    return offers.filter((offer) => offer.target_card?.owner_user_id === userId)
-  }, [offers, userId])
-
-  const sentOffers = useMemo(() => {
-    return offers.filter((offer) => offer.proposer_user_id === userId)
-  }, [offers, userId])
-
-  const inProgressOffers = useMemo(() => {
     return offers.filter(
-      (offer) => offer.status === 'accepted' || offer.status === 'completed'
+      (offer) =>
+        offer.status === 'pending' &&
+        offer.target_card?.owner_user_id === userId
     )
+  }, [offers, userId])
+
+  // 提案サブタブ「送信した提案」: 自分が送信した pending
+  const sentOffers = useMemo(() => {
+    return offers.filter(
+      (offer) =>
+        offer.status === 'pending' &&
+        offer.proposer_user_id === userId
+    )
+  }, [offers, userId])
+
+  // 取引中タブ: trade が動いているもの、または accepted 直後で trade 未生成のもの
+  const inProgressOffers = useMemo(() => {
+    return offers.filter((offer) => {
+      const tradeStatus = offer.trade?.status
+      if (
+        tradeStatus === 'pending' ||
+        tradeStatus === 'in_transit' ||
+        tradeStatus === 'partially_received' ||
+        tradeStatus === 'disputed'
+      ) {
+        return true
+      }
+      return offer.status === 'accepted' && offer.trade == null
+    })
   }, [offers])
 
   const visibleOffers = useMemo(() => {
-    if (activeTab === 'received') return receivedOffers
-    if (activeTab === 'sent') return sentOffers
-    return inProgressOffers
-  }, [activeTab, receivedOffers, sentOffers, inProgressOffers])
-
-  const pendingReceivedCount = useMemo(() => {
-    return receivedOffers.filter((offer) => offer.status === 'pending').length
-  }, [receivedOffers])
+    if (activeTab === 'proposal') {
+      return proposalSubTab === 'received' ? receivedOffers : sentOffers
+    }
+    if (activeTab === 'inProgress') return inProgressOffers
+    return []
+  }, [activeTab, proposalSubTab, receivedOffers, sentOffers, inProgressOffers])
 
   const handleAccept = useCallback(
     (offerId: string) => {
@@ -111,13 +183,13 @@ export default function ProposeScreen() {
                 await acceptOffer(offerId)
                 await loadOffers(true)
                 setActiveTab('inProgress')
+                await refreshBadge()
                 Alert.alert('承認しました', '取引が開始されました。')
-              } catch (error: any) {
+              } catch (error: unknown) {
                 console.error('[ProposeScreen][handleAccept]', error)
-                Alert.alert(
-                  'エラー',
-                  error?.message || '承認に失敗しました'
-                )
+                const message =
+                  error instanceof Error ? error.message : '承認に失敗しました'
+                Alert.alert('エラー', message)
               } finally {
                 setActingOfferId(null)
               }
@@ -126,7 +198,7 @@ export default function ProposeScreen() {
         ]
       )
     },
-    [loadOffers]
+    [loadOffers, refreshBadge]
   )
 
   const handleDecline = useCallback(
@@ -144,13 +216,13 @@ export default function ProposeScreen() {
                 setActingOfferId(offerId)
                 await declineOffer(offerId)
                 await loadOffers(true)
+                await refreshBadge()
                 Alert.alert('辞退しました')
-              } catch (error: any) {
+              } catch (error: unknown) {
                 console.error('[ProposeScreen][handleDecline]', error)
-                Alert.alert(
-                  'エラー',
-                  error?.message || '辞退に失敗しました'
-                )
+                const message =
+                  error instanceof Error ? error.message : '辞退に失敗しました'
+                Alert.alert('エラー', message)
               } finally {
                 setActingOfferId(null)
               }
@@ -159,11 +231,22 @@ export default function ProposeScreen() {
         ]
       )
     },
-    [loadOffers]
+    [loadOffers, refreshBadge]
   )
 
-  const handleOpenTrade = useCallback(async (offer: Offer) => {
-    if (offer.status !== 'accepted' && offer.status !== 'completed') {
+  const handleOpenTrade = useCallback(async (offer: OfferWithTrade) => {
+    const tradeStatus = offer.trade?.status
+
+    if (
+      tradeStatus !== 'pending' &&
+      tradeStatus !== 'in_transit' &&
+      tradeStatus !== 'partially_received' &&
+      tradeStatus !== 'completed' &&
+      tradeStatus !== 'cancelled' &&
+      tradeStatus !== 'disputed' &&
+      offer.status !== 'accepted' &&
+      offer.status !== 'completed'
+    ) {
       Alert.alert('まだ開けません', 'この提案はまだ取引画面を開ける状態ではありません。')
       return
     }
@@ -175,26 +258,24 @@ export default function ProposeScreen() {
         pathname: '/trade/[offerId]',
         params: { offerId: offer.id },
       } as never)
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[ProposeScreen][handleOpenTrade]', error)
-      Alert.alert(
-        '取引画面を開けませんでした',
-        error?.message || '取引情報の取得に失敗しました。'
-      )
+      const message =
+        error instanceof Error ? error.message : '取引情報の取得に失敗しました。'
+      Alert.alert('取引画面を開けませんでした', message)
     } finally {
       setOpeningTradeOfferId(null)
     }
   }, [])
 
   const renderEmptyText = () => {
-    if (activeTab === 'received') {
-      return {
-        title: '受信した提案はまだありません',
-        body: '相手から提案が届くとここに表示されます。',
+    if (activeTab === 'proposal') {
+      if (proposalSubTab === 'received') {
+        return {
+          title: '届いた提案はまだありません',
+          body: '相手から提案が届くとここに表示されます。',
+        }
       }
-    }
-
-    if (activeTab === 'sent') {
       return {
         title: '送信した提案はまだありません',
         body: '提案を送るとここで状態を確認できます。',
@@ -202,7 +283,7 @@ export default function ProposeScreen() {
     }
 
     return {
-      title: '進行中の取引はまだありません',
+      title: '取引中の交換はまだありません',
       body: '承認された提案がここに表示されます。',
     }
   }
@@ -239,42 +320,107 @@ export default function ProposeScreen() {
       )
     }
 
+    type ListItem =
+      | { kind: 'header'; title: string }
+      | { kind: 'offer'; offer: OfferWithTrade }
+
+    const items: ListItem[] = []
+    if (activeTab === 'proposal' && proposalSubTab === 'received') {
+      const priorityOffers = receivedOffers.slice(0, 5)
+      const priorityIds = new Set(priorityOffers.map((o) => o.id))
+      const remainingOffers = receivedOffers.filter(
+        (o) => !priorityIds.has(o.id)
+      )
+      if (priorityOffers.length > 0) {
+        items.push({ kind: 'header', title: '未対応（優先）' })
+        for (const o of priorityOffers) items.push({ kind: 'offer', offer: o })
+      }
+      if (remainingOffers.length > 0) {
+        items.push({ kind: 'header', title: 'すべての提案' })
+        for (const o of remainingOffers) items.push({ kind: 'offer', offer: o })
+      }
+    } else {
+      for (const o of visibleOffers) items.push({ kind: 'offer', offer: o })
+    }
+
     return (
       <View style={styles.list}>
-        {visibleOffers.map((offer) => {
+        {items.map((item, idx) => {
+          if (item.kind === 'header') {
+            return (
+              <Text key={`h-${idx}`} style={styles.sectionTitle}>
+                {item.title}
+              </Text>
+            )
+          }
+          const offer = item.offer
           const isReceived = offer.target_card?.owner_user_id === userId
           const isPendingReceived = isReceived && offer.status === 'pending'
           const isActing = actingOfferId === offer.id
+          const tradeStatus = offer.trade?.status
           const canOpenTrade =
-            offer.status === 'accepted' || offer.status === 'completed'
+            tradeStatus === 'pending' ||
+            tradeStatus === 'in_transit' ||
+            tradeStatus === 'partially_received' ||
+            tradeStatus === 'completed' ||
+            tradeStatus === 'cancelled' ||
+            tradeStatus === 'disputed' ||
+            offer.status === 'accepted' ||
+            offer.status === 'completed'
           const isOpeningTrade = openingTradeOfferId === offer.id
 
           const proposerCardNames = getProposerCardNames(offer)
           const receiverCardNames = getReceiverCardNames(offer)
 
+          const badgeKey = tradeStatus ?? offer.status
+          const badgeLabel = getInProgressBadgeLabel(tradeStatus, offer.status)
+
           return (
-            <View key={offer.id} style={styles.card}>
+            <Pressable
+              key={offer.id}
+              onPress={
+                activeTab === 'proposal'
+                  ? () => router.push(`/offer/${offer.id}`)
+                  : canOpenTrade
+                  ? () => handleOpenTrade(offer)
+                  : undefined
+              }
+              style={({ pressed }) => [
+                styles.card,
+                pressed &&
+                  (activeTab === 'proposal' || canOpenTrade) && {
+                    opacity: 0.85,
+                  },
+              ]}
+            >
               <View style={styles.cardHeader}>
                 <View style={styles.cardHeaderLeft}>
                   <Text style={styles.cardTitle}>
                     {isReceived ? '受信した提案' : '送信した提案'}
                   </Text>
                   <Text style={styles.cardDate}>{formatDate(offer.created_at)}</Text>
+                  {activeTab === 'inProgress' && (
+                    <View style={styles.roleBadge}>
+                      <Text style={styles.roleBadgeText}>
+                        {isReceived ? 'あなたが受信' : 'あなたが提案'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
                 <View
                   style={[
                     styles.statusBadge,
-                    getStatusBadgeStyle(offer.status).badge,
+                    getUnifiedStatusBadgeStyle(badgeKey).badge,
                   ]}
                 >
                   <Text
                     style={[
                       styles.statusBadgeText,
-                      getStatusBadgeStyle(offer.status).text,
+                      getUnifiedStatusBadgeStyle(badgeKey).text,
                     ]}
                   >
-                    {OFFER_STATUS_LABELS[offer.status]}
+                    {badgeLabel}
                   </Text>
                 </View>
               </View>
@@ -290,21 +436,30 @@ export default function ProposeScreen() {
                 </Text>
               </View>
 
+              {/* Trust サマリー（承認/辞退判断の前に事実ベースで表示） */}
+              {(() => {
+                const counterProfile: Profile | null | undefined = isReceived
+                  ? offer.proposer
+                  : offer.target_card?.owner
+                if (counterProfile == null) return null
+                return <TrustSummaryRow profile={counterProfile} />
+              })()}
+
               <View style={styles.tradeRow}>
                 <View style={styles.tradeCardBox}>
-                  <Text style={styles.tradeLabel}>
-                    {isReceived ? '相手が出すカード' : 'あなたが出すカード'}
+                  <Text style={styles.tradeLabel}>あなたが出すカード</Text>
+                  <Text style={styles.tradeValue}>
+                    {isReceived ? receiverCardNames : proposerCardNames}
                   </Text>
-                  <Text style={styles.tradeValue}>{proposerCardNames}</Text>
                 </View>
 
                 <Text style={styles.tradeArrow}>⇄</Text>
 
                 <View style={styles.tradeCardBox}>
-                  <Text style={styles.tradeLabel}>
-                    {isReceived ? 'あなたが受け取るカード' : '相手が出すカード'}
+                  <Text style={styles.tradeLabel}>あなたが受け取るカード</Text>
+                  <Text style={styles.tradeValue}>
+                    {isReceived ? proposerCardNames : receiverCardNames}
                   </Text>
-                  <Text style={styles.tradeValue}>{receiverCardNames}</Text>
                 </View>
               </View>
 
@@ -315,32 +470,61 @@ export default function ProposeScreen() {
                 </View>
               ) : null}
 
-              {isPendingReceived ? (
-                <View style={styles.buttonRow}>
-                  <Pressable
-                    style={[
-                      styles.secondaryButton,
-                      isActing && styles.disabledButton,
-                    ]}
-                    disabled={isActing}
-                    onPress={() => handleDecline(offer.id)}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {isActing ? '処理中...' : '辞退'}
-                    </Text>
-                  </Pressable>
+              {tradeStatus === 'cancelled' || tradeStatus === 'disputed' ? (
+                <View style={styles.noteBox}>
+                  <Text style={styles.noteText}>
+                    {getFooterNote(offer.status, tradeStatus)}
+                  </Text>
+                </View>
+              ) : isPendingReceived ? (
+                <View style={{ gap: 8 }}>
+                  <View style={styles.buttonRow}>
+                    <Pressable
+                      style={[
+                        styles.secondaryButton,
+                        isActing && styles.disabledButton,
+                      ]}
+                      disabled={isActing}
+                      onPress={() => handleDecline(offer.id)}
+                    >
+                      <Text style={styles.secondaryButtonText}>
+                        {isActing ? '処理中...' : '辞退'}
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      style={[
+                        styles.primaryButton,
+                        isActing && styles.disabledButton,
+                      ]}
+                      disabled={isActing}
+                      onPress={() => handleAccept(offer.id)}
+                    >
+                      <Text style={styles.primaryButtonText}>
+                        {isActing ? '処理中...' : '承認'}
+                      </Text>
+                    </Pressable>
+                  </View>
 
                   <Pressable
-                    style={[
-                      styles.primaryButton,
-                      isActing && styles.disabledButton,
-                    ]}
+                    style={[styles.counterButton, isActing && styles.disabledButton]}
                     disabled={isActing}
-                    onPress={() => handleAccept(offer.id)}
+                    onPress={() => {
+                      const proposerCardId = getProposerCardId(offer)
+                      if (!proposerCardId || !offer.target_card?.id || !userId) return
+                      router.push({
+                        pathname: '/offer/counter',
+                        params: {
+                          originalOfferId: offer.id,
+                          proposerId: userId,
+                          receiverId: offer.proposer_user_id,
+                          proposerCardId: offer.target_card.id,
+                          receiverCardId: proposerCardId,
+                        },
+                      } as never)
+                    }}
                   >
-                    <Text style={styles.primaryButtonText}>
-                      {isActing ? '処理中...' : '承認'}
-                    </Text>
+                    <Text style={styles.counterButtonText}>差額変更を提案</Text>
                   </Pressable>
                 </View>
               ) : canOpenTrade ? (
@@ -356,22 +540,26 @@ export default function ProposeScreen() {
                     <Text style={styles.tradeOpenButtonText}>
                       {isOpeningTrade
                         ? '取引画面を開いています...'
-                        : offer.status === 'completed'
+                        : tradeStatus === 'completed' || offer.status === 'completed'
                         ? '取引詳細を見る'
                         : '取引画面へ進む'}
                     </Text>
                   </Pressable>
 
                   <View style={styles.noteBox}>
-                    <Text style={styles.noteText}>{getFooterNote(offer.status)}</Text>
+                    <Text style={styles.noteText}>
+                      {getFooterNote(offer.status, tradeStatus)}
+                    </Text>
                   </View>
                 </View>
               ) : (
                 <View style={styles.noteBox}>
-                  <Text style={styles.noteText}>{getFooterNote(offer.status)}</Text>
+                  <Text style={styles.noteText}>
+                    {getFooterNote(offer.status, tradeStatus)}
+                  </Text>
                 </View>
               )}
-            </View>
+            </Pressable>
           )
         })}
       </View>
@@ -382,38 +570,21 @@ export default function ProposeScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
         <View style={styles.screenHeader}>
-          <Text style={styles.screenTitle}>取引</Text>
-          <Text style={styles.screenSubtitle}>
-            受信した提案の確認、承認、辞退、進行中取引の確認ができます
-          </Text>
+          <Text style={styles.screenTitle}>提案 / 取引</Text>
         </View>
 
         <View style={styles.tabs}>
           <Pressable
-            style={[styles.tab, activeTab === 'received' && styles.activeTab]}
-            onPress={() => setActiveTab('received')}
+            style={[styles.tab, activeTab === 'proposal' && styles.activeTab]}
+            onPress={() => setActiveTab('proposal')}
           >
             <Text
               style={[
                 styles.tabText,
-                activeTab === 'received' && styles.activeTabText,
+                activeTab === 'proposal' && styles.activeTabText,
               ]}
             >
-              受信{pendingReceivedCount > 0 ? ` (${pendingReceivedCount})` : ''}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[styles.tab, activeTab === 'sent' && styles.activeTab]}
-            onPress={() => setActiveTab('sent')}
-          >
-            <Text
-              style={[
-                styles.tabText,
-                activeTab === 'sent' && styles.activeTabText,
-              ]}
-            >
-              送信
+              提案
             </Text>
           </Pressable>
 
@@ -427,10 +598,42 @@ export default function ProposeScreen() {
                 activeTab === 'inProgress' && styles.activeTabText,
               ]}
             >
-              進行中
+              取引中
             </Text>
           </Pressable>
         </View>
+
+        {activeTab === 'proposal' && (
+          <View style={styles.tabs}>
+            <Pressable
+              style={[styles.tab, proposalSubTab === 'received' && styles.activeTab]}
+              onPress={() => setProposalSubTab('received')}
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  proposalSubTab === 'received' && styles.activeTabText,
+                ]}
+              >
+                届いた提案{receivedOffers.length > 0 ? ` (${receivedOffers.length})` : ''}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.tab, proposalSubTab === 'sent' && styles.activeTab]}
+              onPress={() => setProposalSubTab('sent')}
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  proposalSubTab === 'sent' && styles.activeTabText,
+                ]}
+              >
+                送信した提案
+              </Text>
+            </Pressable>
+          </View>
+        )}
 
         <ScrollView
           style={styles.scroll}
@@ -462,15 +665,12 @@ function getProfileName(profile?: SimpleProfileLike | null): string {
     return `@${profile.handle}`
   }
 
-  if (profile.username && profile.username.trim().length > 0) {
-    return profile.username
-  }
-
-  if (profile.full_name && profile.full_name.trim().length > 0) {
-    return profile.full_name
-  }
-
   return 'ユーザー'
+}
+
+function getProposerCardId(offer: Offer): string | undefined {
+  const targetCardId = offer.target_card?.id
+  return offer.items?.find((item) => item.card_id !== targetCardId)?.card_id
 }
 
 function getProposerCardNames(offer: Offer): string {
@@ -514,20 +714,60 @@ function formatDate(value: string): string {
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}`
 }
 
-function getFooterNote(status: OfferStatus): string {
-  if (status === 'accepted') {
+// 取引中カードのバッジ用ラベル（主体非明示の中立表現）
+function getInProgressBadgeLabel(
+  tradeStatus: TradeStatus | undefined | null,
+  offerStatus: OfferStatus
+): string {
+  if (tradeStatus === 'pending') return '発送準備中'
+  if (tradeStatus === 'in_transit') return '配送中'
+  if (tradeStatus === 'partially_received') return '一部到着済'
+  if (tradeStatus === 'disputed') return '確認が必要です'
+  if (tradeStatus) return TRADE_STATUS_LABELS[tradeStatus]
+  return OFFER_STATUS_LABELS[offerStatus]
+}
+
+function getFooterNote(
+  offerStatus: OfferStatus,
+  tradeStatus?: TradeStatus | null
+): string {
+  if (tradeStatus === 'pending') {
+    return '両者の発送登録を待っています（72時間以内）。'
+  }
+
+  if (tradeStatus === 'in_transit') {
+    return '配送が進行中です。到着後に取引画面で確認できます。'
+  }
+
+  if (tradeStatus === 'partially_received') {
+    return '一部の受取確認が完了しています。残りの到着確認を待っています。'
+  }
+
+  if (tradeStatus === 'completed') {
+    return 'この取引は完了済みです。取引詳細を確認できます。'
+  }
+
+  if (tradeStatus === 'cancelled') {
+    return 'この取引は期限切れ等でキャンセルされました。'
+  }
+
+  if (tradeStatus === 'disputed') {
+    return 'この取引はトラブル対応中です。通常進行では操作できません。'
+  }
+
+  if (offerStatus === 'accepted') {
     return 'この提案は承認済みです。取引画面へ進んで発送・受取を管理できます。'
   }
 
-  if (status === 'declined') {
+  if (offerStatus === 'declined') {
     return 'この提案は辞退済みです。'
   }
 
-  if (status === 'cancelled') {
+  if (offerStatus === 'cancelled') {
     return 'この提案はキャンセル済みです。'
   }
 
-  if (status === 'completed') {
+  if (offerStatus === 'completed') {
     return 'この取引は完了済みです。取引詳細を確認できます。'
   }
 
@@ -569,6 +809,61 @@ function getStatusBadgeStyle(status: OfferStatus) {
   }
 }
 
+function getTradeStatusBadgeStyle(status: TradeStatus) {
+  if (status === 'pending') {
+    return {
+      badge: styles.statusPendingBadge,
+      text: styles.statusPendingText,
+    }
+  }
+
+  if (status === 'in_transit' || status === 'partially_received') {
+    return {
+      badge: styles.statusAcceptedBadge,
+      text: styles.statusAcceptedText,
+    }
+  }
+
+  if (status === 'completed') {
+    return {
+      badge: styles.statusCompletedBadge,
+      text: styles.statusCompletedText,
+    }
+  }
+
+  if (status === 'disputed') {
+    return {
+      badge: styles.statusDeclinedBadge,
+      text: styles.statusDeclinedText,
+    }
+  }
+
+  return {
+    badge: styles.statusCancelledBadge,
+    text: styles.statusCancelledText,
+  }
+}
+
+function getUnifiedStatusBadgeStyle(status: OfferStatus | TradeStatus) {
+  if (
+    status === 'in_transit' ||
+    status === 'partially_received' ||
+    status === 'disputed'
+  ) {
+    return getTradeStatusBadgeStyle(status)
+  }
+
+  if (
+    status === 'pending' ||
+    status === 'completed' ||
+    status === 'cancelled'
+  ) {
+    return getTradeStatusBadgeStyle(status)
+  }
+
+  return getStatusBadgeStyle(status)
+}
+
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -584,7 +879,7 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   screenTitle: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '700',
     color: '#18181B',
   },
@@ -673,6 +968,14 @@ const styles = StyleSheet.create({
   list: {
     gap: 12,
   },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#3F3F46',
+    marginTop: 4,
+    marginBottom: 4,
+    paddingHorizontal: 4,
+  },
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
@@ -698,6 +1001,19 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 12,
     color: '#8A8499',
+  },
+  roleBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: '#EEF2FF',
+  },
+  roleBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4338CA',
   },
   statusBadge: {
     paddingHorizontal: 10,
@@ -856,5 +1172,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: '#71717A',
+  },
+  counterButton: {
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#F5F3FF',
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  counterButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6D28D9',
   },
 })

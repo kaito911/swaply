@@ -40,16 +40,18 @@ export default function LoginScreen() {
         throw error
       }
 
-      router.replace('/(tabs)')
+      // ログイン成功後は _layout.tsx の session 監視が自動でルーティングする
+      // router.replace は不要（onboardingDone チェックを経由させるため）
     } catch (error) {
-      console.error('[LoginScreen][handleLogin]', error)
-
       const message =
-        error instanceof Error
-          ? error.message
-          : 'ログインに失敗しました'
+        error instanceof Error ? error.message : ''
 
-      Alert.alert('ログインエラー', message)
+      if (message.includes('Invalid login credentials')) {
+        Alert.alert('ログインエラー', 'メールアドレスまたはパスワードが違います')
+      } else {
+        console.error('[LoginScreen][handleLogin]', error)
+        Alert.alert('ログインエラー', message || 'ログインに失敗しました')
+      }
     } finally {
       setLoading(false)
     }

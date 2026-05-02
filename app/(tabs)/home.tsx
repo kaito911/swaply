@@ -1,225 +1,298 @@
-import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+// app/(tabs)/home.tsx
+import { BestTradeCandidateData } from '@/components/BestTradeCandidateCard'
+import { EmptyHomeState } from '@/components/EmptyHomeState'
+import { HomeLargeCard } from '@/components/HomeLargeCard'
+import { HomeSmallCard } from '@/components/HomeSmallCard'
+import { LaneSectionLabel } from '@/components/LaneSectionLabel'
+import { SearchBar } from '@/components/SearchBar'
+import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
+import { Card, isWantMatch, scoreWantMatch, WantedCard, WantMatchScore } from '@/lib/types' // ★ updated
+import {
+  fetchEasyCards,
+  fetchMyWantedCards,
+  fetchNewCards,
+  fetchRecommendedCards,
+  supabase,
+} from '@/lib/supabase'
+import { useAuthContext } from '@/providers/AuthProvider'
+import { router, useFocusEffect } from 'expo-router'
+import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
-  FlatList,
-  Image,
-  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { type CardItem } from "../../data/cards";
-import { getCards } from "../../lib/cards";
+} from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+
+// ★ updated: easyCardsWithMatch の要素型
+type EasyCardWithMatch = {
+  card: Card
+  bestMatch: WantMatchScore
+  matchReasonLabel: string | null
+}
 
 export default function HomeScreen() {
-  const [cardList, setCardList] = useState<CardItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuthContext()
+
+  const [recommendedCards, setRecommendedCards] = useState<Card[]>([])
+  const [easyCards, setEasyCards] = useState<Card[]>([])
+  const [newCards, setNewCards] = useState<Card[]>([])
+  const [loading, setLoading] = useState(true)
+  const [myWants, setMyWants] = useState<WantedCard[]>([])
 
   useFocusEffect(
     useCallback(() => {
-      let isActive = true;
+      let isActive = true
 
-      const loadCards = async () => {
-        setLoading(true);
-        const nextCards = await getCards();
+      const load = async () => {
+        setLoading(true)
 
-        if (!isActive) return;
-        setCardList(nextCards);
-        setLoading(false);
-      };
+        // ①レーン: get_best_trade_candidate RPC（ログイン時のみ）
+        let candidateData: BestTradeCandidateData | null = null
 
-      loadCards();
+        if (user != null) {
+          const { data: rawCandidate, error: candidateError } = await supabase.rpc(
+            'get_best_trade_candidate',
+            { p_user_id: user.id }
+          )
+          if (candidateError) {
+            console.error('[home] get_best_trade_candidate', candidateError)
+          }
+          if (rawCandidate != null) {
+            candidateData = rawCandidate as BestTradeCandidateData
+          }
+        }
+
+        // wants を先に取得してから fetchEasyCards に渡す（状態管理と取得責務の分離）
+        const wants = user != null ? await fetchMyWantedCards(user.id) : []
+        if (isActive) setMyWants(wants)
+
+        // TODO: 推薦RPC実装後に差し替え (Lane 1: 現行は自分以外のアクティブカードによる近似)
+        const [rec, easy, newest] = await Promise.all([
+          user != null ? fetchRecommendedCards(user.id) : fetchNewCards(),
+          fetchEasyCards(user?.id, wants),
+          fetchNewCards(),
+        ])
+
+        if (!isActive) return
+        const myId = user?.id ?? null
+
+        setRecommendedCards(rec.filter((c) => c.owner_user_id !== myId))
+
+        // bestCandidate を easyCards の先頭に Card として挿入する
+        if (candidateData != null) {
+          const cd = candidateData
+          const bestCard: Card = {
+            id: cd.target_card.id,
+            name: cd.target_card.name,
+            image_url: cd.target_card.image_url,
+            group_name: null,
+            series: null,
+            member_name: null,
+            want_description: null,
+            allows_adjustment: false,
+            adjustment_max: null,
+            status: 'active',
+            owner_user_id: cd.target_user.id,
+            created_at: '',
+            updated_at: '',
+            owner: null,
+          }
+          setEasyCards([bestCard, ...easy.filter((c) => c.id !== cd.target_card.id && c.owner_user_id !== myId)])
+        } else {
+          setEasyCards(easy.filter((c) => c.owner_user_id !== myId))
+        }
+
+        setNewCards(newest.filter((c) => c.owner_user_id !== myId))
+        setLoading(false)
+      }
+
+      load()
 
       return () => {
-        isActive = false;
-      };
-    }, [])
-  );
+        isActive = false
+      }
+    }, [user?.id])
+  )
 
-  const renderItem = ({ item }: { item: CardItem }) => {
-    const successCount = item.trust?.successCount ?? 0;
-    const shipRate = item.trust?.shipRate ?? 0;
-    const replyHours = item.trust?.replyHours ?? 0;
-    const badge = item.trust?.badge ?? "Bronze";
+  const handleSearchPress = () => {
+    router.push('/(tabs)/search')
+  }
 
-    return (
-      <Pressable
-        style={styles.card}
-        onPress={() =>
-          router.push({
-            pathname: "/card/[id]",
-            params: { id: item.id },
-          })
-        }
-      >
-        <Image source={{ uri: item.image }} style={styles.image} />
+  const getMatchReasonLabel = (score: WantMatchScore): string | null => {
+    if (score === 'strong') return 'あなたの求と一致'
+    if (score === 'medium') return '同メンバーで交換しやすい'
+    if (score === 'weak') return 'あなたの求に近い'
+    return null
+  }
 
-        <View style={styles.cardBody}>
-          <View style={styles.topRow}>
-            <Text style={styles.status}>{item.status}</Text>
-            <Text style={styles.badge}>{badge}</Text>
-          </View>
-
-          <Text style={styles.name}>{item.name}</Text>
-
-          <Text style={styles.meta}>
-            {item.series ?? "シリーズ未設定"}・{item.member ?? "メンバー未設定"}
-          </Text>
-
-          <Text style={styles.want} numberOfLines={1}>
-            求: {item.want ?? "条件未設定"}
-          </Text>
-
-          <Text style={styles.seller}>
-            出品者: {item.sellerName ?? "unknown_user"}
-          </Text>
-
-          <View style={styles.trustRow}>
-            <Text style={styles.trustItem}>成立 {successCount}</Text>
-            <Text style={styles.trustItem}>発送率 {shipRate}%</Text>
-            <Text style={styles.trustItem}>返信 {replyHours}h</Text>
-          </View>
-        </View>
-      </Pressable>
-    );
-  };
+  // ★ updated: JSX描画前に easyCards の一致情報を計算しておく
+  const easyCardsWithMatch: EasyCardWithMatch[] = easyCards.map((card) => {
+    const bestMatch = myWants.reduce<WantMatchScore>((best, want) => {
+      const s = scoreWantMatch(card, want)
+      if (s === 'strong') return 'strong'
+      if (s === 'medium' && best !== 'strong') return 'medium'
+      if (s === 'weak' && best === 'none') return 'weak'
+      return best
+    }, 'none')
+    return { card, bestMatch, matchReasonLabel: getMatchReasonLabel(bestMatch) }
+  })
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
-        <Text style={styles.title}>ホーム</Text>
-        <Text style={styles.subTitle}>交換できるカード一覧</Text>
-      </View>
-
-      {loading ? (
-        <View style={styles.loadingBox}>
-          <ActivityIndicator />
-          <Text style={styles.loadingText}>カードを読み込み中...</Text>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Header */}
+        <View style={styles.headerWrap}>
+          <View style={styles.headerTop}>
+            <Text style={styles.logoText}>Swaply</Text>
+          </View>
+          <View style={styles.headerRow}>
+            <View style={styles.searchWrap}>
+              <SearchBar onPress={handleSearchPress} />
+            </View>
+          </View>
         </View>
-      ) : (
-        <FlatList
-          data={cardList}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+
+        {loading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.loadingText}>カードを読み込み中...</Text>
+          </View>
+        ) : recommendedCards.length === 0 && easyCards.length === 0 && newCards.length === 0 ? (
+          <EmptyHomeState />
+        ) : (
+          <>
+            {/* bestCandidate は easyCards 先頭に統合済み */}
+
+            {/* Lane 1: あなたへのおすすめ — LargeCard */}
+            <LaneSectionLabel
+              title="あなたへのおすすめ"
+              sub="すべて見る"
+              onSubPress={() => router.push('/(tabs)/search')}
+            />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.laneContent}
+            >
+              {recommendedCards.map((card) => (
+                <HomeLargeCard
+                  key={card.id}
+                  card={card}
+                  isOwn={user != null && card.owner_user_id === user.id}
+                />
+              ))}
+            </ScrollView>
+
+            {/* Lane 2: 成立しやすい交換 — SmallCard */}
+            <LaneSectionLabel
+              title="成立しやすい交換"
+              sub="初心者でも"
+            />
+            {/* ★ added: レーン全体の意味を伝える補足文 */}
+            <Text style={styles.laneSubNote} numberOfLines={1}>
+              あなたの求やメンバー一致をもとに表示
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.laneContent}
+            >
+              {/* ★ updated: 描画前に計算済みの easyCardsWithMatch を使う */}
+              {easyCardsWithMatch.map(({ card, bestMatch, matchReasonLabel }) => (
+                <HomeSmallCard
+                  key={card.id}
+                  card={card}
+                  isOwn={user != null && card.owner_user_id === user.id}
+                  isWantMatched={bestMatch !== 'none'}
+                  matchReasonLabel={matchReasonLabel}
+                />
+              ))}
+            </ScrollView>
+
+            {/* Lane 3: 新着 — LargeCard */}
+            <LaneSectionLabel
+              title="新着"
+              sub="更新順"
+            />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.laneContent}
+            >
+              {newCards.map((card) => (
+                <HomeLargeCard
+                  key={card.id}
+                  card={card}
+                  isOwn={user != null && card.owner_user_id === user.id}
+                />
+              ))}
+            </ScrollView>
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
-  );
+  )
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: colors.background,
   },
-  header: {
-    paddingTop: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+  scrollContent: {
+    paddingBottom: 120,
   },
-  title: {
+  headerWrap: {
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  logoText: {
     fontSize: 24,
-    fontWeight: "700",
-    color: "#111111",
+    fontWeight: fontWeight.extrabold,
+    color: colors.primary,
+    letterSpacing: -0.5,
   },
-  subTitle: {
-    marginTop: 6,
-    fontSize: 13,
-    color: "#6b7280",
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  searchWrap: {
+    flex: 1,
   },
   loadingBox: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
+    marginTop: spacing['4xl'],
+    alignItems: 'center',
+    marginBottom: spacing.md,
   },
   loadingText: {
-    fontSize: 13,
-    color: "#6b7280",
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
   },
-  listContent: {
-    padding: 16,
-    paddingTop: 8,
-    paddingBottom: 32,
+  laneContent: {
+    paddingHorizontal: spacing.base,
+    paddingBottom: spacing.sm,
   },
-  card: {
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 18,
-    overflow: "hidden",
-    backgroundColor: "#ffffff",
+  // ★ added: Lane 2 見出し直下の補足文
+  laneSubNote: {
+    paddingHorizontal: spacing.base,
+    marginTop: -spacing.xs,
+    marginBottom: spacing.sm,
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.regular,
+    color: colors.textSecondary,
   },
-  image: {
-    width: "100%",
-    height: 220,
-    backgroundColor: "#f3f4f6",
-  },
-  cardBody: {
-    padding: 14,
-  },
-  topRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  status: {
-    fontSize: 12,
-    color: "#4338ca",
-    backgroundColor: "#eef2ff",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    fontWeight: "700",
-  },
-  badge: {
-    fontSize: 12,
-    color: "#92400e",
-    backgroundColor: "#fef3c7",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    fontWeight: "700",
-  },
-  name: {
-    marginTop: 10,
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111111",
-    lineHeight: 22,
-  },
-  meta: {
-    marginTop: 6,
-    fontSize: 12,
-    color: "#6b7280",
-  },
-  want: {
-    marginTop: 8,
-    fontSize: 13,
-    color: "#374151",
-  },
-  seller: {
-    marginTop: 8,
-    fontSize: 12,
-    color: "#4b5563",
-  },
-  trustRow: {
-    marginTop: 12,
-    flexDirection: "row",
-    flexWrap: "wrap",
-  },
-  trustItem: {
-    marginRight: 8,
-    marginBottom: 8,
-    fontSize: 11,
-    color: "#374151",
-    backgroundColor: "#f3f4f6",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-});
+})

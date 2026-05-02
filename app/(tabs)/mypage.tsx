@@ -1,6 +1,5 @@
 // app/(tabs)/mypage.tsx
-const DEV_FEATURES = false
-
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import {
   fetchMyOffers,
   fetchProfile,
@@ -411,7 +410,7 @@ export default function MyPageScreen() {
         </View>
 
         {/* ── DEV + ログアウト ── */}
-        {DEV_FEATURES && (
+        {FEATURE_FLAGS.DEV_FEATURES && (
           <View style={styles.devSection}>
             <Pressable
               style={styles.devRow}

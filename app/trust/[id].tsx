@@ -17,7 +17,6 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { CardItem } from '@/components/CardItem'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { SectionHeader } from '@/components/SectionHeader'
-import { TradeTag } from '@/components/TradeTag'
 import { TrustBadge } from '@/components/TrustBadge'
 import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
 import { fetchProfile, fetchUserCards } from '@/lib/supabase'
@@ -26,7 +25,6 @@ import {
     computeTrustBadge,
     formatLastActive,
     formatReplyTime,
-    MODE_LABELS,
     Profile,
     TrustBadgeLevel,
 } from '@/lib/types'
@@ -150,7 +148,7 @@ export default function TrustProfileScreen() {
           ) : (
             <View style={[styles.avatar, styles.avatarPlaceholder]}>
               <Text style={styles.avatarInitial}>
-                {profile.handle[0].toUpperCase()}
+                {(profile.handle || profile.display_name || '?')[0].toUpperCase()}
               </Text>
             </View>
           )}
@@ -163,10 +161,6 @@ export default function TrustProfileScreen() {
 
           <View style={styles.badgeRow}>
             <TrustBadge level={trustLevel} size="md" />
-            <TradeTag
-              label={`${MODE_LABELS[profile.mode]}モード`}
-              variant="mode"
-            />
           </View>
 
           <Text style={styles.lastActive}>
@@ -261,24 +255,6 @@ export default function TrustProfileScreen() {
           )}
         </View>
 
-        {/* ─ 商品棚への導線 ─ */}
-        <TouchableOpacity
-          style={styles.shelfLink}
-          onPress={() => router.push(`/shelf/${profile.id}` as never)}
-          activeOpacity={0.88}
-        >
-          <View style={styles.shelfLinkLeft}>
-            <Text style={styles.shelfIcon}>📚</Text>
-            <View>
-              <Text style={styles.shelfLinkLabel}>商品棚を見る</Text>
-              <Text style={styles.shelfLinkSub}>
-                所持カード一覧（公開設定時のみ）
-              </Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
-        </TouchableOpacity>
-
         {/* スクロール下余白 (固定CTA分) */}
         <View style={{ height: 120 }} />
       </ScrollView>
@@ -286,10 +262,20 @@ export default function TrustProfileScreen() {
       {/* ─ 固定CTA: 提案ボタン ─ */}
       <View style={styles.ctaWrap}>
         <PrimaryCTA
-          label={`${profile.handle} に提案する`}
-          onPress={() =>
-            router.push(`/offer/create?receiverId=${profile.id}`)
+          label={
+            cards.length > 0
+              ? `${profile.handle || profile.display_name || '出品者'} に提案する`
+              : '出品中のカードがありません'
           }
+          onPress={() => {
+            if (cards.length === 0) return
+            // TODO: 暫定実装 — 正式には出品一覧からカードを選択して提案する導線が正しい
+            router.push({
+              pathname: '/offer/create',
+              params: { cardId: cards[0].id },
+            } as never)
+          }}
+          disabled={cards.length === 0}
           size="lg"
         />
       </View>
@@ -401,39 +387,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     fontSize: fontSize.sm,
     color: colors.textTertiary,
-  },
-
-  // ── 商品棚導線
-  shelfLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginHorizontal: spacing.base,
-    backgroundColor: colors.backgroundCard,
-    borderRadius: radius.xl,
-    padding: spacing.base,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.sm,
-    marginBottom: spacing.xl,
-  },
-  shelfLinkLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  shelfIcon: {
-    fontSize: 28,
-  },
-  shelfLinkLabel: {
-    fontSize: fontSize.base,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  shelfLinkSub: {
-    fontSize: fontSize.xs,
-    color: colors.textTertiary,
-    marginTop: 2,
   },
 
   // ── 固定CTA

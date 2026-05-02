@@ -22,8 +22,9 @@ export function HomeSmallCard({ card, isOwn = false, isWantMatched = false, matc
         ship_rate: owner.ship_rate,
         reply_median_hours: owner.reply_median_hours,
         trouble_count: owner.trouble_count,
+        last_active_at: owner.last_active_at,
       })
-    : 'none'
+    : 'green'
 
   const handlePress = () => {
     router.push({ pathname: '/listing/[id]', params: { id: card.id } })

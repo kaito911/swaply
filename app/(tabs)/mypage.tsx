@@ -362,7 +362,7 @@ export default function MyPageScreen() {
             {/* 名前・バッジ */}
             <View style={styles.heroMeta}>
               <Text style={styles.heroHandle}>{handle ?? displayName ?? 'ユーザー'}</Text>
-              {trustLevel !== 'none' && <TrustBadge level={trustLevel} size="sm" />}
+              <TrustBadge level={trustLevel} size="sm" />
             </View>
             {/* 設定ボタン */}
             <Pressable

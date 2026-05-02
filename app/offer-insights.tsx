@@ -2,7 +2,12 @@
 // 開発用・成立ログ確認画面。ユーザー向けではない。数値はすべて近似値。
 
 import { fetchOfferOutcomeLogs, summarizeOfferOutcomes } from '@/lib/supabase'
-import { OfferOutcomeLog, OfferOutcomeSummary, TrustBadgeLevel } from '@/lib/types'
+import {
+  OfferOutcomeLog,
+  OfferOutcomeSummary,
+  TRUST_BADGE_LABELS,
+  TrustBadgeLevel,
+} from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuthContext } from '@/providers/AuthProvider'
 import React, { useCallback, useEffect, useState } from 'react'
@@ -16,7 +21,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-const TRUST_LEVELS: TrustBadgeLevel[] = ['none', 'bronze', 'silver', 'gold']
+const TRUST_LEVELS: TrustBadgeLevel[] = ['green', 'trial_blue', 'blue', 'gold_blue']
 
 function pct(n: number): string {
   return `${(n * 100).toFixed(1)}%`
@@ -83,7 +88,7 @@ function SummarySection({ summary }: { summary: OfferOutcomeSummary }) {
           return (
             <StatRow
               key={level}
-              label={level}
+              label={TRUST_BADGE_LABELS[level]}
               value={`${d.accepted}/${d.total} (${pct(d.acceptRate)})`}
             />
           )
@@ -97,7 +102,7 @@ function SummarySection({ summary }: { summary: OfferOutcomeSummary }) {
           return (
             <StatRow
               key={level}
-              label={level}
+              label={TRUST_BADGE_LABELS[level]}
               value={`${d.accepted}/${d.total} (${pct(d.acceptRate)})`}
             />
           )

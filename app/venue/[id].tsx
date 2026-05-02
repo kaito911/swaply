@@ -6,7 +6,7 @@ import {
   fetchVenueHolds,
   withdrawSupplyPost,
 } from '@/lib/supabase'
-import { VenueHold, VenueSupplyPost } from '@/lib/types'
+import { computeTrustBadge, VenueHold, VenueSupplyPost } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { TrustBadge } from '@/components/TrustBadge'
@@ -293,13 +293,13 @@ export default function VenueHomeScreen() {
                         <Text style={styles.posterHandle}>@{getDisplayName(post.poster)}</Text>
                         {post.poster != null && (
                           <TrustBadge
-                            level={
-                              post.poster.trade_count >= 50 && post.poster.ship_rate >= 95 && post.poster.trouble_count === 0
-                                ? 'silver'
-                                : post.poster.trade_count >= 10 && post.poster.ship_rate >= 90 && post.poster.trouble_count === 0
-                                ? 'bronze'
-                                : 'none'
-                            }
+                            level={computeTrustBadge({
+                              trade_count: post.poster.trade_count,
+                              ship_rate: post.poster.ship_rate,
+                              reply_median_hours: 24,
+                              trouble_count: post.poster.trouble_count,
+                              last_active_at: null,
+                            })}
                           />
                         )}
                       </View>

@@ -11,6 +11,7 @@ import {
 import {
   Card,
   computeTrustBadge,
+  formatLastActive,
   Offer,
   Profile,
   ShelfItem,
@@ -122,7 +123,7 @@ export default function MyPageScreen() {
   const displayName = profile?.display_name ?? null
   const avatarChar = ((handle || displayName || 'U').slice(0, 1)).toUpperCase()
   const avatarUrl = profile?.avatar_url ?? null
-  const trustLevel: TrustBadgeLevel = profile != null ? computeTrustBadge(profile) : 'none'
+  const trustLevel: TrustBadgeLevel = profile != null ? computeTrustBadge(profile) : 'green'
   const tc = profile?.trade_count ?? 0
   const sr = profile?.ship_rate ?? 100
   const rh = profile?.reply_median_hours ?? 24
@@ -240,81 +241,36 @@ export default function MyPageScreen() {
   )
 
   const renderTrust = () => {
-    type Step = {
-      key: TrustBadgeLevel
-      label: string
-      achieved: boolean
-      nextLabel: string | null
-      conditions: { text: string; met: boolean }[]
-    }
-
-    const steps: Step[] = [
-      {
-        key: 'bronze',
-        label: 'Bronze',
-        achieved: ['bronze', 'silver', 'gold'].includes(trustLevel),
-        nextLabel: trustLevel === 'none' ? `あと${Math.max(0, 3 - tc)}件でBronze` : null,
-        conditions: [
-          { text: `成立3件以上（現在${tc}件）`, met: tc >= 3 },
-          { text: `発送遵守率90%以上（現在${sr}%）`, met: sr >= 90 },
-          { text: 'トラブル0件', met: trouble === 0 },
-        ],
-      },
-      {
-        key: 'silver',
-        label: 'Silver',
-        achieved: ['silver', 'gold'].includes(trustLevel),
-        nextLabel: trustLevel === 'bronze' ? `あと${Math.max(0, 15 - tc)}件でSilver` : null,
-        conditions: [
-          { text: `成立15件以上（現在${tc}件）`, met: tc >= 15 },
-          { text: `発送遵守率95%以上（現在${sr}%）`, met: sr >= 95 },
-          { text: 'トラブル0件', met: trouble === 0 },
-          { text: `返信24h以内（現在${rh}h）`, met: rh <= 24 },
-        ],
-      },
-      {
-        key: 'gold',
-        label: 'Gold',
-        achieved: trustLevel === 'gold',
-        nextLabel: trustLevel === 'silver' ? `あと${Math.max(0, 50 - tc)}件でGold` : null,
-        conditions: [
-          { text: `成立50件以上（現在${tc}件）`, met: tc >= 50 },
-          { text: `発送遵守率97%以上（現在${sr}%）`, met: sr >= 97 },
-          { text: 'トラブル0件', met: trouble === 0 },
-        ],
-      },
-    ]
+    const lastActiveText = formatLastActive(profile?.last_active_at ?? null)
 
     return (
       <View style={styles.tabContent}>
-        <Text style={styles.badgeCurrent}>
-          現在:{' '}
-          {trustLevel === 'none' ? 'バッジなし' :
-           trustLevel === 'bronze' ? '🥉 Bronze' :
-           trustLevel === 'silver' ? '🥈 Silver' : '🥇 Gold'}
-        </Text>
-        {steps.map((step) => (
-          <View key={step.key} style={styles.badgeStep}>
-            <View style={styles.badgeStepHeader}>
-              <View style={[styles.badgeDot, step.achieved && styles.badgeDotDone]} />
-              <Text style={[styles.badgeStepLabel, step.achieved && styles.badgeStepLabelDone]}>
-                {step.label}{step.achieved ? ' ✓' : ''}
+        <View style={styles.trustHeaderRow}>
+          <Text style={styles.trustHeaderLabel}>現在のバッジ</Text>
+          <TrustBadge level={trustLevel} size="md" />
+        </View>
+
+        <Text style={styles.sectionTitle}>あなたの取引履歴</Text>
+        <View style={styles.dataCard}>
+          {([
+            { label: '取引件数', value: `${tc}件` },
+            { label: '発送遵守率', value: `${sr}%` },
+            { label: '返信中央値', value: rh < 999 ? `${rh}時間` : '—' },
+            { label: 'トラブル件数', value: `${trouble}件` },
+            { label: '直近活動', value: lastActiveText },
+          ] as const).map((item, i, arr) => (
+            <View
+              key={item.label}
+              style={[styles.dataRow, i < arr.length - 1 && styles.dataRowBorder]}
+            >
+              <Text style={styles.dataLabel}>{item.label}</Text>
+              <Text style={[styles.dataValue, { color: colors.textPrimary }]}>
+                {item.value}
               </Text>
-              {step.nextLabel != null && (
-                <Text style={styles.badgeNext}>{step.nextLabel}</Text>
-              )}
             </View>
-            {!step.achieved && (
-              <View style={styles.badgeConds}>
-                {step.conditions.map((cond, i) => (
-                  <Text key={i} style={[styles.condText, cond.met && styles.condTextMet]}>
-                    {cond.met ? '✓ ' : '○ '}{cond.text}
-                  </Text>
-                ))}
-              </View>
-            )}
-          </View>
-        ))}
+          ))}
+        </View>
+
         <Text style={styles.noteText}>
           バッジは優遇権ではなく信頼証明です。発送順・露出順には影響しません。
         </Text>
@@ -781,55 +737,22 @@ const styles = StyleSheet.create({
   },
 
   // ── trust ──
-  badgeCurrent: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: colors.primary,
-    marginBottom: spacing.md,
-  },
-  badgeStep: {
-    marginBottom: spacing.sm,
-  },
-  badgeStepHeader: {
+  trustHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.base,
+    marginBottom: spacing.md,
+    backgroundColor: colors.backgroundCard,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  badgeDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.borderLight,
-    flexShrink: 0,
-  },
-  badgeDotDone: {
-    backgroundColor: colors.primary,
-  },
-  badgeStepLabel: {
+  trustHeaderLabel: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: colors.textTertiary,
-  },
-  badgeStepLabelDone: {
-    color: colors.textPrimary,
-  },
-  badgeNext: {
-    fontSize: fontSize.xs,
-    color: colors.primary,
-    marginLeft: 'auto',
-  },
-  badgeConds: {
-    paddingLeft: 18,
-    gap: 2,
-  },
-  condText: {
-    fontSize: fontSize.xs,
-    color: colors.textTertiary,
-    lineHeight: 18,
-  },
-  condTextMet: {
-    color: colors.success,
+    color: colors.textSecondary,
+    fontWeight: fontWeight.medium,
   },
 
   // ── history ──

@@ -19,18 +19,23 @@ export const colors = {
   border: '#E8E5F8',
   borderLight: '#F0EFFE',
 
-  trustGold: '#D97706',
-  trustGoldBg: '#FFFBEB',
-  trustGoldBorder: '#FDE68A',
-  trustSilver: '#475569',
-  trustSilverBg: '#F1F5F9',
-  trustSilverBorder: '#CBD5E1',
-  trustBronze: '#92400E',
-  trustBronzeBg: '#FEF3C7',
-  trustBronzeBorder: '#FCD34D',
+  // Trust badge — 4-stage palette (green / trial_blue / blue / gold_blue)
+  trustBadgeGreen: '#10B981',
+  trustBadgeGreenBg: '#ECFDF5',
+  trustBadgeGreenBorder: '#A7F3D0',
+  trustBadgeTrialBlue: '#60A5FA',
+  trustBadgeTrialBlueBg: '#EFF6FF',
+  trustBadgeTrialBlueBorder: '#BFDBFE',
+  trustBadgeBlue: '#2563EB',
+  trustBadgeBlueBg: '#DBEAFE',
+  trustBadgeBlueBorder: '#93C5FD',
+  trustBadgeGoldBlue: '#1E40AF',
+  trustBadgeGoldBlueBg: '#DBEAFE',
+  trustBadgeGoldBlueBorder: '#FCD34D',
+  trustBadgeGoldBlueAccent: '#F59E0B',
 
+  // 既存 metric 用色（Trust badge とは別用途、保持）
   trustGreen: '#059669',
-  trustBlue: '#2563EB',
 
   success: '#059669',
   successBg: '#ECFDF5',

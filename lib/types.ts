@@ -1,7 +1,7 @@
 // lib/types.ts
 import { parseWantText } from './wantParser' // ★ added
 
-export type TrustBadgeLevel = 'none' | 'bronze' | 'silver' | 'gold'
+export type TrustBadgeLevel = 'green' | 'trial_blue' | 'blue' | 'gold_blue'
 export type CardStatus = 'active' | 'inactive' | 'reserved' | 'traded'
 export type CardCondition = 'mint' | 'near_mint' | 'good' | 'fair' | 'poor'
 export type UserMode = 'oshi' | 'trading_card' | 'collection'
@@ -287,30 +287,47 @@ export function isWantMatch(card: Card, want: WantedCard): boolean {
 // ─────────────────────────────────────────
 // Trustバッジ判定
 // ─────────────────────────────────────────
+
+// last_active_at が指定日数以内なら true（computeTrustBadge 内部用ヘルパー）
+function isRecentlyActive(lastActiveAt: string | null, days: number): boolean {
+  if (lastActiveAt == null) return false
+  const diffMs = Date.now() - new Date(lastActiveAt).getTime()
+  return diffMs < days * 24 * 60 * 60 * 1000
+}
+
 export function computeTrustBadge(
   profile: Pick<
     Profile,
-    'trade_count' | 'ship_rate' | 'reply_median_hours' | 'trouble_count'
+    | 'trade_count'
+    | 'ship_rate'
+    | 'reply_median_hours'
+    | 'trouble_count'
+    | 'last_active_at'
   >
 ): TrustBadgeLevel {
-  const { trade_count, ship_rate, reply_median_hours, trouble_count } = profile
+  const { trade_count, ship_rate, trouble_count, last_active_at } = profile
 
-  if (trade_count >= 50 && ship_rate >= 97) return 'gold'
-
+  // gold_blue: 50件以上 + 97%以上 + 直近60日アクティブ
   if (
-    trade_count >= 15 &&
-    ship_rate >= 95 &&
-    trouble_count === 0 &&
-    reply_median_hours <= 24
+    trade_count >= 50 &&
+    ship_rate >= 97 &&
+    isRecentlyActive(last_active_at, 60)
   ) {
-    return 'silver'
+    return 'gold_blue'
   }
 
-  if (trade_count >= 3 && ship_rate >= 90 && trouble_count === 0) {
-    return 'bronze'
+  // blue: 10件以上 + 95%以上 + トラブル0件
+  if (trade_count >= 10 && ship_rate >= 95 && trouble_count === 0) {
+    return 'blue'
   }
 
-  return 'none'
+  // trial_blue: 1〜9件
+  if (trade_count >= 1) {
+    return 'trial_blue'
+  }
+
+  // green: 取引なし
+  return 'green'
 }
 
 export const CONDITION_LABELS: Record<CardCondition, string> = {
@@ -342,6 +359,14 @@ export const TRADE_STATUS_LABELS: Record<TradeStatus, string> = {
   completed: '完了',
   cancelled: 'キャンセル',
   disputed: 'トラブル',
+}
+
+// バッジ表示ラベルの単一情報源（TrustBadge / offer-insights / 他で共有）
+export const TRUST_BADGE_LABELS: Record<TrustBadgeLevel, string> = {
+  green: '新規',
+  trial_blue: 'お試し',
+  blue: '安定',
+  gold_blue: '高信頼',
 }
 
 export function formatReplyTime(hours: number): string {

@@ -770,7 +770,7 @@ export function summarizeOfferOutcomes(logs: OfferOutcomeLog[]): OfferOutcomeSum
     }
   }
 
-  const trustLevels: TrustBadgeLevel[] = ['none', 'bronze', 'silver', 'gold']
+  const trustLevels: TrustBadgeLevel[] = ['green', 'trial_blue', 'blue', 'gold_blue']
 
   const groupByTrust = (
     key: (log: OfferOutcomeLog) => TrustBadgeLevel

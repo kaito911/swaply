@@ -16,10 +16,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="venue-tab" />
 
       <Tabs.Screen name="sell" options={{ href: null }} />
-      <Tabs.Screen name="fab" options={{ href: null }} />
       <Tabs.Screen name="home" options={{ href: null }} />
-      <Tabs.Screen name="offers" options={{ href: null }} />
-      <Tabs.Screen name="profile" options={{ href: null }} />
       <Tabs.Screen name="search" />
     </Tabs>
   )

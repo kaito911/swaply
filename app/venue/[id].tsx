@@ -196,21 +196,24 @@ export default function VenueHomeScreen() {
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 
           {/* ── レーン1: 成立候補 ── */}
+          {/* TODO(Phase 2): Smart レーン本実装 — 同会場 / Trust / 差額量による
+              候補スコアリング。現状はプレースホルダー表示のみで Supply レーンへ
+              誘導している。詳細は docs/phase2-backlog.md を参照。 */}
           {lane === 'smart' && (
-            <>
-              <View style={styles.infoBox}>
-                <Text style={styles.infoText}>
-                  あなたの出品・ほしいカードと一致した候補です。同会場・Trust・差額量で優先度を計算しています。
-                </Text>
-              </View>
-              <View style={styles.emptyBox}>
-                <Ionicons name="sparkles-outline" size={36} color={colors.border} />
-                <Text style={styles.emptyTitle}>成立候補を計算中</Text>
-                <Text style={styles.emptyBody}>
-                  参加者が増えると候補が表示されます。{'\n'}まずは供給板に不要カードを投稿しましょう。
-                </Text>
-              </View>
-            </>
+            <View style={styles.emptyBox}>
+              <Ionicons name="construct-outline" size={36} color={colors.border} />
+              <Text style={styles.emptyTitle}>準備中</Text>
+              <Text style={styles.emptyBody}>
+                成立候補の自動提案は今後追加予定です。{'\n'}
+                今は当日供給板で交換相手を探してください。
+              </Text>
+              <Pressable
+                style={styles.smartLaneCta}
+                onPress={() => setLane('supply')}
+              >
+                <Text style={styles.smartLaneCtaText}>当日供給板を見る</Text>
+              </Pressable>
+            </View>
           )}
 
           {/* ── レーン2: 当日供給板 ── */}
@@ -511,6 +514,20 @@ const styles = StyleSheet.create({
   emptyBox: { alignItems: 'center', paddingVertical: 40, gap: spacing.sm },
   emptyTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
   emptyBody: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
+  smartLaneCta: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  smartLaneCtaText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+  },
   supplyHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',

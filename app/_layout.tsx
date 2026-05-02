@@ -72,6 +72,7 @@ function RootNavigator() {
         screenOptions={{
           headerShown: false,
           headerBackTitle: '',
+          headerBackButtonDisplayMode: 'minimal',
           contentStyle: { backgroundColor: colors.background },
         }}
       >

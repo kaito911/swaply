@@ -897,7 +897,7 @@ export async function updateProfile(params: {
 // 検索
 // ─────────────────────────────────────────
 
-export async function searchCards(query: string, limit = 30): Promise<Card[]> {
+export async function searchCardsByText(query: string, limit = 30): Promise<Card[]> {
   const trimmed = query.trim()
   if (trimmed === '') return []
 
@@ -912,7 +912,7 @@ export async function searchCards(query: string, limit = 30): Promise<Card[]> {
     .limit(limit)
 
   if (error) {
-    console.error('[searchCards]', error)
+    console.error('[searchCardsByText]', error)
     return []
   }
 

@@ -41,7 +41,7 @@ type AiCard = {
 export default function ListingNewCardinfoScreen() {
   const params = useLocalSearchParams<{
     imageUri: string
-    imageBackUri: string | undefined
+    imageBackUri: string
   }>()
   const { imageUri, imageBackUri } = params
 

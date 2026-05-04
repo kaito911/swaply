@@ -57,7 +57,7 @@ type EnrichedCard = {
 export default function ListingNewConditionScreen() {
   const params = useLocalSearchParams<{
     imageUri: string
-    imageBackUri: string | undefined
+    imageBackUri: string
     aiCardsJson: string
   }>()
   const { imageUri, imageBackUri } = params

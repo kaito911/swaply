@@ -137,7 +137,7 @@ export default function ListingNewConfirmScreen() {
 
   const params = useLocalSearchParams<{
     imageUri: string
-    imageBackUri: string | undefined
+    imageBackUri: string
     enrichedCardsJson: string
   }>()
 

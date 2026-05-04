@@ -88,17 +88,22 @@ export default function HomeScreen() {
             id: cd.target_card.id,
             name: cd.target_card.name,
             image_url: cd.target_card.image_url,
+            image_back_url: null,
             group_name: null,
             series: null,
             member_name: null,
+            description: null,
+            condition: null,
             want_description: null,
             allows_adjustment: false,
             adjustment_max: null,
+            allows_mail: false,
+            allows_handoff: false,
             status: 'active',
             owner_user_id: cd.target_user.id,
             created_at: '',
             updated_at: '',
-            owner: null,
+            owner: undefined,
           }
           setEasyCards([bestCard, ...easy.filter((c) => c.id !== cd.target_card.id && c.owner_user_id !== myId)])
         } else {

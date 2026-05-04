@@ -36,6 +36,7 @@ function TrustSummaryRow({ profile }: { profile: Profile }) {
     ship_rate: profile.ship_rate,
     reply_median_hours: profile.reply_median_hours,
     trouble_count: profile.trouble_count,
+    last_active_at: profile.last_active_at,
   })
   return (
     <View style={trustRowStyles.row}>

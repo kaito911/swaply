@@ -232,8 +232,9 @@ export default function ListingDetailScreen() {
         ship_rate: owner.ship_rate,
         reply_median_hours: owner.reply_median_hours,
         trouble_count: owner.trouble_count,
+        last_active_at: owner.last_active_at,
       })
-    : 'none'
+    : 'green'
 
   const diff = getDiffInfo(card)
   const isOwn = currentUserId !== null && card.owner_user_id === currentUserId

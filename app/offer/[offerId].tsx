@@ -232,6 +232,7 @@ export default function OfferDetailScreen() {
                   ship_rate: counterPartProfile.ship_rate,
                   reply_median_hours: counterPartProfile.reply_median_hours,
                   trouble_count: counterPartProfile.trouble_count,
+                  last_active_at: counterPartProfile.last_active_at,
                 })}
                 size="sm"
               />

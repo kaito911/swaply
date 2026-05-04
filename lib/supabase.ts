@@ -616,6 +616,7 @@ type OfferOutcomeRaw = {
     ship_rate: number
     reply_median_hours: number
     trouble_count: number
+    last_active_at: string | null
   } | null
   target_card: {
     name: string | null
@@ -626,6 +627,7 @@ type OfferOutcomeRaw = {
       ship_rate: number
       reply_median_hours: number
       trouble_count: number
+      last_active_at: string | null
     } | null
   } | null
   items: Array<{
@@ -662,7 +664,8 @@ export async function fetchOfferOutcomeLogs(userId?: string): Promise<OfferOutco
         trade_count,
         ship_rate,
         reply_median_hours,
-        trouble_count
+        trouble_count,
+        last_active_at
       ),
       target_card:cards!offers_target_card_id_fkey(
         name,
@@ -672,7 +675,8 @@ export async function fetchOfferOutcomeLogs(userId?: string): Promise<OfferOutco
           trade_count,
           ship_rate,
           reply_median_hours,
-          trouble_count
+          trouble_count,
+          last_active_at
         )
       ),
       items:offer_items(
@@ -694,7 +698,7 @@ export async function fetchOfferOutcomeLogs(userId?: string): Promise<OfferOutco
     return []
   }
 
-  const rows = (data ?? []) as OfferOutcomeRaw[]
+  const rows = (data ?? []) as unknown as OfferOutcomeRaw[]
 
   const mapped = rows.map((row): OfferOutcomeLog => {
     const targetCardId = row.target_card_id
@@ -704,11 +708,11 @@ export async function fetchOfferOutcomeLogs(userId?: string): Promise<OfferOutco
 
     const proposerTrustLevel: TrustBadgeLevel = row.proposer != null
       ? computeTrustBadge(row.proposer)
-      : 'none'
+      : 'green'
 
     const receiverTrustLevel: TrustBadgeLevel = row.target_card?.owner != null
       ? computeTrustBadge(row.target_card.owner)
-      : 'none'
+      : 'green'
 
     return {
       offer_id: row.id,

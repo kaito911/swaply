@@ -132,6 +132,7 @@ export default function TrustProfileScreen() {
     ship_rate: profile.ship_rate,
     reply_median_hours: profile.reply_median_hours,
     trouble_count: profile.trouble_count,
+    last_active_at: profile.last_active_at,
   })
 
   return (

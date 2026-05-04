@@ -1,5 +1,6 @@
 // lib/supabase.ts
 import { createClient } from '@supabase/supabase-js'
+import { ALL_MEMBERS, MemberMaster } from '../constants/members'
 import {
   Card,
   computeTrustBadge,
@@ -912,6 +913,150 @@ export async function searchCards(query: string, limit = 30): Promise<Card[]> {
 
   if (error) {
     console.error('[searchCards]', error)
+    return []
+  }
+
+  return (data ?? []) as Card[]
+}
+
+// ─────────────────────────────────────────
+// メンバー指定検索 (Phase 1: TREASURE のみ、constants/members.ts を参照)
+// ─────────────────────────────────────────
+
+/**
+ * member の aliases 全てに対する `or` 用 ilike 句を組み立てる。
+ *
+ * cards.member_name はフリーテキスト保存(マスタ正規化前)のため、同一人物
+ * の表記揺れを aliases で吸収する。ilike なので大文字小文字非依存。
+ * 部分一致 (`%`) は使わない: 「ハルト」検索が「ハルトン」等を拾わないよう
+ * exact (case-insensitive) で揃える。
+ */
+function memberAliasOrClause(member: MemberMaster): string {
+  return member.aliases.map((a) => `member_name.ilike.${a}`).join(',')
+}
+
+/**
+ * autocomplete 用のメンバー候補を返す (Phase 1: in-memory フィルタ)。
+ *
+ * 入力に対して各メンバーの aliases いずれかが部分一致したらヒット扱い。
+ * 大文字小文字非依存。Phase 2 で DB マスタ化する際は async DB 検索に
+ * 差し替える想定。
+ */
+export function getMemberSuggestions(
+  input: string,
+  limit = 10
+): readonly MemberMaster[] {
+  const trimmed = input.trim().toLowerCase()
+  if (trimmed === '') return []
+  return ALL_MEMBERS.filter((m) =>
+    m.aliases.some((a) => a.toLowerCase().includes(trimmed))
+  ).slice(0, limit)
+}
+
+/**
+ * 指定メンバーが所属するグループ候補を cards から DISTINCT 取得する。
+ *
+ * 結果が 0 件のとき(該当 cards が DB に未登録) は member.group のハード
+ * コード値を fallback として返す。これにより β 開始直後のスパースな
+ * DB でも検索 UI が機能する。DB エラー時も同じ fallback を返す。
+ */
+export async function getGroupsForMember(
+  memberCanonical: string
+): Promise<string[]> {
+  const member = ALL_MEMBERS.find((m) => m.canonical === memberCanonical)
+  if (member == null) return []
+
+  const { data, error } = await supabase
+    .from('cards')
+    .select('group_name')
+    .eq('status', 'active')
+    .or(memberAliasOrClause(member))
+    .not('group_name', 'is', null)
+
+  if (error) {
+    console.error('[getGroupsForMember]', error)
+    return [member.group]
+  }
+
+  const groups = Array.from(
+    new Set((data ?? []).map((r) => r.group_name as string))
+  )
+  return groups.length === 0 ? [member.group] : groups
+}
+
+/**
+ * 指定メンバー(オプションでグループ指定)に該当する series 候補を cards
+ * から DISTINCT 取得する。シリーズはユーザー入力フリーテキストでバリ
+ * エーション豊富、またマスタ化対象でもないため fallback はなし(空配列は
+ * 「直接入力」UI を表示するシグナル)。
+ */
+export async function getSeriesOptions(
+  memberCanonical: string,
+  group?: string
+): Promise<string[]> {
+  const member = ALL_MEMBERS.find((m) => m.canonical === memberCanonical)
+  if (member == null) return []
+
+  let query = supabase
+    .from('cards')
+    .select('series')
+    .eq('status', 'active')
+    .or(memberAliasOrClause(member))
+    .not('series', 'is', null)
+
+  if (group != null && group.trim() !== '') {
+    query = query.ilike('group_name', group)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    console.error('[getSeriesOptions]', error)
+    return []
+  }
+
+  return Array.from(new Set((data ?? []).map((r) => r.series as string)))
+}
+
+/**
+ * メンバー指定での cards 検索。
+ *
+ * - memberCanonical: ALL_MEMBERS の canonical 表記 (autocomplete で選択
+ *   された結果)。マスタに存在しない canonical を渡されたら空配列。
+ * - group: 任意の絞り込み (case-insensitive 完全一致)
+ * - series: 任意の絞り込み (case-insensitive 完全一致)
+ *
+ * member_name のマッチング戦略: aliases の各表記に対して exact ilike を
+ * OR 展開する (詳細は memberAliasOrClause 参照)。
+ */
+export async function searchCardsByMember(
+  memberCanonical: string,
+  group?: string,
+  series?: string,
+  limit = 30
+): Promise<Card[]> {
+  const member = ALL_MEMBERS.find((m) => m.canonical === memberCanonical)
+  if (member == null) return []
+
+  let query = supabase
+    .from('cards')
+    .select('*, owner:profiles(*)')
+    .eq('status', 'active')
+    .or(memberAliasOrClause(member))
+
+  if (group != null && group.trim() !== '') {
+    query = query.ilike('group_name', group)
+  }
+  if (series != null && series.trim() !== '') {
+    query = query.ilike('series', series)
+  }
+
+  const { data, error } = await query
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.error('[searchCardsByMember]', error)
     return []
   }
 

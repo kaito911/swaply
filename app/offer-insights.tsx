@@ -36,8 +36,8 @@ function StatRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function SectionHeader({ title }: { title: string }) {
-  return <Text style={styles.sectionHeader}>{title}</Text>
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return <Text style={styles.sectionHeader}>{children}</Text>
 }
 
 function Block({ children }: { children: React.ReactNode }) {

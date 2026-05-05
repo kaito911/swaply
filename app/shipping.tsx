@@ -83,7 +83,7 @@ export default function ShippingScreen() {
   if (authLoading || loading) {
     return (
       <SafeAreaView style={styles.loadingWrap} edges={['top']}>
-        <ActivityIndicator size="large" color="#6C63FF" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     )
   }
@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     height: 52,
     borderRadius: 16,
-    backgroundColor: '#6C63FF',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },

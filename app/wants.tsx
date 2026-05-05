@@ -81,7 +81,7 @@ export default function WantsScreen() {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <View style={styles.center}>
-          <ActivityIndicator size="small" color="#6C63FF" />
+          <ActivityIndicator size="small" color={colors.primary} />
         </View>
       </SafeAreaView>
     )

@@ -1028,10 +1028,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   statusPendingBadge: {
-    backgroundColor: '#F5F3FF',
+    backgroundColor: colors.tagInfoBg,
   },
   statusPendingText: {
-    color: '#6D28D9',
+    color: colors.tagInfoText,
   },
   statusAcceptedBadge: {
     backgroundColor: '#ECFDF3',
@@ -1178,15 +1178,15 @@ const styles = StyleSheet.create({
   counterButton: {
     height: 44,
     borderRadius: 14,
-    backgroundColor: '#F5F3FF',
+    backgroundColor: colors.backgroundCard,
     borderWidth: 1,
-    borderColor: '#DDD6FE',
+    borderColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   counterButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6D28D9',
+    color: colors.primary,
   },
 })

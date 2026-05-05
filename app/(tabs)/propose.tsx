@@ -1,5 +1,6 @@
 import { TradeStats } from '@/components/TradeStats'
 import { TrustBadge } from '@/components/TrustBadge'
+import { colors } from '@/constants/theme'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useMemo, useState } from 'react'
 import {
@@ -293,7 +294,7 @@ export default function ProposeScreen() {
     if (loading) {
       return (
         <View style={styles.centerBox}>
-          <ActivityIndicator size="small" color="#6D5EF5" />
+          <ActivityIndicator size="small" color={colors.primary} />
           <Text style={styles.centerText}>取引一覧を読み込み中です</Text>
         </View>
       )
@@ -643,7 +644,7 @@ export default function ProposeScreen() {
         >
           {refreshing && !loading ? (
             <View style={styles.refreshBox}>
-              <ActivityIndicator size="small" color="#6D5EF5" />
+              <ActivityIndicator size="small" color={colors.primary} />
               <Text style={styles.refreshText}>最新状態に更新しています</Text>
             </View>
           ) : null}
@@ -868,11 +869,11 @@ function getUnifiedStatusBadgeStyle(status: OfferStatus | TradeStatus) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F7F7FB',
+    backgroundColor: colors.background,
   },
   container: {
     flex: 1,
-    backgroundColor: '#F7F7FB',
+    backgroundColor: colors.background,
   },
   screenHeader: {
     paddingHorizontal: 20,
@@ -906,8 +907,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   activeTab: {
-    backgroundColor: '#6D5EF5',
-    borderColor: '#6D5EF5',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   tabText: {
     fontSize: 14,
@@ -1097,7 +1098,7 @@ const styles = StyleSheet.create({
   tradeArrow: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#6D5EF5',
+    color: colors.primary,
   },
   messageBox: {
     marginBottom: 14,
@@ -1126,7 +1127,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 46,
     borderRadius: 14,
-    backgroundColor: '#6D5EF5',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1153,7 +1154,7 @@ const styles = StyleSheet.create({
   tradeOpenButton: {
     height: 48,
     borderRadius: 14,
-    backgroundColor: '#6D5EF5',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,

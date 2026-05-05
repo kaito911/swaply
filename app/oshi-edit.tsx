@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   saveButtonDisabled: {
-    backgroundColor: '#C4C0D8',
+    backgroundColor: colors.textTertiary,
   },
   saveButtonText: {
     fontSize: fontSize.sm,

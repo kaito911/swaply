@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
   dateText: {
     marginTop: 4,
     fontSize: 11,
-    color: '#C4C0D8',
+    color: colors.textTertiary,
   },
   removeButton: {
     marginLeft: 12,

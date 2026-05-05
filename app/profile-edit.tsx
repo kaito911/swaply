@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   buttonDisabled: {
-    backgroundColor: '#C4C0D8',
+    backgroundColor: colors.textTertiary,
   },
   buttonText: {
     fontSize: 15,

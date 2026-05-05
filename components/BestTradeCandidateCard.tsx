@@ -32,8 +32,8 @@ const LABEL_STYLE: Record<
   BestTradeCandidateData['label'],
   { bg: string; text: string }
 > = {
-  almost_confirmed: { bg: colors.tagGreen, text: colors.tagGreenText },
-  likely: { bg: colors.tagPurple, text: colors.tagPurpleText },
+  almost_confirmed: { bg: colors.tagAccentBg, text: colors.tagAccentText },
+  likely: { bg: colors.tagInfoBg, text: colors.tagInfoText },
 }
 
 // ─────────────────────────────────────────

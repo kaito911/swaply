@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: spacing.xs,
     left: spacing.xs,
-    backgroundColor: colors.tagGreen,
+    backgroundColor: colors.tagNeutralBg,
     borderRadius: radius.full,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
   diffText: {
     fontSize: 9,
     fontWeight: fontWeight.semibold,
-    color: colors.tagGreenText,
+    color: colors.tagNeutralText,
   },
   ownBadge: {
     position: 'absolute',
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: spacing.xs,
     right: spacing.xs,
-    backgroundColor: colors.tagPurple,
+    backgroundColor: colors.tagPersonalBg,
     borderRadius: radius.full,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -188,6 +188,6 @@ const styles = StyleSheet.create({
   wantMatchOverlayText: {
     fontSize: 9,
     fontWeight: fontWeight.semibold,
-    color: colors.tagPurpleText,
+    color: colors.tagPersonalText,
   },
 })

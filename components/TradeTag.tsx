@@ -20,13 +20,13 @@ interface TradeTagProps {
 type StyleDef = { bg: string; text: string }
 
 const VARIANT_STYLES: Record<TradeTagVariant, StyleDef> = {
-  default: { bg: colors.tagPurple, text: colors.tagPurpleText },
-  mail: { bg: colors.tagBlue, text: colors.tagBlueText },
-  handoff: { bg: colors.tagGreen, text: colors.tagGreenText },
-  adjustment: { bg: colors.tagAmber, text: colors.tagAmberText },
-  no_adjustment: { bg: colors.tagGreen, text: colors.tagGreenText },
-  match: { bg: '#EDE9FE', text: '#4C1D95' },
-  mode: { bg: colors.tagPurple, text: colors.tagPurpleText },
+  default: { bg: colors.tagPersonalBg, text: colors.tagPersonalText },
+  mail: { bg: colors.tagNeutralBg, text: colors.tagNeutralText },
+  handoff: { bg: colors.tagNeutralBg, text: colors.tagNeutralText },
+  adjustment: { bg: colors.tagAccentBg, text: colors.tagAccentText },
+  no_adjustment: { bg: colors.tagNeutralBg, text: colors.tagNeutralText },
+  match: { bg: colors.tagPersonalBg, text: colors.tagPersonalText },
+  mode: { bg: colors.tagPersonalBg, text: colors.tagPersonalText },
 }
 
 export function TradeTag({ label, variant = 'default' }: TradeTagProps) {

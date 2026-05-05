@@ -28,16 +28,16 @@ type DiffInfo = { text: string; bgColor: string; textColor: string }
 
 function getDiffInfo(card: Card): DiffInfo {
   if (!card.allows_adjustment) {
-    return { text: '調整金なし', bgColor: colors.tagGreen, textColor: colors.tagGreenText }
+    return { text: '調整金なし', bgColor: colors.tagNeutralBg, textColor: colors.tagNeutralText }
   }
   if (card.adjustment_max != null) {
     return {
       text: `調整金 ¥${card.adjustment_max.toLocaleString()}まで可`,
-      bgColor: colors.tagAmber,
-      textColor: colors.tagAmberText,
+      bgColor: colors.tagAccentBg,
+      textColor: colors.tagAccentText,
     }
   }
-  return { text: '調整金相談可', bgColor: colors.tagPurple, textColor: colors.tagPurpleText }
+  return { text: '調整金相談可', bgColor: colors.tagInfoBg, textColor: colors.tagInfoText }
 }
 
 function getCtaConfig(
@@ -410,10 +410,10 @@ export default function ListingDetailScreen() {
           <Text style={styles.sectionLabel}>交換条件</Text>
           <View style={styles.conditionsRow}>
             {card.allows_mail && (
-              <Tag text="郵送で交換可" bgColor={colors.tagBlue} textColor={colors.tagBlueText} />
+              <Tag text="郵送で交換可" bgColor={colors.tagNeutralBg} textColor={colors.tagNeutralText} />
             )}
             {card.allows_handoff && (
-              <Tag text="手渡しで交換可" bgColor={colors.tagBlue} textColor={colors.tagBlueText} />
+              <Tag text="手渡しで交換可" bgColor={colors.tagNeutralBg} textColor={colors.tagNeutralText} />
             )}
             <Tag text={diff.text} bgColor={diff.bgColor} textColor={diff.textColor} />
           </View>

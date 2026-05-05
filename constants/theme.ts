@@ -1,57 +1,95 @@
 // constants/theme.ts
+//
+// Swaply Theme — Navy / 引き算スタイル (Instagram-inspired minimalism)
+// Aligned with refactor_plan_v1.md (Phase A: UI-1/2/3) and strategy_master_v2.md.
+//
+// 設計原則:
+// - 引き締め紺ベース + 引き算 (グラデ・装飾紫を排除)
+// - Trust思想: バッジは事実記号、序列演出禁止
+// - CTA は primary 単一、success/warning/error は状態表示専用 (アクション禁止)
+// - shadow は最小限 (border中心の境界表現、Card に border 必須)
+//
+// 命名規則 (3レイヤー分離):
+// - DB enum (trust_badge): green / trial_blue / blue / gold_blue (永続化、変更不可)
+// - TS theme key: trustBadge* プレフィックス (既存命名規則維持、TrustBadge.tsx 整合)
+// - UI 表示ラベル: lib/types.ts の TRUST_BADGE_LABELS が日本語 (新規/お試し/安定/高信頼)
+//   を Source of Truth とする。色名 (Green/Teal/Sky/Amber) はあくまで内部色相メモ。
+// - trust* (プレフィックスなし): TradeStats 等のメトリック色 (legacy、別用途)
 
 export const colors = {
-  primary: '#6C63FF',
-  primaryLight: '#9B8AFB',
-  primaryDark: '#5A52E0',
-  gradientStart: '#6C63FF',
-  gradientEnd: '#9B8AFB',
+  primary: '#1F2A52',
+  primaryDark: '#141B36',
 
-  background: '#F8F7FF',
+  background: '#FFFFFF',
   backgroundCard: '#FFFFFF',
-  backgroundMuted: '#EFEDFF',
+  backgroundMuted: '#F5F5F7',
 
-  textPrimary: '#1A1040',
-  textSecondary: '#6B7280',
+  textPrimary: '#1F2A52',
+  textSecondary: '#5A6478',
   textTertiary: '#9CA3AF',
   textInverse: '#FFFFFF',
 
-  border: '#E8E5F8',
-  borderLight: '#F0EFFE',
+  border: '#E5E5EA',
+  borderLight: '#F0F0F2',
 
-  // Trust badge — 4-stage palette (green / trial_blue / blue / gold_blue)
-  trustBadgeGreen: '#10B981',
+  // Trust 4階層バッジ (DB enum 整合のためキー名維持、UI 表示は TRUST_BADGE_LABELS 参照)
+  trustBadgeGreen: '#059669',          // 色相: Green
   trustBadgeGreenBg: '#ECFDF5',
   trustBadgeGreenBorder: '#A7F3D0',
-  trustBadgeTrialBlue: '#60A5FA',
-  trustBadgeTrialBlueBg: '#EFF6FF',
-  trustBadgeTrialBlueBorder: '#BFDBFE',
-  trustBadgeBlue: '#2563EB',
-  trustBadgeBlueBg: '#DBEAFE',
-  trustBadgeBlueBorder: '#93C5FD',
-  trustBadgeGoldBlue: '#1E40AF',
-  trustBadgeGoldBlueBg: '#DBEAFE',
-  trustBadgeGoldBlueBorder: '#FCD34D',
-  trustBadgeGoldBlueAccent: '#F59E0B',
 
-  // 既存 metric 用色（Trust badge とは別用途、保持）
+  trustBadgeTrialBlue: '#0D9488',      // 色相: Teal (UI ラベルは TRUST_BADGE_LABELS 参照)
+  trustBadgeTrialBlueBg: '#F0FDFA',
+  trustBadgeTrialBlueBorder: '#99F6E4',
+
+  trustBadgeBlue: '#0EA5E9',           // 色相: Sky (UI ラベルは TRUST_BADGE_LABELS 参照)
+  trustBadgeBlueBg: '#F0F9FF',
+  trustBadgeBlueBorder: '#BAE6FD',
+
+  trustBadgeGoldBlue: '#D97706',       // 色相: Amber (UI ラベルは TRUST_BADGE_LABELS 参照)
+  trustBadgeGoldBlueBg: '#FFFBEB',
+  trustBadgeGoldBlueBorder: '#FDE68A',
+
+  // Trust メトリック (legacy、TradeStats 等)
   trustGreen: '#059669',
 
+  // === 状態色 (アクション禁止、表示専用) ===
+  // 「成立済み」「発送済み」等の達成状態表示。CTA ボタンには使用禁止。
   success: '#059669',
   successBg: '#ECFDF5',
+
+  // 「期限間近」「注意」等の表示。CTA ボタンには使用禁止。
   warning: '#D97706',
   warningBg: '#FFFBEB',
+
+  // 「失敗」「エラー」等の表示。削除確認等の緊急アクションのみ例外的に許可。
   error: '#DC2626',
   errorBg: '#FEF2F2',
+  errorBorder: '#FECACA',
 
-  tagPurple: '#EDE9FE',
-  tagPurpleText: '#5B21B6',
-  tagBlue: '#EFF6FF',
-  tagBlueText: '#1D4ED8',
-  tagGreen: '#F0FDF4',
-  tagGreenText: '#166534',
-  tagAmber: '#FFFBEB',
-  tagAmberText: '#92400E',
+  // === タグ 4系統 (機能別判別性維持、Trust とは彩度差で階層分離) ===
+  // tagNeutral: 配送条件 (郵送/手渡し)、調整金なし — slate
+  tagNeutralBg: '#F5F5F7',
+  tagNeutralText: '#5A6478',
+  tagNeutralBorder: '#E5E5EA',
+
+  // tagAccent: 調整金あり、ほぼ確定等のハイライト系 — amber
+  tagAccentBg: '#FEF3C7',
+  tagAccentText: '#92400E',
+  tagAccentBorder: '#FDE68A',
+
+  // tagInfo: 要相談、likely成立しやすい、調整金相談可 (成立可能性シグナル) — sky
+  tagInfoBg: '#E0F2FE',
+  tagInfoText: '#0369A1',
+  tagInfoBorder: '#BAE6FD',
+
+  // tagPersonal: ほしい / モード / wantMatch (ユーザー固有) — rose (紫代替)
+  tagPersonalBg: '#FCE7F3',
+  tagPersonalText: '#9F1239',
+  tagPersonalBorder: '#FBCFE8',
+
+  // Deprecated (UI-4 で削除予定)
+  gradientStart: '#1F2A52',
+  gradientEnd: '#1F2A52',
 } as const
 
 export const spacing = {
@@ -98,24 +136,24 @@ export const fontWeight = {
 
 export const shadow = {
   sm: {
-    shadowColor: '#6C63FF',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   },
   md: {
-    shadowColor: '#6C63FF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    elevation: 4,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
   },
   lg: {
-    shadowColor: '#6C63FF',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.14,
-    shadowRadius: 22,
-    elevation: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
   },
 } as const

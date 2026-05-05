@@ -16,16 +16,16 @@ interface HomeLargeCardProps {
 
 function getDiffLabel(card: Card): { text: string; bg: string; textColor: string } {
   if (!card.allows_adjustment) {
-    return { text: '調整金なし', bg: colors.tagGreen, textColor: colors.tagGreenText }
+    return { text: '調整金なし', bg: colors.tagNeutralBg, textColor: colors.tagNeutralText }
   }
   if (card.adjustment_max != null) {
     return {
       text: `¥${card.adjustment_max.toLocaleString()}`,
-      bg: colors.tagBlue,
-      textColor: colors.tagBlueText,
+      bg: colors.tagAccentBg,
+      textColor: colors.tagAccentText,
     }
   }
-  return { text: '要相談', bg: colors.tagAmber, textColor: colors.tagAmberText }
+  return { text: '要相談', bg: colors.tagInfoBg, textColor: colors.tagInfoText }
 }
 
 export function HomeLargeCard({ card, isOwn = false }: HomeLargeCardProps) {

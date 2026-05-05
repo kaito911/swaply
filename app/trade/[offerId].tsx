@@ -1,4 +1,5 @@
 // app/trade/[offerId].tsx
+import { colors } from '@/constants/theme'
 import {
     cancelTrade,
     confirmTradeReceipt,
@@ -1080,16 +1081,16 @@ const styles = StyleSheet.create({
 
   // ── [3] Action ───────────────────────────
   actionCard: {
-    backgroundColor: '#F5F3FF',
+    backgroundColor: colors.tagAccentBg,
     borderRadius: 20,
     padding: 18,
     borderWidth: 1.5,
-    borderColor: '#C4B5FD',
+    borderColor: colors.tagAccentBorder,
   },
   actionTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#3B1FA8',
+    color: colors.tagAccentText,
     marginBottom: 6,
   },
   cancelLink: {

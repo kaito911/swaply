@@ -395,12 +395,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: '#F5F3FF',
+    backgroundColor: colors.tagInfoBg,
   },
   statusBadgeText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#6D28D9',
+    color: colors.tagInfoText,
   },
   dateText: {
     fontSize: 12,
@@ -503,16 +503,16 @@ const styles = StyleSheet.create({
   counterButton: {
     height: 44,
     borderRadius: radius.lg,
-    backgroundColor: '#F5F3FF',
+    backgroundColor: colors.backgroundCard,
     borderWidth: 1,
-    borderColor: '#DDD6FE',
+    borderColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   counterButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6D28D9',
+    color: colors.primary,
   },
   disabledButton: {
     opacity: 0.6,

@@ -419,7 +419,7 @@ export default function VenueHomeScreen() {
 
                 <View style={styles.bootstrapNote}>
                   <Text style={styles.bootstrapNoteText}>
-                    Bootstrap Mode: 差額なし・即手渡し限定
+                    Bootstrap Mode: 調整金なし・即手渡し限定
                   </Text>
                 </View>
 
@@ -443,7 +443,7 @@ export default function VenueHomeScreen() {
                     {holdAgreed && <Text style={styles.checkmark}>✓</Text>}
                   </View>
                   <Text style={styles.agreeText}>
-                    会場内での即手渡し・差額なしの条件でHold申請します。承認後は時間内に必ず交換します。
+                    会場内での即手渡し・調整金なしの条件でHold申請します。承認後は時間内に必ず交換します。
                   </Text>
                 </Pressable>
 

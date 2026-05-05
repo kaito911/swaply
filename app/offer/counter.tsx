@@ -41,7 +41,7 @@ export default function CounterOfferScreen() {
   const handleSubmit = async () => {
     const amount = adjustmentAmount === '' ? 0 : parseInt(adjustmentAmount, 10)
     if (isNaN(amount)) {
-      Alert.alert('入力エラー', '差額は数値で入力してください')
+      Alert.alert('入力エラー', '調整金は数値で入力してください')
       return
     }
 
@@ -76,7 +76,7 @@ export default function CounterOfferScreen() {
           <Pressable onPress={() => router.back()} hitSlop={12}>
             <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
           </Pressable>
-          <Text style={styles.headerTitle}>差額変更を提案</Text>
+          <Text style={styles.headerTitle}>調整金変更を提案</Text>
           <View style={{ width: 24 }} />
         </View>
 
@@ -85,7 +85,7 @@ export default function CounterOfferScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.label}>差額金額（円）</Text>
+          <Text style={styles.label}>調整金（円）</Text>
           <Text style={styles.hint}>
             相手に追加で支払ってほしい金額を入力します。あなたが支払う場合はマイナスを付けてください。
           </Text>

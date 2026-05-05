@@ -53,7 +53,7 @@ export function HomeSmallCard({ card, isOwn = false, isWantMatched = false, matc
         {/* 差額なしタグ: bottom-left overlay（Lane 2 の責務を視覚的に伝える） */}
         {!card.allows_adjustment && (
           <View style={styles.diffOverlay}>
-            <Text style={styles.diffText}>差額なし</Text>
+            <Text style={styles.diffText}>調整金なし</Text>
           </View>
         )}
 

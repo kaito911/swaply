@@ -525,7 +525,7 @@ export default function ProposeScreen() {
                       } as never)
                     }}
                   >
-                    <Text style={styles.counterButtonText}>差額変更を提案</Text>
+                    <Text style={styles.counterButtonText}>調整金変更を提案</Text>
                   </Pressable>
                 </View>
               ) : canOpenTrade ? (

@@ -16,7 +16,7 @@ interface HomeLargeCardProps {
 
 function getDiffLabel(card: Card): { text: string; bg: string; textColor: string } {
   if (!card.allows_adjustment) {
-    return { text: '差額なし', bg: colors.tagGreen, textColor: colors.tagGreenText }
+    return { text: '調整金なし', bg: colors.tagGreen, textColor: colors.tagGreenText }
   }
   if (card.adjustment_max != null) {
     return {

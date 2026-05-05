@@ -28,16 +28,16 @@ type DiffInfo = { text: string; bgColor: string; textColor: string }
 
 function getDiffInfo(card: Card): DiffInfo {
   if (!card.allows_adjustment) {
-    return { text: '差額なし', bgColor: colors.tagGreen, textColor: colors.tagGreenText }
+    return { text: '調整金なし', bgColor: colors.tagGreen, textColor: colors.tagGreenText }
   }
   if (card.adjustment_max != null) {
     return {
-      text: `差額 ¥${card.adjustment_max.toLocaleString()}まで可`,
+      text: `調整金 ¥${card.adjustment_max.toLocaleString()}まで可`,
       bgColor: colors.tagAmber,
       textColor: colors.tagAmberText,
     }
   }
-  return { text: '差額相談可', bgColor: colors.tagPurple, textColor: colors.tagPurpleText }
+  return { text: '調整金相談可', bgColor: colors.tagPurple, textColor: colors.tagPurpleText }
 }
 
 function getCtaConfig(
@@ -73,7 +73,7 @@ function getPushReason(
   if (bestMatchScore === 'medium') return 'あなたが求めているカードに近いです'
   if (owner != null && owner.trade_count >= 1) return '交換実績があるため、安心して提案できます'
   if (card.allows_mail) return '郵送で交換しやすい条件です'
-  if (card.allows_adjustment) return '差額調整に対応しており、条件が合わせやすいです'
+  if (card.allows_adjustment) return '調整金に対応しており、条件が合わせやすいです'
   return null
 }
 

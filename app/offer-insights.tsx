@@ -70,7 +70,7 @@ function SummarySection({ summary }: { summary: OfferOutcomeSummary }) {
       </Block>
 
       <Block>
-        <SectionHeader>差額許可別（代理値）</SectionHeader>
+        <SectionHeader>調整金許可別（代理値）</SectionHeader>
         <StatRow
           label="許可あり"
           value={`${summary.adjustmentAllowed.accepted}/${summary.adjustmentAllowed.total} (${pct(summary.adjustmentAllowed.acceptRate)})`}
@@ -200,7 +200,7 @@ export default function OfferInsightsScreen() {
       >
         <Text style={styles.title}>成立ログ</Text>
         <Text style={styles.devNote}>
-          開発用。承認時刻・辞退時刻・差額情報は近似値または代理値。
+          開発用。承認時刻・辞退時刻・調整金情報は近似値または代理値。
         </Text>
 
         {loading ? (

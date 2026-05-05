@@ -141,7 +141,7 @@ export default function MyPageScreen() {
           { label: '発送遵守率', value: `${sr}%`, color: colors.success },
           { label: '返信速度', value: rh < 999 ? `${rh}h` : '—', color: '#0891B2' },
           { label: 'トラブル', value: `${trouble}件`, color: trouble === 0 ? colors.success : colors.error },
-          { label: '差額平均', value: profile?.adjustment_avg != null ? `¥${profile.adjustment_avg}` : '—', color: '#D97706' },
+          { label: '調整金平均', value: profile?.adjustment_avg != null ? `¥${profile.adjustment_avg}` : '—', color: '#D97706' },
         ] as const).map((item, i, arr) => (
           <View key={item.label} style={[styles.dataRow, i < arr.length - 1 && styles.dataRowBorder]}>
             <Text style={styles.dataLabel}>{item.label}</Text>

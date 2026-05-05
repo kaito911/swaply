@@ -115,7 +115,7 @@ export default function VenueListScreen() {
           <Text style={styles.bannerBody}>
             ライブ会場でのダブりカード交換に特化したモード。{'\n'}
             当日供給板・会場商品棚を中心に、会場での交換を探せます。{'\n'}
-            <Text style={styles.bannerAccent}>差額なし・即手渡し・Venue Holdで交換を固定。</Text>{'\n'}
+            <Text style={styles.bannerAccent}>調整金なし・即手渡し・Venue Holdで交換を固定。</Text>{'\n'}
             その場で交換できる相手を見つけましょう。
           </Text>
         </View>
@@ -205,7 +205,7 @@ export default function VenueListScreen() {
           <Text style={styles.bootstrapTitle}>Bootstrap Venue Mode（初回会場）</Text>
           <Text style={styles.bootstrapBody}>
             初回会場はTrustゼロで参加できる特別モード。{'\n'}
-            差額なし・即手渡しのみが条件。{'\n'}
+            調整金なし・即手渡しのみが条件。{'\n'}
             成立するとTrustが自動生成されます。
           </Text>
         </View>

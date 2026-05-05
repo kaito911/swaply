@@ -31,11 +31,11 @@ function shippingLabel(card: Card): string {
 }
 
 function adjustmentLabel(card: Card): string {
-  if (!card.allows_adjustment) return '差額なし'
+  if (!card.allows_adjustment) return '調整金なし'
   if (card.adjustment_max != null) {
-    return `差額あり（上限 ¥${card.adjustment_max.toLocaleString()}）`
+    return `調整金あり（上限 ¥${card.adjustment_max.toLocaleString()}）`
   }
-  return '差額あり（上限未設定）'
+  return '調整金あり（上限未設定）'
 }
 
 // ─────────────────────────────────────────

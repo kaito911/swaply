@@ -341,7 +341,7 @@ export default function OfferDetailScreen() {
               disabled={acting}
               onPress={handleCounter}
             >
-              <Text style={styles.counterButtonText}>差額変更を提案</Text>
+              <Text style={styles.counterButtonText}>調整金変更を提案</Text>
             </Pressable>
           </>
         )}

@@ -15,7 +15,6 @@ export default function TabsLayout() {
       <Tabs.Screen name="mypage" />
       <Tabs.Screen name="venue-tab" />
 
-      <Tabs.Screen name="sell" options={{ href: null }} />
       <Tabs.Screen name="home" options={{ href: null }} />
       <Tabs.Screen name="search" />
     </Tabs>

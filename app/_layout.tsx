@@ -89,7 +89,6 @@ function RootNavigator() {
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,
-            headerBackTitle: '',
           }}
         />
 
@@ -102,7 +101,6 @@ function RootNavigator() {
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,
-            headerBackTitle: '',
           }}
         />
 
@@ -122,7 +120,6 @@ function RootNavigator() {
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,
-            headerBackTitle: '',
             headerBackButtonDisplayMode: 'minimal',
           }}
         />
@@ -135,7 +132,6 @@ function RootNavigator() {
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,
-            headerBackTitle: '',
           }}
         />
 
@@ -147,7 +143,6 @@ function RootNavigator() {
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,
-            headerBackTitle: '',
           }}
         />
 
@@ -164,7 +159,6 @@ function RootNavigator() {
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,
-            headerBackTitle: '',
           }}
         />
 
@@ -186,7 +180,6 @@ function RootNavigator() {
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,
-            headerBackTitle: '',
           }}
         />
 
@@ -203,7 +196,6 @@ function RootNavigator() {
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,
-            headerBackTitle: '',
           }}
         />
         <Stack.Screen
@@ -214,7 +206,6 @@ function RootNavigator() {
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,
-            headerBackTitle: '',
           }}
         />
       </Stack>

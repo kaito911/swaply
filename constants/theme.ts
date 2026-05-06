@@ -132,13 +132,6 @@ export const fontWeight = {
 }
 
 export const shadow = {
-  sm: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
-  },
   md: {
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },

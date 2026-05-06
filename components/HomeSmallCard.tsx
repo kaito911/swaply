@@ -1,5 +1,5 @@
 // components/HomeSmallCard.tsx
-import { colors, fontWeight, radius, shadow, spacing } from '@/constants/theme'
+import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card, computeTrustBadge } from '@/lib/types'
 import { router } from 'expo-router'
 import React from 'react'
@@ -104,7 +104,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     overflow: 'hidden',
     marginRight: spacing.sm,
-    ...shadow.sm,
   },
   imageWrap: {
     width: '100%',

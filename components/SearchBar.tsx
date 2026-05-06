@@ -1,5 +1,5 @@
 // components/SearchBar.tsx
-import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
+import { colors, fontSize, radius, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
 import React from 'react'
 import { StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
@@ -49,7 +49,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundCard,
     borderWidth: 1,
     borderColor: colors.border,
-    ...shadow.sm,
   },
   inner: {
     flexDirection: 'row',

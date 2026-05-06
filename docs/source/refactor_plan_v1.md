@@ -1,6 +1,6 @@
-# Swaply 改修指示書 v1.2
+# Swaply 改修指示書 v1.3
 
-最終更新: 2026-05-06 / バージョン: v1.2 / 前提: feat/trade-pr1 ブランチ HEAD = 053c2b8 (Phase A finalize)
+最終更新: 2026-05-07 / バージョン: v1.3 / 前提: feat/trade-pr1 ブランチ HEAD = 968ddc6 (M5.5 + 軽量 M クリーンアップ完了)
 
 > **本ドキュメントの位置づけ**:
 > Swaply のコードベース改修方針と残タスクを管理する Source of Truth。
@@ -24,6 +24,7 @@
 - **v1.0 (2026-04)**: 初版、E1〜E3 + H1〜H5 のスコープ定義
 - **v1.1 (2026-05-04)**: M5 完了反映、M5.5 + M9〜M12 を新規追加
 - **v1.2 (2026-05-06)**: Phase A 完了反映 (UI 改修全 7 タスク + M-search)、Phase B 章 (高級感調律 UI-7〜UI-10) を新設、Phase 2 backlog の品質系を memory に分離
+- **v1.3 (2026-05-07)**: Phase B UI-7 を「出品画面改修」(19-23h、11 commits 構造) として大幅拡張、UI-8〜UI-11 をリナンバリング (旧 UI-7 微細な質感 → UI-9 へシフト)、Q1〜Q6 確定事項を記録、セッション分割と FB チェックポイントを明示
 
 ---
 
@@ -160,9 +161,99 @@ A 象限 (信用 × おしゃれ) + 写真主役、Linear/Notion/Aēsop/Apple Wa
 
 ## 3. Phase B (高級感調律) — 着手予定
 
-ブランドポジショニング memory「高級感の構成要素 4 項」をベースに分解。
+ブランドポジショニング memory「高級感の構成要素 4 項」 + 出品 UX 改善 (UI-7) をベースに分解。
 
-### UI-8: タイポ調整 + 余白拡大 (★ 最優先)
+### Phase B 全体スコープ
+
+| Task | 工数 | スコープ |
+|---|---|---|
+| **UI-7** ★最優先 | **19-23h (2.5-3 日)** | 出品画面改修 (詳細は下記、11 commits 構造) |
+| UI-8 | 2-3h | タイポ + 余白 (theme 値変更、全画面一斉) |
+| UI-9 | 1-1.5h | 微細な質感 (border 色 / radius / shadow) |
+| UI-10 | 2-3h | 写真の見せ方 + TrustBadge 配置戦略 |
+| UI-11 | 1-1.5h | 残り hex 撤去 (M-cleanup-3〜4 統合) |
+| UI-17 | 別案件 | ロゴ外部発注 (Phase C 候補) |
+| **合計** | **25-32h** | |
+
+---
+
+### UI-7: 出品画面改修 (★ Phase B 最優先、19-23h / 2.5-3 日)
+
+#### スコープ
+- **1 写真 = N cards** (物理分離型、案 1 採用)
+- **ホーム表示**: クロップ画像 (案 α)
+- **詳細画面**: 元写真 + bbox 細ボーダー (案 i)
+- **検索集約 UI** は別タスク化 (UI-7 スコープ外)
+
+#### DB スキーマ拡張 (cards テーブルに 6 列追加)
+- `bbox_x` / `bbox_y` / `bbox_w` / `bbox_h` (0-1 正規化、DECIMAL 型)
+- `image_url_full` (元写真の Storage URL)
+- `image_url_cropped` (クロップ画像の Storage URL)
+- 既存 cards row との互換: `bbox = null` (= 写真全体が 1 card)
+
+#### 11 Commits 構造
+
+##### Phase 1: Foundation (4 commits, 約 6h)
+- **C1**: DB migration (cards に 6 列追加、additive)
+  - commit message に「Phase 2 で listings 分離時の image_url_full 重複に注意」明記
+- **C2**: Supabase Storage helper (upload 関数、path 規約)
+- **C3**: 状態 + 配送方法入力フロー追加 (戦略整合先行)
+- **C4**: 進捗バー component (Linear 風)
+
+##### Phase 2: Annotation Core (4 commits, 約 8-10h)
+- **事前 spike**: C5 矩形描画ジェスチャ (1-2h プロトタイプ、PanResponder vs gesture-handler 選定)
+- **C5**: 矩形描画ジェスチャ component (独立 component)
+- **C6**: annotate.tsx (select.tsx 改修、bbox state 管理)
+- **C7**: ai.tsx 簡約化 + cardinfo 統合 + TREASURE_MEMBERS autocomplete
+- **C8**: クロップ画像生成 (expo-image-manipulator)
+
+##### Phase 3: 統合 & 仕上げ (3 commits, 約 5-6h)
+- **C9**: confirm.tsx 拡張 (bbox + image_url_full/cropped insert)
+- **C10**: 画面遷移ロジック (image → annotate → cardinfo → confirm)
+- **C11**: 調整金 UI 文言改善 + 最終検証
+
+#### リスク評価
+
+| 順位 | 項目 | リスク | 対策 |
+|---|---|---|---|
+| 1 | C5 矩形描画ジェスチャ | ★★★ | 独立 component で事前 spike (1-2h) |
+| 2 | クロップ + Storage 並列 upload | ★★ | partial 失敗 rollback 設計 |
+| 3 | bbox 座標系の精度 | ★★ | 画像 natural size と display size のスケーリング、EXIF 対応 |
+| 4 | Storage helper 単体 | ★ | 既存 `uploadCardImage` 流用 |
+| 5 | DB migration | ★ | 純 additive、無害 |
+
+#### ユーザーフィードバックチェックポイント
+
+| Checkpoint | 確認内容 | コスト |
+|---|---|---|
+| After C4 | 状態/配送/進捗バー / DB migration 反映 | 5-10 分 |
+| **★★ After C6** | **ジェスチャ UX 確認 (最重要、UX 違和感の早期発見)** | 10-15 分 |
+| After C8 | クロップ品質確認 / 複数 upload の挙動 | 10-15 分 |
+| After C11 | 全フロー徹底検証 | 30 分以上 |
+
+#### セッション分割
+
+| セッション | 内容 | commit 数 | 工数 |
+|---|---|---|---|
+| 議論 1 (今、v1.3 更新) | 設計詰め + plan 更新 | 0-1 | ~1h |
+| 実装 1 | Phase 1 Foundation: C1-C4 | 4 | ~6h |
+| 実装 2 | Phase 2 Annotation Core: C5-C8 + 事前 spike | 4 | ~8-10h |
+| 実装 3 | Phase 3 統合 & 仕上げ: C9-C11 | 3 | ~5-6h |
+
+#### Q1〜Q6 確定事項 (2026-05-07 議論結果)
+
+| Q | 確定 | 理由 |
+|---|---|---|
+| Q1 (画面構造) | **Y** (3 画面 + AI 層 1) + クロップ画像生成 | 戦略整合 + UX バランス |
+| Q2 (DB スキーマ) | **A** (cards 拡張、6 列追加) | 最小変更、純 additive |
+| Q3 (image upload) | **(i) UI-7 同梱** | 機能必須前提のため別タスク化非効率 |
+| Q4 (dead code) | **部分流用** | select 40-50% / ai 30-40% |
+| Q5 (AI 層 1 入力範囲) | **(i) bbox + 基本情報のみ** | 画面密度抑制、判断粒度分離 |
+| Q6 (進捗バー UI) | **(i) Linear 風** | brand_positioning memory「Linear 参照」と整合 |
+
+---
+
+### UI-8: タイポ調整 + 余白拡大 (UI-7 完了後の最優先)
 - **想定時間**: 2〜3 時間
 - **対象**:
   - font-weight: 見出し 700/800 → 600/700 (細く)
@@ -174,22 +265,23 @@ A 象限 (信用 × おしゃれ) + 写真主役、Linear/Notion/Aēsop/Apple Wa
 - **着手時前提確認**: grep で「theme 値直参照」か「hex hardcode 散在」かを検証
 - **依存**: M-cleanup-3, M-cleanup-4 (hex 残響整理) — 並行 or 先行で進める
 
-### UI-7: 微細な質感
+### UI-9: 微細な質感 (旧 v1.2 UI-7)
 - **想定時間**: 1〜1.5 時間
 - **対象**:
   - border 色を薄く (#E5E5EA → #EEEEF1〜#F2F2F5 検討)
   - border-radius 規約明文化 (Card 16px / Button 12px / Tag full)
   - shadow opacity 調律 (現状 BestTradeCandidateCard のみ shadow.md)
 
-### UI-9: 写真の見せ方 + TrustBadge 配置戦略
+### UI-10: 写真の見せ方 + TrustBadge 配置戦略 (旧 v1.2 UI-9)
 - **想定時間**: 2〜3 時間
 - **対象**:
   - aspect ratio 統一 (HomeLargeCard / HomeSmallCard / CardItem)
   - 写真周囲の額装 padding
   - TrustBadge 配置戦略決定 (overlay 残置 vs body 化 vs ハイブリッド)
 - **連動**: HomeLargeCard/HomeSmallCard の overlay 削減 (Phase A 委譲分)
+- **連動**: UI-7 のクロップ画像表示と整合 (ホーム = クロップ、詳細 = 元写真 + bbox)
 
-### UI-10: 残り hex 撤去 (M-cleanup-3〜4 統合)
+### UI-11: 残り hex 撤去 (M-cleanup-3〜4 統合、旧 v1.2 UI-10)
 - **想定時間**: 1〜1.5 時間
 - **対象**:
   - propose.tsx 残り 〜20 箇所

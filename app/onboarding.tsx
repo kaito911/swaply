@@ -3,7 +3,6 @@
 // 完了フラグを AsyncStorage に保存し、以降はスキップされる
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Ionicons } from '@expo/vector-icons'
-import { LinearGradient } from 'expo-linear-gradient'
 import { router } from 'expo-router'
 import React, { useState } from 'react'
 import {
@@ -104,14 +103,9 @@ export default function OnboardingScreen({ onComplete }: Props) {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.container}>
           <View style={styles.heroArea}>
-            <LinearGradient
-              colors={[colors.gradientStart, colors.gradientEnd]}
-              style={styles.logoMark}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
+            <View style={[styles.logoMark, { backgroundColor: colors.primary }]}>
               <Text style={styles.logoMarkText}>S</Text>
-            </LinearGradient>
+            </View>
             <Text style={styles.logoText}>Swaply</Text>
             <Text style={styles.tagline}>交換を、もっと安全に。</Text>
           </View>

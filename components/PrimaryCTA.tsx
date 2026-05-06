@@ -1,6 +1,5 @@
 // components/PrimaryCTA.tsx
 import { colors, radius, shadow } from '@/constants/theme'
-import { LinearGradient } from 'expo-linear-gradient'
 import React from 'react'
 import {
   ActivityIndicator,
@@ -94,7 +93,7 @@ export function PrimaryCTA({
     )
   }
 
-  // primary (gradient)
+  // primary (solid navy)
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -106,37 +105,29 @@ export function PrimaryCTA({
           borderRadius: bRadius,
           overflow: 'hidden' as const,
           opacity: isDisabled ? 0.5 : 1,
+          backgroundColor: colors.primary,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 16,
         },
         shadow.md,
         style,
       ]}
     >
-      <LinearGradient
-        colors={[colors.gradientStart, colors.gradientEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={{
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          paddingHorizontal: 16,
-        }}
-      >
-        {loading ? (
-          <ActivityIndicator size="small" color={colors.textInverse} />
-        ) : (
-          <Text
-            style={{
-              fontSize,
-              color: colors.textInverse,
-              fontWeight: '700',
-              letterSpacing: 0.3,
-            }}
-          >
-            {label}
-          </Text>
-        )}
-      </LinearGradient>
+      {loading ? (
+        <ActivityIndicator size="small" color={colors.textInverse} />
+      ) : (
+        <Text
+          style={{
+            fontSize,
+            color: colors.textInverse,
+            fontWeight: '700',
+            letterSpacing: 0.3,
+          }}
+        >
+          {label}
+        </Text>
+      )}
     </TouchableOpacity>
   )
 }

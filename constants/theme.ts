@@ -87,9 +87,6 @@ export const colors = {
   tagPersonalText: '#9F1239',
   tagPersonalBorder: '#FBCFE8',
 
-  // Deprecated (UI-4 で削除予定)
-  gradientStart: '#1F2A52',
-  gradientEnd: '#1F2A52',
 } as const
 
 export const spacing = {

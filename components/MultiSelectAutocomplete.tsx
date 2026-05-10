@@ -16,9 +16,9 @@ import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import React, { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
-  FlatList,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -192,11 +192,17 @@ export function MultiSelectAutocomplete<T>(props: MultiSelectAutocompleteProps<T
               <ActivityIndicator size="small" color={colors.primary} />
             </View>
           ) : suggestions.length > 0 ? (
-            <FlatList
-              data={suggestions}
-              keyExtractor={props.getKey}
-              renderItem={({ item }) => (
+            // 注: 親 ScrollView との VirtualizedList nesting 警告回避のため
+            //     FlatList ではなく ScrollView + map 実装。
+            //     LIMIT 20 (master.ts 既定) で windowing 不要、β1 範囲では perf 問題なし。
+            <ScrollView
+              style={styles.suggestListInner}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              {suggestions.map((item) => (
                 <Pressable
+                  key={props.getKey(item)}
                   onPress={() => handleSelectItem(item)}
                   style={({ pressed }) => [
                     styles.suggestItem,
@@ -205,11 +211,8 @@ export function MultiSelectAutocomplete<T>(props: MultiSelectAutocompleteProps<T
                 >
                   {props.renderOption(item)}
                 </Pressable>
-              )}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-              style={styles.suggestListInner}
-            />
+              ))}
+            </ScrollView>
           ) : (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateText}>該当なし</Text>

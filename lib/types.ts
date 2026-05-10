@@ -6,6 +6,12 @@ export type CardStatus = 'active' | 'inactive' | 'reserved' | 'traded'
 export type CardCondition = 'mint' | 'near_mint' | 'good' | 'fair' | 'poor'
 export type UserMode = 'oshi' | 'trading_card' | 'collection'
 
+// マスタカテゴリ (cards.category と master_works.category で共有)
+export type MasterCategory = 'anime' | 'idol' | 'character' | 'manga' | 'other'
+
+// user_keyword_history.source
+export type KeywordHistorySource = 'search' | 'listing_input'
+
 export type OfferStatus =
   | 'pending'
   | 'accepted'
@@ -72,6 +78,46 @@ export interface Card {
   created_at: string
   updated_at: string
   owner?: Profile
+}
+
+// ─────────────────────────────────────────
+// master_works (大カテゴリマスタ、画像なし)
+// 設計: refactor_plan v1.9 章 3.10、Day 1 必須項目 #5 (image_url 持たない)
+// ─────────────────────────────────────────
+export interface MasterWork {
+  id: string                         // slug PK (例: 'kimetsu', 'conan', 'sanrio')
+  display_name_ja: string
+  display_name_en: string | null
+  aliases: string[]                  // 表記ゆれ吸収用
+  category: MasterCategory
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+// ─────────────────────────────────────────
+// master_characters (主要キャラマスタ、画像なし)
+// ─────────────────────────────────────────
+export interface MasterCharacter {
+  id: string                         // slug PK
+  work_id: string                    // master_works.id への参照
+  display_name_ja: string
+  display_name_en: string | null
+  aliases: string[]
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+// ─────────────────────────────────────────
+// user_keyword_history (検索/入力履歴、master 拡張判断材料)
+// ─────────────────────────────────────────
+export interface UserKeywordHistory {
+  id: string                         // uuid
+  user_id: string
+  keyword: string
+  source: KeywordHistorySource
+  searched_at: string
 }
 
 // ─────────────────────────────────────────

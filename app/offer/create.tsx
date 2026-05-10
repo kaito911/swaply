@@ -18,7 +18,8 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { createOffer, fetchCard, fetchMyWantedCards, fetchUserCards } from '@/lib/supabase' // ★ updated
-import { Card, scoreWantMatch, WantedCard, WantMatchScore } from '@/lib/types' // ★ updated
+import { Card, WantedCard, WantMatchScore } from '@/lib/types'
+import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { useAuthContext } from '@/providers/AuthProvider'
 
 type AdjustmentPayer = 'proposer' | 'receiver'
@@ -96,7 +97,7 @@ function getHint(
 
   let bestWant = targetWants[0] // ★ updated: bestMatchに対応するwantを追跡
   const bestMatch = targetWants.reduce<WantMatchScore>((acc, want) => {
-    const s = scoreWantMatch(myCard, want) // ★ updated: myCard × 相手want
+    const s = scoreWantMatchV2(myCard, want) // ★ updated: myCard × 相手want
     if (s === 'strong') { bestWant = want; return 'strong' }
     if (s === 'medium' && acc !== 'strong') { bestWant = want; return 'medium' }
     if (s === 'weak' && acc === 'none') { bestWant = want; return 'weak' }
@@ -238,7 +239,7 @@ export default function OfferCreateScreen() {
         const sortedMine = [...filteredMine].sort((a, b) => {
           const getBestRank = (card: Card): number =>
             wantScoreRank[fetchedTargetWants.reduce<WantMatchScore>((best, want) => {
-              const s = scoreWantMatch(card, want)
+              const s = scoreWantMatchV2(card, want)
               if (s === 'strong') return 'strong'
               if (s === 'medium' && best !== 'strong') return 'medium'
               if (s === 'weak' && best === 'none') return 'weak'
@@ -268,7 +269,7 @@ export default function OfferCreateScreen() {
 
         // ★ added: targetCard と自分の WantedCards の一致スコアを算出
         const best = fetchedMyWants.reduce<WantMatchScore>((acc, want) => {
-          const s = scoreWantMatch(target, want)
+          const s = scoreWantMatchV2(target, want)
           if (s === 'strong') return 'strong'
           if (s === 'medium' && acc !== 'strong') return 'medium'
           if (s === 'weak' && acc === 'none') return 'weak'

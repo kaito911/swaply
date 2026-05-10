@@ -9,7 +9,6 @@ import {
   OfferOutcomeSummary,
   OfferStatus,
   Profile,
-  scoreWantMatch, // ★ added
   ShelfItem,
   TradeStatus,
   TrustBadgeLevel,
@@ -21,8 +20,10 @@ import {
   VenueTrade,
   VenueTradeStatus,
   WantedCard,
-  WantMatchScore, // ★ added
+  WantMatchScore,
 } from './types'
+import { scoreWantMatchV2 } from './matcher' // ★ Step 3 commit 3: v1 → v2 切替
+import { findCharacterIdsByText, findItemTypeIdsByText } from './master' // ★ searchCardsByText 改修用
 import { readAsStringAsync } from 'expo-file-system/legacy'
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''
@@ -87,9 +88,10 @@ function easyScore(card: Card, myWants: WantedCard[]): number {
     else if (diffHours < 168) score += 5
   }
 
-  // ★ updated: strong/medium/weak の段階的一致スコアリング
+  // ★ Step 3 commit 3: scoreWantMatchV2 (any-overlap + overlap 数重み付け)
+  // characters[] 空 → wantParserMatcher v1 fallback (legacy K-POP 用、本ファイル import 不要、v2 内で委譲)
   const bestMatch = myWants.reduce<WantMatchScore>((best, want) => {
-    const s = scoreWantMatch(card, want)
+    const s = scoreWantMatchV2(card, want)
     if (s === 'strong') return 'strong'
     if (s === 'medium' && best !== 'strong') return 'medium'
     if (s === 'weak' && best === 'none') return 'weak'
@@ -897,26 +899,98 @@ export async function updateProfile(params: {
 // 検索
 // ─────────────────────────────────────────
 
+/**
+ * テキスト検索 (Step 3 commit 3 で配列対応 + legacy fallback merge に改修)。
+ *
+ * 検索ロジック:
+ *   1. 入力テキストを master_characters / master_item_types で fuzzy 解決 (sync, cache 前提)
+ *   2. 並列 query:
+ *      (a) characters @> matched_char_ids (overlap、master 解決時のみ)
+ *      (b) item_types @> matched_item_type_ids (overlap、master 解決時のみ)
+ *      (c) name + legacy K-POP 列 (group_name/member_name/series) の text fuzzy
+ *   3. 結果を ID で dedup + merge
+ *
+ * これで:
+ *   - 新規アニメ出品 (characters[] あり) → (a)(c) でヒット
+ *   - legacy K-POP (member_name のみ、characters[]=空) → (c) でヒット
+ *   - β1 cards 1000-2000 件なら 2-3 並列 query は許容範囲
+ *
+ * Phase 1.5+ で RPC 関数化 (search_cards_unified) で最適化検討。
+ */
 export async function searchCardsByText(query: string, limit = 30): Promise<Card[]> {
   const trimmed = query.trim()
   if (trimmed === '') return []
 
-  const { data, error } = await supabase
-    .from('cards')
-    .select('*, owner:profiles(*)')
-    .eq('status', 'active')
-    .or(
-      `name.ilike.%${trimmed}%,group_name.ilike.%${trimmed}%,member_name.ilike.%${trimmed}%,series.ilike.%${trimmed}%`
-    )
-    .order('created_at', { ascending: false })
-    .limit(limit)
+  // Step 1: 入力テキストを master で fuzzy 解決
+  const matchedCharIds = findCharacterIdsByText(trimmed)
+  const matchedItemTypeIds = findItemTypeIdsByText(trimmed)
 
-  if (error) {
-    console.error('[searchCardsByText]', error)
-    return []
+  // Step 2: 並列 query (max 3 つ)
+  // 注: Supabase JS の query builder は PromiseLike<T> (Thenable) を返すため
+  //     Promise<T> ではなく PromiseLike<T> で型を取る (Promise.all は両対応)
+  type QueryResult = { data: Card[] | null; error: unknown }
+  const queries: PromiseLike<QueryResult>[] = []
+
+  // (a) characters[] overlap (master 解決時のみ)
+  if (matchedCharIds.length > 0) {
+    queries.push(
+      supabase
+        .from('cards')
+        .select('*, owner:profiles(*)')
+        .eq('status', 'active')
+        .overlaps('characters', matchedCharIds)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+        .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
+    )
   }
 
-  return (data ?? []) as Card[]
+  // (b) item_types[] overlap (master 解決時のみ)
+  if (matchedItemTypeIds.length > 0) {
+    queries.push(
+      supabase
+        .from('cards')
+        .select('*, owner:profiles(*)')
+        .eq('status', 'active')
+        .overlaps('item_types', matchedItemTypeIds)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+        .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
+    )
+  }
+
+  // (c) name + legacy K-POP 列の text fuzzy (常に実行)
+  queries.push(
+    supabase
+      .from('cards')
+      .select('*, owner:profiles(*)')
+      .eq('status', 'active')
+      .or(
+        `name.ilike.%${trimmed}%,group_name.ilike.%${trimmed}%,member_name.ilike.%${trimmed}%,series.ilike.%${trimmed}%`,
+      )
+      .order('created_at', { ascending: false })
+      .limit(limit)
+      .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
+  )
+
+  const results = await Promise.all(queries)
+
+  // Step 3: dedup + merge (先勝ち、配列 query を先に評価して match 強度を優先)
+  const seen = new Set<string>()
+  const merged: Card[] = []
+  for (const result of results) {
+    if (result.error) {
+      console.error('[searchCardsByText]', result.error)
+      continue
+    }
+    for (const c of result.data ?? []) {
+      if (seen.has(c.id)) continue
+      seen.add(c.id)
+      merged.push(c)
+    }
+  }
+
+  return merged.slice(0, limit)
 }
 
 // ─────────────────────────────────────────

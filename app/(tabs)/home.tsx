@@ -6,7 +6,8 @@ import { HomeSmallCard } from '@/components/HomeSmallCard'
 import { LaneSectionLabel } from '@/components/LaneSectionLabel'
 import { SearchBar } from '@/components/SearchBar'
 import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
-import { Card, isWantMatch, scoreWantMatch, WantedCard, WantMatchScore } from '@/lib/types' // ★ updated
+import { Card, WantedCard, WantMatchScore } from '@/lib/types'
+import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import {
   fetchEasyCards,
   fetchMyWantedCards,
@@ -137,10 +138,10 @@ export default function HomeScreen() {
     return null
   }
 
-  // ★ updated: JSX描画前に easyCards の一致情報を計算しておく
+  // ★ Step 3 commit 3: scoreWantMatchV2 (any-overlap + overlap 数重み付け)
   const easyCardsWithMatch: EasyCardWithMatch[] = easyCards.map((card) => {
     const bestMatch = myWants.reduce<WantMatchScore>((best, want) => {
-      const s = scoreWantMatch(card, want)
+      const s = scoreWantMatchV2(card, want)
       if (s === 'strong') return 'strong'
       if (s === 'medium' && best !== 'strong') return 'medium'
       if (s === 'weak' && best === 'none') return 'weak'

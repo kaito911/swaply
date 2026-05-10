@@ -1,5 +1,10 @@
 // lib/types.ts
-import { parseWantText } from './wantParser' // ★ added
+//
+// 型定義集 (関数定義は持たない)。
+// 旧 scoreWantMatch / isWantMatch / parseWantText 依存は Step 3 commit 3 atomic で
+// lib/matcher.ts (v2) と lib/wantParserMatcher.ts (v1 移設) に分離。
+// 関数を呼ぶ場合は lib/matcher.ts (新規アニメ向け、推奨) または
+// lib/wantParserMatcher.ts (legacy K-POP 専用) を直接 import すること。
 
 export type TrustBadgeLevel = 'green' | 'trial_blue' | 'blue' | 'gold_blue'
 export type CardStatus = 'active' | 'inactive' | 'reserved' | 'traded'
@@ -316,46 +321,16 @@ export interface VenueTrade {
   updated_at: string
 }
 
-export type WantMatchScore = 'strong' | 'medium' | 'weak' | 'none' // ★ added
-
-// ★ added: 正規化＋strong/medium/weak の段階的一致スコアリング
-export function scoreWantMatch(card: Card, want: WantedCard): WantMatchScore {
-  const cardText = [card.name, card.group_name, card.member_name, card.series]
-    .filter(Boolean).join(' ')
-  const wantText = [want.card_name, want.group_name, want.member_name, want.series]
-    .filter(Boolean).join(' ')
-
-  const cardParsed = parseWantText(cardText)
-  const wantParsed = parseWantText(wantText)
-
-  const groupMatch =
-    cardParsed.parsedGroupName !== null &&
-    wantParsed.parsedGroupName !== null &&
-    cardParsed.parsedGroupName === wantParsed.parsedGroupName
-
-  const memberMatch =
-    cardParsed.parsedMemberName !== null &&
-    wantParsed.parsedMemberName !== null &&
-    cardParsed.parsedMemberName === wantParsed.parsedMemberName
-
-  // ★ updated: 両者null or 完全一致のみ strong。片方nullは medium へ落とす。
-  const seriesExactMatch =
-    cardParsed.parsedSeries === wantParsed.parsedSeries
-
-  const bothSeriesNull =
-    cardParsed.parsedSeries === null && wantParsed.parsedSeries === null
-
-  if (groupMatch && memberMatch && (seriesExactMatch || bothSeriesNull)) return 'strong'
-  if (groupMatch && memberMatch) return 'medium'
-  // ★ updated: card側はDB構造化データのためconfidence判定不要。want側のみで判定。
-  if (memberMatch && wantParsed.parseConfidence >= 0.60) return 'weak'
-  return 'none'
-}
-
-// ★ updated: scoreWantMatch を内部で呼ぶ。既存呼び出し元との互換を維持。
-export function isWantMatch(card: Card, want: WantedCard): boolean {
-  return scoreWantMatch(card, want) !== 'none'
-}
+/**
+ * 求カード (want) との一致度スコア。
+ * - strong: 単独出品で完全一致 (v2) / 全 3 軸完全一致 (v1)
+ * - medium: 小規模セット (2-3 名) で含まれる (v2) / group + member 一致 (v1)
+ * - weak:   大規模セット (4 名以上) の 1 員 (v2) / member のみ一致 (v1)
+ * - none:   無関係
+ *
+ * 関数定義は lib/matcher.ts (v2、推奨) / lib/wantParserMatcher.ts (v1、legacy) に分離。
+ */
+export type WantMatchScore = 'strong' | 'medium' | 'weak' | 'none'
 
 // ─────────────────────────────────────────
 // Trustバッジ判定

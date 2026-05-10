@@ -3,7 +3,8 @@ import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { TrustBadge } from '@/components/TrustBadge'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { addWantedCard, fetchCard, fetchMyWantedCards, supabase } from '@/lib/supabase'
-import { Card, computeTrustBadge, isWantMatch, Profile, scoreWantMatch, TrustBadgeLevel, WantMatchScore } from '@/lib/types'
+import { Card, computeTrustBadge, Profile, TrustBadgeLevel, WantMatchScore } from '@/lib/types'
+import { isWantMatchV2, scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
@@ -145,10 +146,10 @@ export default function ListingDetailScreen() {
 
       if (uid != null) {
         const wants = await fetchMyWantedCards(uid)
-        setIsWantSaved(wants.some((want) => isWantMatch(fetched, want)))
+        setIsWantSaved(wants.some((want) => isWantMatchV2(fetched, want)))
 
         const best = wants.reduce<WantMatchScore>((acc, want) => {
-          const s = scoreWantMatch(fetched, want)
+          const s = scoreWantMatchV2(fetched, want)
           if (s === 'strong') return 'strong'
           if (s === 'medium' && acc !== 'strong') return 'medium'
           if (s === 'weak' && acc === 'none') return 'weak'

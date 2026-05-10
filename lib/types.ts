@@ -110,6 +110,23 @@ export interface MasterCharacter {
 }
 
 // ─────────────────────────────────────────
+// master_item_types (アイテム種別マスタ、ハイブリッド = フリー入力許容)
+// 設計: 当初は cards.item_type の CHECK enum 案だったが、
+// 「ガチャガチャ系が今熱い」「今後どんどん追加していけるように」の指摘を受けマスタ化
+// ─────────────────────────────────────────
+export interface MasterItemType {
+  id: string                         // slug PK (例: 'acrylic_stand', 'can_badge', 'gacha')
+  display_name_ja: string
+  display_name_en: string | null
+  aliases: string[]
+  category_hint: MasterCategory | null  // 主な使用カテゴリのヒント
+  sort_order: number
+  is_active: boolean                 // 廃止フラグ
+  created_at: string
+  updated_at: string
+}
+
+// ─────────────────────────────────────────
 // user_keyword_history (検索/入力履歴、master 拡張判断材料)
 // ─────────────────────────────────────────
 export interface UserKeywordHistory {

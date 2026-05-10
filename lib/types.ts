@@ -75,6 +75,14 @@ export interface Card {
   adjustment_max: number | null
   allows_mail: boolean
   allows_handoff: boolean
+  // items 拡張 (refactor_plan v1.11 章 3.9 / Step 1 commit 4)
+  // 既存データは NULL、新規出品で値を要求 (UI 層で必須化)。
+  // work_id / character_id / item_type は論理的に master_* を参照するが
+  // FK 制約は付けず、ハイブリッドマスタとしてフリー入力 fallback を許容する。
+  category: MasterCategory | null
+  work_id: string | null
+  character_id: string | null
+  item_type: string | null
   created_at: string
   updated_at: string
   owner?: Profile

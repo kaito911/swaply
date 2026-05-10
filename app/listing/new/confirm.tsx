@@ -1,20 +1,28 @@
 // app/listing/new/confirm.tsx
-// STEP5: 出品内容確認 → cards テーブルへ一括 insert（複数カード対応）
-// 資料: プロトタイプ STEP5「出品生成確認（複数出品プレビュー）」
-//   - enrichedCardsJson を受け取り、EnrichedCard[] を parse
-//   - 「N件の出品が作成されます」バナー
-//   - 各カードのプレビューリスト（シリーズ・メンバー・カード・求・調整金）
-//   - 「出品する」: enrichedCards を1回の insert で一括登録
+// Step 3 commit 6: 出品内容確認 → cards テーブルへ 1 行 insert (セット 1 出品 N=1)
 //
-// NOTE: 発送方法（allows_mail / allows_handoff）は STEP4 に存在しないため
-//       condition.tsx からは渡されない。
-//       資料 画面単位仕様書 3-2 に「郵送/手渡し可否（任意）」とある通り、
-//       入力ステップが資料上未確定のため、現時点は allows_mail=true（デフォルト）
-//       allows_handoff=false で insert する。
+// 旧版 (commit 4 まで): EnrichedCard[] (N 件) を受け取り、N 行 insert
+// 新版 (commit 6):     EnrichedListing (1 セット) を受け取り、1 行 insert
+//
+// 設計方針 (Phase 2 §6):
+//   - toInsertRow v2: characters[] / item_types[] / work_id / category 投入
+//   - legacy K-POP 列 (group_name/member_name/series) は NULL (新規出品では使わない)
+//   - name は buildSetName で master + free text を結合した表示用文字列
+//   - 「N 件のカードを出品しました」→「出品が完了しました」(N=1 化)
+//
+// NOTE: 発送方法 (allows_mail / allows_handoff) は STEP4 に存在しないため
+//       旧版と同様 allows_mail=true / allows_handoff=false で insert する。
+
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
+import {
+  getCharacterById,
+  getItemTypeById,
+  getWorkById,
+} from '@/lib/master'
 import { supabase, uploadCardImage } from '@/lib/supabase'
+import type { MasterCategory } from '@/lib/types'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useState } from 'react'
 import {
@@ -31,25 +39,27 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 // types
 // ─────────────────────────────────────────
 
-// condition.tsx から受け取るカード型
-type EnrichedCard = {
-  id: string
-  group: string
-  series: string
-  member: string
-  card: string
+/** condition.tsx から受け取る型 (re-declare、cross-route で型 export 不可のため) */
+type EnrichedListing = {
+  workId: string
+  category: MasterCategory
+  characters: string[]
+  itemTypes: string[]
   want_description: string
   allows_adjustment: boolean
   adjustment_max: number
 }
 
-// cards テーブルへの insert 行型
+/** cards テーブルへの insert 行型 (Step 2.5 配列化後) */
 type CardInsertRow = {
   owner_user_id: string
   name: string
-  group_name: string | null
-  member_name: string | null
-  series: string | null
+  // 新 schema (Step 1 + Step 2.5)
+  category: MasterCategory
+  work_id: string
+  characters: string[]
+  item_types: string[]
+  // 共通
   image_url: string | null
   image_back_url: string | null
   description: null
@@ -60,37 +70,83 @@ type CardInsertRow = {
   allows_handoff: false
   allows_adjustment: boolean
   adjustment_max: number | null
+  // legacy K-POP 列は NULL (新規出品では使わない、Phase 1.5 K-POP 統一まで保全)
+  group_name: null
+  member_name: null
+  series: null
 }
 
 // ─────────────────────────────────────────
 // helpers
 // ─────────────────────────────────────────
 
+/** master ID → display name、未ヒットなら raw text fallback */
+function characterDisplay(id: string): string {
+  return getCharacterById(id)?.display_name_ja ?? id
+}
+
+function itemTypeDisplay(id: string): string {
+  return getItemTypeById(id)?.display_name_ja ?? id
+}
+
+/**
+ * セット表示用の name 文字列を生成。
+ * 例: 「鬼滅の刃 - 炭治郎、禰豆子、善逸 (アクスタ)」
+ *     「鬼滅の刃 - 炭治郎、禰豆子、善逸 他8名 (アクスタ・缶バッジ)」
+ */
+function buildSetName(e: EnrichedListing): string {
+  const work = getWorkById(e.workId)
+  const charNames = e.characters.map(characterDisplay)
+  const typeNames = e.itemTypes.map(itemTypeDisplay)
+
+  const parts: string[] = []
+  if (work != null) parts.push(work.display_name_ja)
+
+  if (charNames.length > 0) {
+    parts.push(
+      charNames.length <= 3
+        ? charNames.join('、')
+        : `${charNames.slice(0, 3).join('、')} 他${charNames.length - 3}名`,
+    )
+  }
+
+  if (typeNames.length > 0) {
+    parts.push(`(${typeNames.join('・')})`)
+  }
+
+  return parts.join(' - ')
+}
+
 function toInsertRow(
-  c: EnrichedCard,
+  e: EnrichedListing,
   userId: string,
-  imageUri: string,
+  imageUri: string | null,
   imageBackUrl: string | null,
 ): CardInsertRow {
   return {
     owner_user_id: userId,
-    // group + member を name として使用（例: TREASURE ハルト）
-    name: [c.group, c.member].filter(Boolean).join(' '),
-    group_name: c.group !== '' ? c.group : null,
-    member_name: c.member !== '' ? c.member : null,
-    series: c.series !== '' ? c.series : null,
-    // Phase 1: imageUri はローカルURI — Supabase Storage 連携は Phase 2
-    image_url: imageUri !== '' ? imageUri : null,
+    name: buildSetName(e),
+    // 新 schema
+    category: e.category,
+    work_id: e.workId,
+    characters: e.characters,
+    item_types: e.itemTypes,
+    // 画像
+    image_url: imageUri,
     image_back_url: imageBackUrl,
+    // 共通
     description: null,
     status: 'active',
     condition: null,
-    want_description: c.want_description !== '' ? c.want_description : null,
-    // 発送方法は資料上 STEP4 に入力ステップが未確定のため暫定デフォルト
+    want_description: e.want_description !== '' ? e.want_description : null,
     allows_mail: true,
     allows_handoff: false,
-    allows_adjustment: c.allows_adjustment,
-    adjustment_max: c.allows_adjustment ? c.adjustment_max : null,
+    allows_adjustment: e.allows_adjustment,
+    adjustment_max: e.allows_adjustment ? e.adjustment_max : null,
+    // legacy NULL
+    group_name: null,
+    member_name: null,
+    series: null,
   }
 }
 
@@ -132,23 +188,29 @@ const rowStyles = StyleSheet.create({
 // ─────────────────────────────────────────
 // screen
 // ─────────────────────────────────────────
+
 export default function ListingNewConfirmScreen() {
   const { userId, loading: authLoading } = useAuth()
 
   const params = useLocalSearchParams<{
     imageUri: string
     imageBackUri: string
-    enrichedCardsJson: string
+    enrichedListingJson: string
   }>()
 
   const { imageUri, imageBackUri } = params
 
-  // useLocalSearchParams は同期的に値を返すため lazy initializer で直接 parse する
-  // enrichedCards は確認画面で編集しないため setter は不要
-  const [enrichedCards] = useState<EnrichedCard[]>(() =>
-    JSON.parse(params.enrichedCardsJson) as EnrichedCard[]
-  )
+  // useLocalSearchParams は同期的に値を返すため lazy initializer で直接 parse
+  const [enriched] = useState<EnrichedListing | null>(() => {
+    try {
+      return JSON.parse(params.enrichedListingJson) as EnrichedListing
+    } catch {
+      return null
+    }
+  })
   const [submitting, setSubmitting] = useState(false)
+
+  const work = enriched != null ? getWorkById(enriched.workId) : undefined
 
   const handleSubmit = async () => {
     if (submitting || authLoading) return
@@ -156,19 +218,19 @@ export default function ListingNewConfirmScreen() {
       Alert.alert('エラー', 'ログイン情報が取得できません')
       return
     }
-    if (enrichedCards.length === 0) return
+    if (enriched == null) {
+      Alert.alert('エラー', '出品情報を読み込めませんでした')
+      return
+    }
 
     try {
       setSubmitting(true)
 
-      // 表面をStorageにアップロード
+      // 表面を Storage にアップロード
       let resolvedImageUrl: string | null = null
       if (imageUri != null && imageUri !== '' && !imageUri.startsWith('http')) {
         try {
-          resolvedImageUrl = await uploadCardImage({
-            userId,
-            imageUri,
-          })
+          resolvedImageUrl = await uploadCardImage({ userId, imageUri })
         } catch (error) {
           console.error('[confirm] uploadCardImage failed', error)
           resolvedImageUrl = null
@@ -177,7 +239,7 @@ export default function ListingNewConfirmScreen() {
         resolvedImageUrl = imageUri !== '' ? imageUri : null
       }
 
-      // 裏面をStorageにアップロード（任意・存在する場合のみ）
+      // 裏面を Storage にアップロード(任意)
       let resolvedImageBackUrl: string | null = null
       if (imageBackUri) {
         if (!imageBackUri.startsWith('http')) {
@@ -196,23 +258,23 @@ export default function ListingNewConfirmScreen() {
         }
       }
 
-      const rows: CardInsertRow[] = enrichedCards.map((c) =>
-        toInsertRow(c, userId, resolvedImageUrl ?? '', resolvedImageBackUrl),
+      // 1 row insert (N=1 化、セット 1 出品)
+      const row = toInsertRow(
+        enriched,
+        userId,
+        resolvedImageUrl,
+        resolvedImageBackUrl,
       )
 
-      const { error } = await supabase.from('cards').insert(rows)
+      const { error } = await supabase.from('cards').insert([row])
       if (error) throw error
 
-      Alert.alert(
-        '出品完了',
-        `${enrichedCards.length}件のカードを出品しました。`,
-        [
-          {
-            text: 'OK',
-            onPress: () => router.replace('/(tabs)/mypage' as never),
-          },
-        ],
-      )
+      Alert.alert('出品完了', '出品が完了しました。', [
+        {
+          text: 'OK',
+          onPress: () => router.replace('/(tabs)/mypage' as never),
+        },
+      ])
     } catch (err) {
       console.error('[ListingNewConfirmScreen][handleSubmit]', err)
       const message =
@@ -227,6 +289,22 @@ export default function ListingNewConfirmScreen() {
       setSubmitting(false)
     }
   }
+
+  // enriched が読み込めなかった場合のフォールバック表示
+  if (enriched == null) {
+    return (
+      <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
+        <View style={styles.errorState}>
+          <Text style={styles.errorStateText}>
+            出品情報を読み込めませんでした。前の画面に戻ってやり直してください。
+          </Text>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  const charNames = enriched.characters.map(characterDisplay)
+  const typeNames = enriched.itemTypes.map(itemTypeDisplay)
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
@@ -245,47 +323,48 @@ export default function ListingNewConfirmScreen() {
           <View style={styles.previewPlaceholder} />
         )}
 
-        {/* 件数バナー */}
-        <View style={styles.countBanner}>
-          <Text style={styles.countBannerText}>
-            <Text style={styles.countBannerBold}>{enrichedCards.length}件</Text>
-            {' '}の出品が作成されます
-          </Text>
-        </View>
-
-        {/* カード別プレビュー */}
-        {enrichedCards.map((c, i) => (
-          <View key={c.id} style={styles.cardSection}>
-            {/* カードヘッダー */}
-            <View style={styles.cardHeader}>
-              <View style={styles.cardHeaderBadge}>
-                <Text style={styles.cardHeaderBadgeText}>{i + 1}</Text>
-              </View>
-              <Text style={styles.cardHeaderTitle} numberOfLines={1}>
-                {[c.group, c.member, c.series].filter(Boolean).join(' · ') || '（未入力）'}
-              </Text>
-            </View>
-
-            {/* カード詳細 */}
-            <View style={styles.cardBody}>
-              <Row label="グループ" value={c.group || '—'} />
-              <Row label="メンバー" value={c.member || '—'} />
-              <Row label="シリーズ" value={c.series || '—'} />
-              <Row label="求めるカード" value={c.want_description || '—'} />
-              <Row label="調整金" value={c.allows_adjustment ? 'あり' : 'なし'} />
-              {c.allows_adjustment && (
-                <Row
-                  label="調整金目安"
-                  value={
-                    c.adjustment_max > 0
-                      ? `¥${c.adjustment_max.toLocaleString()} まで`
-                      : '¥0'
-                  }
-                />
-              )}
-            </View>
+        {/* セット内容 */}
+        <View style={styles.cardSection}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardHeaderTitle} numberOfLines={2}>
+              {buildSetName(enriched)}
+            </Text>
           </View>
-        ))}
+
+          <View style={styles.cardBody}>
+            <Row label="作品" value={work?.display_name_ja ?? '(未指定)'} />
+            <Row
+              label="キャラクター"
+              value={
+                charNames.length > 0 ? charNames.join('、') : '(未指定)'
+              }
+            />
+            <Row
+              label="アイテム種別"
+              value={
+                typeNames.length > 0 ? typeNames.join(' / ') : '(未指定)'
+              }
+            />
+            <Row
+              label="求めるカード"
+              value={enriched.want_description || '—'}
+            />
+            <Row
+              label="調整金"
+              value={enriched.allows_adjustment ? 'あり' : 'なし'}
+            />
+            {enriched.allows_adjustment && (
+              <Row
+                label="調整金目安"
+                value={
+                  enriched.adjustment_max > 0
+                    ? `¥${enriched.adjustment_max.toLocaleString()} まで`
+                    : '¥0'
+                }
+              />
+            )}
+          </View>
+        </View>
       </ScrollView>
 
       {/* Fixed CTA */}
@@ -294,7 +373,7 @@ export default function ListingNewConfirmScreen() {
           label="出品する"
           onPress={handleSubmit}
           loading={submitting}
-          disabled={submitting || authLoading || userId == null || enrichedCards.length === 0}
+          disabled={submitting || authLoading || userId == null}
           size="lg"
         />
       </View>
@@ -308,16 +387,9 @@ export default function ListingNewConfirmScreen() {
 const PREVIEW_HEIGHT = 200
 
 const styles = StyleSheet.create({
-  outerWrap: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: spacing.xl,
-  },
+  outerWrap: { flex: 1, backgroundColor: colors.background },
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: spacing.xl },
   preview: {
     width: '100%',
     height: PREVIEW_HEIGHT,
@@ -328,29 +400,10 @@ const styles = StyleSheet.create({
     height: PREVIEW_HEIGHT,
     backgroundColor: colors.backgroundMuted,
   },
-  // 件数バナー
-  countBanner: {
-    marginHorizontal: spacing.base,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-    backgroundColor: '#EEF2FF',
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  countBannerText: {
-    fontSize: 13,
-    color: '#3730A3',
-    lineHeight: 19,
-  },
-  countBannerBold: {
-    fontWeight: fontWeight.bold,
-  },
-  // カード別プレビューブロック
+  // セット内容ブロック
   cardSection: {
     marginHorizontal: spacing.base,
+    marginTop: spacing.md,
     marginBottom: spacing.md,
     backgroundColor: colors.backgroundCard,
     borderRadius: radius.md,
@@ -359,39 +412,35 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     backgroundColor: colors.backgroundMuted,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  cardHeaderBadge: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  cardHeaderBadgeText: {
-    fontSize: 10,
-    fontWeight: fontWeight.bold,
-    color: colors.textInverse,
-  },
   cardHeaderTitle: {
-    flex: 1,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
+    lineHeight: 20,
   },
   cardBody: {
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xs,
     paddingBottom: spacing.xs,
+  },
+  // error state
+  errorState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  errorStateText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   // CTA
   ctaWrap: {

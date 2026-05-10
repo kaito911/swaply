@@ -1,5 +1,11 @@
 // app/listing/new/cardinfo.tsx
-// STEP3: カード情報入力
+//
+// ⚠️ DEPRECATED 2026-05-XX (Step 3 commit 4): K-POP 個別 N 出品 flow 用。
+// β1 アニメ流れ (work → characters → items → condition → confirm) では使用しない。
+// commit 5 で image.tsx の routing が /work に切替後、本ファイルは route から外れる。
+// Phase 1.5 で K-POP 復活時に個別 N 出品需要が出れば再利用余地あり、それまで保持。
+//
+// STEP3 (旧): カード情報入力
 // 資料: プロトタイプ STEP3「カード情報入力（カード単位）」
 //   - deleted=false のカードごとに シリーズ・メンバー・カード を入力（全必須）
 //   - canNext = activeCards.every(c => c.series && c.member && c.card)

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { colors } from '@/constants/theme'
 import { AuthProvider, useAuthContext } from '@/providers/AuthProvider'
 import { BadgeProvider } from '@/providers/BadgeProvider'
+import { MasterCacheProvider } from '@/providers/MasterCacheProvider'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import OnboardingScreen, { ONBOARDING_DONE_KEY } from './onboarding'
@@ -217,7 +218,9 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <BadgeProvider>
-        <RootNavigator />
+        <MasterCacheProvider>
+          <RootNavigator />
+        </MasterCacheProvider>
       </BadgeProvider>
     </AuthProvider>
   )

@@ -75,14 +75,16 @@ export interface Card {
   adjustment_max: number | null
   allows_mail: boolean
   allows_handoff: boolean
-  // items 拡張 (refactor_plan v1.11 章 3.9 / Step 1 commit 4)
-  // 既存データは NULL、新規出品で値を要求 (UI 層で必須化)。
-  // work_id / character_id / item_type は論理的に master_* を参照するが
+  // items 拡張 (refactor_plan v1.11 章 3.9 / Step 2.5 commit 1 c601667 で配列化)
+  // 既存データは空配列、新規出品で値を要求 (UI 層で最低 1 個必須)。
+  // work_id / characters[] / item_types[] は論理的に master_* を参照するが
   // FK 制約は付けず、ハイブリッドマスタとしてフリー入力 fallback を許容する。
+  // characters[] / item_types[] はセット出品 (1 行 = N キャラ) と単独出品 (1 行 = 1 キャラ)
+  // を統一表現するため配列。N=1 もセット形式の最小ケースとして扱う。
   category: MasterCategory | null
   work_id: string | null
-  character_id: string | null
-  item_type: string | null
+  characters: string[]
+  item_types: string[]
   created_at: string
   updated_at: string
   owner?: Profile

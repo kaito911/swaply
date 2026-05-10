@@ -1,13 +1,19 @@
 // app/listing/new/condition.tsx
-// STEP4: 交換条件入力（共通条件）
-// 資料: プロトタイプ STEP4「共通条件（求カード・調整金）」
-//   - aiCardsJson を受け取り、activeCards を初期化
-//   - 求カード: フリーテキスト必須（全カード共通）
-//   - 調整金: 初期折りたたみ・任意・0〜¥1,000（全カード共通）
-//   - 発送方法はこのSTEPに含まれない（プロトタイプ仕様）
-//   - 出口: enrichedCardsJson（EnrichedCard[] を JSON化）を confirm.tsx へ渡す
+// Step 3 commit 7: セット 1 出品の条件入力 (求カード + 調整金)
+//
+// 旧版 (commit 4 まで): aiCardsJson (N 件) を受け取り、enrichedCardsJson (N 件) を出力
+// 新版 (commit 7): charactersJson + itemTypesJson (1 セット) を受け取り、enrichedListingJson を出力
+//
+// 設計方針 (Phase 2 §5):
+//   - セット 1 出品 = 1 want / 1 adjustment 設定 (1 セット全体に対する設定)
+//   - 「N 件すべて」バナー削除 (旧 N 件分割パターン用、新フローでは不要)
+//   - サマリーは 1 セット分の表示 (work + characters + item_types)
+//   - 求カード必須、調整金は任意・折りたたみ・0〜¥1,000
+
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
+import { getCharacterById, getItemTypeById, getWorkById } from '@/lib/master'
+import type { MasterCategory } from '@/lib/types'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useState } from 'react'
 import {
@@ -26,56 +32,74 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 // types
 // ─────────────────────────────────────────
 
-// cardinfo.tsx から受け取るカード型
-type AiCard = {
-  id: string
-  group: string
-  series: string
-  member: string
-  card: string
-  deleted: boolean
-  memberCandidates: string[]
-  seriesCandidates: string[]
-  cardCandidates: string[]
-}
-
-// confirm.tsx へ渡すカード型（条件フィールドを各カードに保持）
-type EnrichedCard = {
-  id: string
-  group: string
-  series: string
-  member: string
-  card: string
+/**
+ * セット 1 出品の構造化データ。confirm.tsx に渡す中間型。
+ *
+ * characters / itemTypes には master ID と raw text が混在し得る (ハイブリッドマスタ)。
+ * 表示時は master cache lookup → 未ヒットなら raw text を直接表示。
+ */
+export type EnrichedListing = {
+  workId: string
+  category: MasterCategory
+  characters: string[]
+  itemTypes: string[]
   want_description: string
   allows_adjustment: boolean
   adjustment_max: number
 }
 
 // ─────────────────────────────────────────
+// helpers
+// ─────────────────────────────────────────
+
+/** master ID → display name、未ヒットなら raw text */
+function characterDisplay(id: string): string {
+  return getCharacterById(id)?.display_name_ja ?? id
+}
+
+function itemTypeDisplay(id: string): string {
+  return getItemTypeById(id)?.display_name_ja ?? id
+}
+
+// ─────────────────────────────────────────
 // screen
 // ─────────────────────────────────────────
+
 export default function ListingNewConditionScreen() {
   const params = useLocalSearchParams<{
     imageUri: string
-    imageBackUri: string
-    aiCardsJson: string
+    imageBackUri?: string
+    workId: string
+    category: string
+    charactersJson: string
+    itemTypesJson: string
   }>()
-  const { imageUri, imageBackUri } = params
 
-  // useLocalSearchParams は同期的に値を返すため lazy initializer で直接 parse する
-  // activeCards は STEP4 内で編集しないため setter は不要
-  const [activeCards] = useState<AiCard[]>(() => {
-    const all = JSON.parse(params.aiCardsJson) as AiCard[]
-    return all.filter((c) => !c.deleted)
+  // 受信データを lazy parse (param は同期取得、setter 不要)
+  const [characters] = useState<string[]>(() => {
+    try {
+      return JSON.parse(params.charactersJson) as string[]
+    } catch {
+      return []
+    }
+  })
+  const [itemTypes] = useState<string[]>(() => {
+    try {
+      return JSON.parse(params.itemTypesJson) as string[]
+    } catch {
+      return []
+    }
   })
 
-  // 求カード（必須・全カード共通）
+  // 求カード (必須・セット 1 つ分)
   const [want, setWant] = useState('')
-  // 調整金（任意・初期折りたたみ・全カード共通）
+  // 調整金 (任意・折りたたみ)
   const [showDiff, setShowDiff] = useState(false)
   const [diffAmt, setDiffAmt] = useState('0')
 
-  const canProceed = want.trim().length > 0 && activeCards.length > 0
+  const work = getWorkById(params.workId)
+
+  const canProceed = want.trim().length > 0
 
   const handleDiffChange = (v: string) => {
     const digits = v.replace(/[^0-9]/g, '')
@@ -90,23 +114,21 @@ export default function ListingNewConditionScreen() {
 
   const handleNext = () => {
     if (!canProceed) return
-    // 共通条件を各カードに適用して EnrichedCard[] を生成
-    const enriched: EnrichedCard[] = activeCards.map((c) => ({
-      id: c.id,
-      group: c.group,
-      series: c.series,
-      member: c.member,
-      card: c.card,
+    const enriched: EnrichedListing = {
+      workId: params.workId,
+      category: params.category as MasterCategory,
+      characters,
+      itemTypes,
       want_description: want.trim(),
       allows_adjustment: showDiff,
       adjustment_max: parsedDiffAmt,
-    }))
+    }
     router.push({
       pathname: '/listing/new/confirm' as never,
       params: {
-        imageUri,
-        imageBackUri,
-        enrichedCardsJson: JSON.stringify(enriched),
+        imageUri: params.imageUri ?? '',
+        imageBackUri: params.imageBackUri ?? '',
+        enrichedListingJson: JSON.stringify(enriched),
       },
     })
   }
@@ -123,62 +145,53 @@ export default function ListingNewConditionScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* ── 複数カード共通適用バナー（N>1のみ表示）── */}
-          {activeCards.length > 1 && (
-            <View style={styles.commonBanner}>
-              <Text style={styles.commonBannerText}>
-                ここで設定した条件は{' '}
-                <Text style={styles.commonBannerBold}>
-                  {activeCards.length}件すべての出品
-                </Text>
-                {' '}に共通で適用されます。
+          {/* セットサマリー */}
+          <View style={styles.setSummary}>
+            <Text style={styles.summaryLabel}>出品内容</Text>
+            <Text style={styles.summaryWork}>
+              {work?.display_name_ja ?? '(作品未指定)'}
+            </Text>
+            <Text style={styles.summaryDetail}>
+              {characters.length > 0
+                ? characters.map(characterDisplay).join('、')
+                : '(キャラ未指定)'}
+            </Text>
+            {itemTypes.length > 0 && (
+              <Text style={styles.summaryDetailSub}>
+                {itemTypes.map(itemTypeDisplay).join(' / ')}
               </Text>
-            </View>
-          )}
-
-          {/* ── 対象カードサマリー ── */}
-          <View style={styles.cardSummaryList}>
-            {activeCards.map((c, i) => (
-              <View key={c.id} style={styles.cardSummaryRow}>
-                <View style={styles.cardSummaryBadge}>
-                  <Text style={styles.cardSummaryBadgeText}>{i + 1}</Text>
-                </View>
-                <Text style={styles.cardSummaryLabel} numberOfLines={1}>
-                  {[c.group, c.member, c.series].filter(Boolean).join(' · ') || '（未入力）'}
-                </Text>
-              </View>
-            ))}
+            )}
           </View>
 
-          {/* ── 求（欲しいカード）必須 ── */}
+          {/* ── 求(欲しいカード)必須 ── */}
           <Text style={styles.sectionLabel}>
-            求（欲しいカード）<Text style={styles.required}>*</Text>
+            求(欲しいカード)<Text style={styles.required}> *</Text>
           </Text>
           <Text style={styles.sectionHint}>
-            カード単位で指定。メンバー・シリーズだけでも可。
+            このセットと交換したいカード/アイテムを記入してください。
           </Text>
           <TextInput
             style={[styles.input, styles.inputMulti]}
-            placeholder="例：ヨシ solo ver."
+            placeholder="例: 鬼滅・甘露寺のアクスタ"
             value={want}
             onChangeText={setWant}
             multiline
             textAlignVertical="top"
           />
 
-          {/* ── 調整金（任意・折りたたみ）── */}
+          {/* ── 調整金(任意・折りたたみ)── */}
           <Pressable
             style={styles.diffToggleBtn}
             onPress={() => setShowDiff((v) => !v)}
           >
             <Text style={styles.diffToggleBtnText}>
-              {showDiff ? '▼ 調整金を非表示' : '＋ 調整金を許可する（任意）'}
+              {showDiff ? '▼ 調整金を非表示' : '＋ 調整金を許可する(任意)'}
             </Text>
           </Pressable>
 
           {showDiff && (
             <View style={styles.diffWrap}>
-              <Text style={styles.diffLabel}>調整金の目安（0〜¥1,000）</Text>
+              <Text style={styles.diffLabel}>調整金の目安(0〜¥1,000)</Text>
               <TextInput
                 style={styles.diffInput}
                 value={diffAmt}
@@ -187,13 +200,12 @@ export default function ListingNewConditionScreen() {
                 textAlign="center"
               />
               <Text style={styles.diffNote}>
-                出品時点で確定不要。提案時に変更できます。上限¥1,000（売買化防止）。
+                出品時点で確定不要。提案時に変更できます。上限¥1,000(売買化防止)。
               </Text>
             </View>
           )}
         </ScrollView>
 
-        {/* Fixed CTA */}
         <View style={styles.ctaWrap}>
           <PrimaryCTA
             label="次へ"
@@ -211,76 +223,44 @@ export default function ListingNewConditionScreen() {
 // styles
 // ─────────────────────────────────────────
 const styles = StyleSheet.create({
-  outerWrap: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  kav: {
-    flex: 1,
-  },
-  scroll: {
-    flex: 1,
-  },
+  outerWrap: { flex: 1, backgroundColor: colors.background },
+  kav: { flex: 1 },
+  scroll: { flex: 1 },
   scrollContent: {
     paddingHorizontal: spacing.base,
     paddingTop: spacing.lg,
     paddingBottom: spacing.xl,
   },
-  // 複数カード共通適用バナー
-  commonBanner: {
-    backgroundColor: '#EEF2FF',
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  commonBannerText: {
-    fontSize: 12,
-    color: '#3730A3',
-    lineHeight: 18,
-  },
-  commonBannerBold: {
-    fontWeight: fontWeight.bold,
-  },
-  // カードサマリー
-  cardSummaryList: {
+  // セットサマリー (1 セット分の表示、旧 N 件バナー廃止)
+  setSummary: {
     backgroundColor: colors.backgroundCard,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    overflow: 'hidden',
+    padding: spacing.md,
     marginBottom: spacing.lg,
   },
-  cardSummaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: spacing.sm,
-  },
-  cardSummaryBadge: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  cardSummaryBadgeText: {
-    fontSize: 10,
-    fontWeight: fontWeight.bold,
-    color: colors.textInverse,
-  },
-  cardSummaryLabel: {
-    flex: 1,
-    fontSize: 13,
+  summaryLabel: {
+    fontSize: 11,
     fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  summaryWork: {
+    fontSize: 16,
+    fontWeight: fontWeight.bold,
     color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  summaryDetail: {
+    fontSize: 13,
+    color: colors.textPrimary,
+    lineHeight: 19,
+  },
+  summaryDetailSub: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 4,
   },
   // section
   sectionLabel: {
@@ -289,9 +269,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: spacing.xs,
   },
-  required: {
-    color: colors.error,
-  },
+  required: { color: colors.error },
   sectionHint: {
     fontSize: 12,
     color: colors.textSecondary,
@@ -308,10 +286,8 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     backgroundColor: colors.backgroundCard,
   },
-  inputMulti: {
-    minHeight: 88,
-  },
-  // 調整金トグルボタン
+  inputMulti: { minHeight: 88 },
+  // 調整金トグル
   diffToggleBtn: {
     marginTop: spacing.lg,
     borderWidth: 1,
@@ -326,7 +302,6 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     color: colors.textSecondary,
   },
-  // 調整金展開エリア
   diffWrap: {
     marginTop: spacing.sm,
     backgroundColor: colors.backgroundCard,
@@ -357,7 +332,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 17,
   },
-  // CTA
   ctaWrap: {
     paddingHorizontal: spacing.base,
     paddingTop: spacing.sm,

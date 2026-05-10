@@ -81,8 +81,9 @@ export default function ListingNewImageScreen() {
 
   const handleNext = () => {
     if (frontUri == null) return
+    // Step 3 commit 5: 旧 cardinfo (K-POP 個別 N 出品) → 新 work (アニメ セット出品 3-step) に切替
     router.push({
-      pathname: '/listing/new/cardinfo' as never,
+      pathname: '/listing/new/work' as never,
       params: {
         imageUri: frontUri,
         imageBackUri: backUri,

@@ -1,5 +1,11 @@
 // app/listing/new/select.tsx
-// STEP1: カードを選択
+//
+// ⚠️ DEPRECATED 2026-05-XX (Step 3 commit 5): K-POP 個別 N 出品 flow (1 photo → N cards 行) 用。
+// β1 アニメ flow (1 photo → 1 set 行) では使用しない。
+// commit 5 で image.tsx の routing が /work 直行に変更されたため、本ファイルは route から
+// アクセス不可 (dead code 化)。Phase 1.5 で K-POP 復活時に AI bbox 認識需要が出れば再利用余地。
+//
+// STEP1 (旧): カードを選択
 // 資料: プロトタイプ STEP1「カード選択（写真上でタップ ①②③）」
 //   - 写真を全面表示し、AI検出bbox枠をタップして選択/解除
 //   - テキストリスト選択は禁止

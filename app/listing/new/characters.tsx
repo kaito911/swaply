@@ -18,7 +18,7 @@ import { MultiSelectAutocomplete } from '@/components/MultiSelectAutocomplete'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
 import { getCharacterSuggestions, recordListingKeyword } from '@/lib/master'
-import type { MasterCategory, MasterCharacter } from '@/lib/types'
+import type { MasterCharacter } from '@/lib/types'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useState } from 'react'
 import {

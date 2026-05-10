@@ -1,5 +1,12 @@
 // app/listing/new/ai.tsx
-// STEP2: AI確認・修正
+//
+// ⚠️ DEPRECATED 2026-05-XX (Step 3 commit 5): TREASURE 専用 mock の AI 検出フロー。
+// β1 アニメ flow ではマスタベースの手動 multi-select に置き換え (work/characters/items)。
+// commit 5 で image.tsx の routing が /work 直行に変更されたため、本ファイルは route から
+// アクセス不可 (dead code 化)。Phase 1.5 で K-POP 復活 + アニメ AI 認識需要が出れば
+// 再利用余地、それまで保持。
+//
+// STEP2 (旧): AI確認・修正
 // 資料: プロトタイプ STEP2「AI 検出 → 確認・修正」
 //   - AI検出結果一覧表示
 //   - 各カードに 修正/削除/戻す

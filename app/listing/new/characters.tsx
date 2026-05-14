@@ -15,6 +15,7 @@
 import { Ionicons } from '@expo/vector-icons'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { MultiSelectAutocomplete } from '@/components/MultiSelectAutocomplete'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
 import { getCharacterSuggestions, recordListingKeyword } from '@/lib/master'
@@ -82,6 +83,7 @@ export default function ListingNewCharactersScreen() {
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
+      <ScreenHeader title="出品" subtitle="キャラ 3/5" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}

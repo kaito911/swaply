@@ -11,6 +11,7 @@
 //   - 求カード必須、調整金は任意・折りたたみ・0〜¥1,000
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { getCharacterById, getItemTypeById, getWorkById } from '@/lib/master'
 import type { MasterCategory } from '@/lib/types'
@@ -135,6 +136,7 @@ export default function ListingNewConditionScreen() {
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
+      <ScreenHeader title="出品" subtitle="条件 5/5" />
       <KeyboardAvoidingView
         style={styles.kav}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

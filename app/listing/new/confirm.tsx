@@ -14,6 +14,7 @@
 //       旧版と同様 allows_mail=true / allows_handoff=false で insert する。
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -294,6 +295,7 @@ export default function ListingNewConfirmScreen() {
   if (enriched == null) {
     return (
       <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
+        <ScreenHeader title="出品" subtitle="確認" />
         <View style={styles.errorState}>
           <Text style={styles.errorStateText}>
             出品情報を読み込めませんでした。前の画面に戻ってやり直してください。
@@ -308,6 +310,7 @@ export default function ListingNewConfirmScreen() {
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
+      <ScreenHeader title="出品" subtitle="確認" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}

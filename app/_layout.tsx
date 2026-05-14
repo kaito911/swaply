@@ -84,12 +84,8 @@ function RootNavigator() {
         <Stack.Screen
           name="listing/new"
           options={{
-            headerShown: true,
-            title: '出品する',
+            headerShown: false,
             presentation: 'modal',
-            headerStyle: { backgroundColor: colors.background },
-            headerTintColor: colors.textPrimary,
-            headerShadowVisible: false,
           }}
         />
 

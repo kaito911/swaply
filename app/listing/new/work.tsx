@@ -13,6 +13,7 @@
 //   imageUri, imageBackUri, workId, category
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { getWorkSuggestions } from '@/lib/master'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -58,6 +59,7 @@ export default function ListingNewWorkScreen() {
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
+      <ScreenHeader title="出品" subtitle="作品 2/5" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}

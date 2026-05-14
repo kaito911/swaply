@@ -2,6 +2,7 @@
 // Phase 1 listing UX: select front + back images → navigate to /listing/new/cardinfo
 // 裏面は任意（成立判断のため推奨）。表面のみで「次へ」可能。
 import { PrimaryCTA } from '@/components/PrimaryCTA'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import * as ImagePicker from 'expo-image-picker'
 import { router } from 'expo-router'
@@ -91,8 +92,31 @@ export default function ListingNewImageScreen() {
     })
   }
 
+  const handleCancel = () => {
+    const hasContent = frontUri != null || backUri != null
+    if (!hasContent) {
+      if (router.canGoBack()) router.back()
+      return
+    }
+    Alert.alert(
+      '出品をキャンセルしますか?',
+      '入力した内容は破棄されます。',
+      [
+        { text: 'やめる', style: 'cancel' },
+        {
+          text: 'キャンセル',
+          style: 'destructive',
+          onPress: () => {
+            if (router.canGoBack()) router.back()
+          },
+        },
+      ],
+    )
+  }
+
   return (
     <SafeAreaView style={styles.wrap} edges={['top', 'bottom']}>
+      <ScreenHeader title="出品" subtitle="写真 1/5" onBack={handleCancel} />
       {/* Slot tabs */}
       <View style={styles.tabRow}>
         <Pressable

@@ -1,10 +1,11 @@
 // app/(tabs)/search.tsx
 //
 // 検索画面 (M-search)。2 タブ構成:
-//   1. 「メンバーで探す」: 3 段検索 (メンバー必須 → グループ任意 → シリーズ任意)
-//   2. 「キーワードで探す」: フリーテキスト 4 軸 OR (既存ロジック流用)
+//   1. 「キャラ・アイテムを探す」(default): フリーテキスト、master_characters/item_types + 配列 + legacy fallback
+//   2. 「グループ・メンバーで探す」: 3 段検索 (K-POP 専用、メンバー → グループ → シリーズ)
 //
 // タブ切替時は各タブの状態を保持する (i 案、UX 良)。
+// 鬼滅・コナンなどのキャラは「キャラ・アイテムを探す」タブを使う前提。
 
 import { MemberMaster } from '@/constants/members'
 import {
@@ -37,26 +38,26 @@ type SearchTab = 'member' | 'text'
 export default function SearchScreen() {
   const { user } = useAuthContext()
 
-  const [tab, setTab] = useState<SearchTab>('member')
+  const [tab, setTab] = useState<SearchTab>('text')
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* タブバー */}
       <View style={styles.tabBar}>
         <Pressable
-          onPress={() => setTab('member')}
-          style={[styles.tab, tab === 'member' && styles.tabActive]}
-        >
-          <Text style={[styles.tabLabel, tab === 'member' && styles.tabLabelActive]}>
-            メンバーで探す
-          </Text>
-        </Pressable>
-        <Pressable
           onPress={() => setTab('text')}
           style={[styles.tab, tab === 'text' && styles.tabActive]}
         >
           <Text style={[styles.tabLabel, tab === 'text' && styles.tabLabelActive]}>
-            キーワードで探す
+            キャラ・アイテムを探す
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setTab('member')}
+          style={[styles.tab, tab === 'member' && styles.tabActive]}
+        >
+          <Text style={[styles.tabLabel, tab === 'member' && styles.tabLabelActive]}>
+            グループ・メンバーで探す
           </Text>
         </Pressable>
       </View>
@@ -376,7 +377,7 @@ function TextSearchPane({ currentUserId }: { currentUserId: string | null }) {
           <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
           <TextInput
             style={styles.input}
-            placeholder="カード名、グループ、メンバーで検索"
+            placeholder="キャラ・アイテム名で検索 (例: 炭治郎、アクスタ)"
             placeholderTextColor={colors.textTertiary}
             value={query}
             onChangeText={handleSearch}
@@ -395,7 +396,7 @@ function TextSearchPane({ currentUserId }: { currentUserId: string | null }) {
         currentUserId={currentUserId}
         emptyHint={
           query.trim() === ''
-            ? 'カード名・グループ・メンバーで検索'
+            ? 'キャラ・アイテム・グループで検索'
             : '見つかりませんでした'
         }
       />

@@ -33,7 +33,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { useBadge } from '@/providers/BadgeProvider'
-import { TabHeader } from '@/components/TabHeader'
 import { TrustBadge } from '@/components/TrustBadge'
 
 // ─────────────────────────────────────────
@@ -339,7 +338,6 @@ export default function MyPageScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <TabHeader title="マイページ" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}

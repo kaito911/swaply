@@ -1,4 +1,3 @@
-import { TabHeader } from '@/components/TabHeader'
 import { TradeStats } from '@/components/TradeStats'
 import { TrustBadge } from '@/components/TrustBadge'
 import { colors } from '@/constants/theme'
@@ -571,8 +570,10 @@ export default function ProposeScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <TabHeader title="提案 / 取引" />
       <View style={styles.container}>
+        <View style={styles.screenHeader}>
+          <Text style={styles.screenTitle}>提案 / 取引</Text>
+        </View>
 
         <View style={styles.tabs}>
           <Pressable

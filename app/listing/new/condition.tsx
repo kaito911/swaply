@@ -163,9 +163,9 @@ export default function ListingNewConditionScreen() {
             )}
           </View>
 
-          {/* ── 求(欲しいカード)必須 ── */}
+          {/* ── 求(ほしいアイテム)必須 ── */}
           <Text style={styles.sectionLabel}>
-            求(欲しいカード)<Text style={styles.required}> *</Text>
+            求(ほしいアイテム)<Text style={styles.required}> *</Text>
           </Text>
           <Text style={styles.sectionHint}>
             このセットと交換したいカード/アイテムを記入してください。

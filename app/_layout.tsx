@@ -115,14 +115,7 @@ function RootNavigator() {
 
         <Stack.Screen
           name="offer/[offerId]"
-          options={{
-            headerShown: true,
-            title: '提案内容',
-            headerStyle: { backgroundColor: colors.background },
-            headerTintColor: colors.textPrimary,
-            headerShadowVisible: false,
-            headerBackButtonDisplayMode: 'minimal',
-          }}
+          options={{ headerShown: false }}
         />
 
         <Stack.Screen

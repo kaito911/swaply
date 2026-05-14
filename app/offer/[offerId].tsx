@@ -1,8 +1,9 @@
 // app/offer/[offerId].tsx
 // 提案詳細画面（届いた提案 / 送信した提案 共通）
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { TradeStats } from '@/components/TradeStats'
 import { TrustBadge } from '@/components/TrustBadge'
-import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { colors, radius, spacing } from '@/constants/theme'
 import { acceptOffer, declineOffer, fetchOfferById } from '@/lib/supabase'
 import {
   computeTrustBadge,
@@ -11,7 +12,6 @@ import {
   type Profile,
 } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
-import { Ionicons } from '@expo/vector-icons'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useState } from 'react'
 import {
@@ -26,63 +26,14 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-// 画面内 custom header (Stack ヘッダーは _layout.tsx で headerShown:false 設定済)
-function ScreenHeader({ title }: { title: string }) {
-  const handleBack = useCallback(() => {
-    if (router.canGoBack()) {
-      router.back()
-    } else {
-      router.replace('/(tabs)/propose' as never)
-    }
-  }, [])
-
-  return (
-    <View style={headerStyles.wrap}>
-      <Pressable
-        onPress={handleBack}
-        hitSlop={12}
-        style={({ pressed }) => [
-          headerStyles.backBtn,
-          pressed && headerStyles.backBtnPressed,
-        ]}
-      >
-        <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-      </Pressable>
-      <Text style={headerStyles.title}>{title}</Text>
-      <View style={headerStyles.backBtn} />
-    </View>
-  )
+// 戻り先 fallback (canGoBack=false のとき提案タブに replace)
+function backToProposeFallback() {
+  if (router.canGoBack()) {
+    router.back()
+  } else {
+    router.replace('/(tabs)/propose' as never)
+  }
 }
-
-const headerStyles = StyleSheet.create({
-  wrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.full,
-  },
-  backBtnPressed: {
-    backgroundColor: colors.backgroundMuted,
-  },
-  title: {
-    flex: 1,
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-    textAlign: 'center',
-  },
-})
 
 type SimpleProfileLike = {
   display_name?: string | null
@@ -226,7 +177,7 @@ export default function OfferDetailScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScreenHeader title="提案内容" />
+        <ScreenHeader title="提案内容" onBack={backToProposeFallback} />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -238,7 +189,7 @@ export default function OfferDetailScreen() {
   if (error != null || offer == null) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScreenHeader title="提案内容" />
+        <ScreenHeader title="提案内容" onBack={backToProposeFallback} />
         <View style={styles.center}>
           <Text style={styles.errorTitle}>{error ?? '提案が見つかりません'}</Text>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
@@ -266,7 +217,7 @@ export default function OfferDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <ScreenHeader title="提案内容" />
+      <ScreenHeader title="提案内容" onBack={backToProposeFallback} />
       <ScrollView contentContainerStyle={styles.content}>
         {/* ステータス */}
         <View style={styles.statusRow}>

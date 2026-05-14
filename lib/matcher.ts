@@ -79,3 +79,42 @@ export function scoreWantMatchV2(card: Card, want: WantedCard): WantMatchScore {
 export function isWantMatchV2(card: Card, want: WantedCard): boolean {
   return scoreWantMatchV2(card, want) !== 'none'
 }
+
+// ─────────────────────────────────────────
+// 検索画面用 score (Phase 0.5b)
+// ─────────────────────────────────────────
+
+export type SearchMatchScore = 'strong' | 'medium' | 'weak' | 'none'
+
+/**
+ * 検索画面 (Phase 0.5b) でチップ絞り込み結果の表示順を決める score 関数。
+ *
+ * 前提:
+ *   - selectedCharacterIds / selectedItemTypeIds の overlap は DB query 側で担保済 (.overlaps())
+ *   - 本関数はあくまでクライアント側 sort 用 (strong > medium > weak)
+ *   - matcher v2 と同じ思想: 単独出品優先 → 小規模セット → 大規模セット
+ *
+ * legacy (characters[] 空) の扱い:
+ *   - チップ絞り込み経路では DB の .overlaps('characters', [...]) で hit しないため
+ *     本関数まで届かない = 実質 dead code
+ *   - text fallback 経路はチップ 0 なので絞り込みなし = 'none' で早期 return
+ *   - 防御的設計として characters[] 空時は 'weak' を返す (将来 fallback で呼ばれても安全)
+ */
+export function scoreSearchMatch(
+  card: Card,
+  selectedCharacterIds: string[],
+  selectedItemTypeIds: string[],
+): SearchMatchScore {
+  // 絞り込みなし → sort 不要
+  if (selectedCharacterIds.length === 0 && selectedItemTypeIds.length === 0) {
+    return 'none'
+  }
+
+  // legacy (characters[] 空) — 防御的に weak、通常 DB query で hit せず到達しない
+  if (card.characters.length === 0) return 'weak'
+
+  const total = card.characters.length
+  if (total === 1) return 'strong'
+  if (total <= 3) return 'medium'
+  return 'weak'
+}

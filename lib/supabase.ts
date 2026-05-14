@@ -900,38 +900,71 @@ export async function updateProfile(params: {
 // ─────────────────────────────────────────
 
 /**
- * テキスト検索 (Step 3 commit 3 で配列対応 + legacy fallback merge に改修)。
+ * 検索 cards 取得 (Phase 0.5b)。チップとフリーテキストの組み合わせで挙動が分岐。
  *
- * 検索ロジック:
- *   1. 入力テキストを master_characters / master_item_types で fuzzy 解決 (sync, cache 前提)
- *   2. 並列 query:
- *      (a) characters @> matched_char_ids (overlap、master 解決時のみ)
- *      (b) item_types @> matched_item_type_ids (overlap、master 解決時のみ)
- *      (c) name + legacy K-POP 列 (group_name/member_name/series) の text fuzzy
- *   3. 結果を ID で dedup + merge
+ * 3 経路:
+ *   経路 1 (チップあり): single query で `.overlaps()` を chain。
+ *     - characterIds + itemTypeIds 両方 → 2 つの overlaps を Postgrest が AND 結合
+ *     - 確定事項 A: キャラ × アイテム = AND、キャラ同士 = OR (overlaps の意味論)、
+ *                   アイテム同士 = OR (同) を SQL レベルで自然に実現
+ *     - 入力中 free text (query) はチップありのとき無視 (R11)
  *
- * これで:
- *   - 新規アニメ出品 (characters[] あり) → (a)(c) でヒット
- *   - legacy K-POP (member_name のみ、characters[]=空) → (c) でヒット
- *   - β1 cards 1000-2000 件なら 2-3 並列 query は許容範囲
+ *   経路 2 (チップ 0 + free text): 既存 3 query merge (a/b/c) を維持。
+ *     - (a) characters overlap (text → master fuzzy 解決の結果が非空のとき)
+ *     - (b) item_types overlap (同)
+ *     - (c) name + legacy 列 (group_name/member_name/series) の ilike (常に、legacy fallback)
+ *     - 結果は (a)→(b)→(c) で dedup + merge (master 解決済が上位)
+ *
+ *   経路 3 (全部空): 空配列即返却。
  *
  * Phase 1.5+ で RPC 関数化 (search_cards_unified) で最適化検討。
  */
-export async function searchCardsByText(query: string, limit = 30): Promise<Card[]> {
-  const trimmed = query.trim()
-  if (trimmed === '') return []
+export async function searchCards(params: {
+  query?: string
+  characterIds?: string[]
+  itemTypeIds?: string[]
+  limit?: number
+}): Promise<Card[]> {
+  const limit = params.limit ?? 30
+  const characterIds = params.characterIds ?? []
+  const itemTypeIds = params.itemTypeIds ?? []
+  const query = (params.query ?? '').trim()
 
-  // Step 1: 入力テキストを master で fuzzy 解決
-  const matchedCharIds = findCharacterIdsByText(trimmed)
-  const matchedItemTypeIds = findItemTypeIdsByText(trimmed)
+  // 経路 3: 全部空
+  if (characterIds.length === 0 && itemTypeIds.length === 0 && query === '') {
+    return []
+  }
 
-  // Step 2: 並列 query (max 3 つ)
+  // 経路 1: チップあり → single query (AND chain)
+  if (characterIds.length > 0 || itemTypeIds.length > 0) {
+    let q = supabase
+      .from('cards')
+      .select('*, owner:profiles(*)')
+      .eq('status', 'active')
+
+    if (characterIds.length > 0) q = q.overlaps('characters', characterIds)
+    if (itemTypeIds.length > 0) q = q.overlaps('item_types', itemTypeIds)
+
+    const { data, error } = await q
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    if (error) {
+      console.error('[searchCards/chips]', error)
+      return []
+    }
+    return (data ?? []) as Card[]
+  }
+
+  // 経路 2: チップ 0 + free text → 既存 3 query merge
+  const matchedCharIds = findCharacterIdsByText(query)
+  const matchedItemTypeIds = findItemTypeIdsByText(query)
+
   // 注: Supabase JS の query builder は PromiseLike<T> (Thenable) を返すため
   //     Promise<T> ではなく PromiseLike<T> で型を取る (Promise.all は両対応)
   type QueryResult = { data: Card[] | null; error: unknown }
   const queries: PromiseLike<QueryResult>[] = []
 
-  // (a) characters[] overlap (master 解決時のみ)
   if (matchedCharIds.length > 0) {
     queries.push(
       supabase
@@ -945,7 +978,6 @@ export async function searchCardsByText(query: string, limit = 30): Promise<Card
     )
   }
 
-  // (b) item_types[] overlap (master 解決時のみ)
   if (matchedItemTypeIds.length > 0) {
     queries.push(
       supabase
@@ -959,14 +991,13 @@ export async function searchCardsByText(query: string, limit = 30): Promise<Card
     )
   }
 
-  // (c) name + legacy K-POP 列の text fuzzy (常に実行)
   queries.push(
     supabase
       .from('cards')
       .select('*, owner:profiles(*)')
       .eq('status', 'active')
       .or(
-        `name.ilike.%${trimmed}%,group_name.ilike.%${trimmed}%,member_name.ilike.%${trimmed}%,series.ilike.%${trimmed}%`,
+        `name.ilike.%${query}%,group_name.ilike.%${query}%,member_name.ilike.%${query}%,series.ilike.%${query}%`,
       )
       .order('created_at', { ascending: false })
       .limit(limit)
@@ -975,12 +1006,11 @@ export async function searchCardsByText(query: string, limit = 30): Promise<Card
 
   const results = await Promise.all(queries)
 
-  // Step 3: dedup + merge (先勝ち、配列 query を先に評価して match 強度を優先)
   const seen = new Set<string>()
   const merged: Card[] = []
   for (const result of results) {
     if (result.error) {
-      console.error('[searchCardsByText]', result.error)
+      console.error('[searchCards/freetext]', result.error)
       continue
     }
     for (const c of result.data ?? []) {
@@ -991,6 +1021,13 @@ export async function searchCardsByText(query: string, limit = 30): Promise<Card
   }
 
   return merged.slice(0, limit)
+}
+
+/**
+ * 旧 API 互換 wrapper。Phase 0.5b Stage 3 で search.tsx が searchCards に移行完了後、削除予定。
+ */
+export async function searchCardsByText(query: string, limit = 30): Promise<Card[]> {
+  return searchCards({ query, limit })
 }
 
 // ─────────────────────────────────────────

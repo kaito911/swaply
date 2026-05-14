@@ -190,6 +190,18 @@ export function getCharacterSuggestions(
   return filterByFuzzy(pool, input).slice(0, options.limit ?? 20)
 }
 
+/**
+ * 検索画面用 (Phase 0.5b): master_characters を work 横断で fuzzy filter。
+ * 出品 form の getCharacterSuggestions (workId 必須) と並列、互換性のため touch せず。
+ * limit 10 で Phase 1.5 の master 拡大 (K-POP 追加等) に備える。
+ */
+export function getCharacterSuggestionsAcrossWorks(
+  input: string,
+  limit = 10,
+): MasterCharacter[] {
+  return filterByFuzzy(cache.characters, input).slice(0, limit)
+}
+
 export function getItemTypeSuggestions(
   input: string,
   options?: { categoryHint?: MasterCategory; limit?: number },

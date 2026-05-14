@@ -23,7 +23,7 @@ import {
   WantMatchScore,
 } from './types'
 import { scoreWantMatchV2 } from './matcher' // ★ Step 3 commit 3: v1 → v2 切替
-import { findCharacterIdsByText, findItemTypeIdsByText } from './master' // ★ searchCardsByText 改修用
+import { findCharacterIdsByText, findItemTypeIdsByText } from './master' // searchCards (Phase 0.5b) 経路 2 の master fuzzy 解決
 import { readAsStringAsync } from 'expo-file-system/legacy'
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''
@@ -1021,13 +1021,6 @@ export async function searchCards(params: {
   }
 
   return merged.slice(0, limit)
-}
-
-/**
- * 旧 API 互換 wrapper。Phase 0.5b Stage 3 で search.tsx が searchCards に移行完了後、削除予定。
- */
-export async function searchCardsByText(query: string, limit = 30): Promise<Card[]> {
-  return searchCards({ query, limit })
 }
 
 // ─────────────────────────────────────────

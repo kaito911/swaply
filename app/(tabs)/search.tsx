@@ -7,20 +7,23 @@
 // タブ切替時は各タブの状態を保持する (i 案、UX 良)。
 // 鬼滅・コナンなどのキャラは「キャラ・アイテムを探す」タブを使う前提。
 
+import { SearchAutocomplete } from '@/components/SearchAutocomplete'
 import { MemberMaster } from '@/constants/members'
+import { isMasterCacheReady } from '@/lib/master'
+import { scoreSearchMatch, type SearchMatchScore } from '@/lib/matcher'
 import {
   getGroupsForMember,
   getMemberSuggestions,
   getSeriesOptions,
+  searchCards,
   searchCardsByMember,
-  searchCardsByText,
 } from '@/lib/supabase'
-import { Card } from '@/lib/types'
+import { Card, MasterCharacter, MasterItemType } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
@@ -337,25 +340,125 @@ function MemberSearchPane({ currentUserId }: { currentUserId: string | null }) {
 }
 
 // ─────────────────────────────────────────
-// キーワード検索ペイン (フリーテキスト 4 軸 OR、既存ロジック流用)
+// キャラ・アイテム検索ペイン (Phase 0.5b: SearchAutocomplete + チップ絞り込み)
+//
+// 動作 (確定事項 A/B/G/H):
+//   - チップあり: searchCards({characterIds, itemTypeIds}) を即時呼出、sortByScore で並べ替え
+//   - チップ 0 + 入力あり: 400ms debounce で searchCards({query}) を呼ぶ text fallback
+//   - チップ 0 + 入力空: 結果 reset、empty hint「キャラを選んで検索」
+//   - master 未 ready: 候補非表示 (SearchAutocomplete 内部処理)、empty hint「キーワードを入力してください」
 // ─────────────────────────────────────────
 
+/**
+ * 検索結果を scoreSearchMatch (matcher v2 思想) で並べ替える。
+ * 同スコア内は created_at DESC (DB query が既に降順なので元順序維持)。
+ * 絞り込みなし時は何もしない (created_at DESC のまま)。
+ */
+function sortByScore(
+  cards: Card[],
+  selectedCharIds: string[],
+  selectedItemTypeIds: string[],
+): Card[] {
+  if (selectedCharIds.length === 0 && selectedItemTypeIds.length === 0) return cards
+
+  const scoreOrder: Record<SearchMatchScore, number> = {
+    strong: 3, medium: 2, weak: 1, none: 0,
+  }
+  return [...cards].sort((a, b) => {
+    const sa = scoreOrder[scoreSearchMatch(a, selectedCharIds, selectedItemTypeIds)]
+    const sb = scoreOrder[scoreSearchMatch(b, selectedCharIds, selectedItemTypeIds)]
+    return sb - sa
+  })
+}
+
+/**
+ * emptyHint 4 パターン (R15):
+ *   - master 未 ready → 「キーワードを入力してください」
+ *   - 入力空 + チップ 0 → 「キャラを選んで検索」
+ *   - チップあり + 結果ゼロ → 「条件を変えてみてください」
+ *   - 入力あり + チップ 0 + 結果ゼロ → 「見つかりませんでした」
+ */
+function getEmptyHint(args: {
+  masterReady: boolean
+  inputTrimmed: string
+  hasChips: boolean
+}): string {
+  if (!args.masterReady) return 'キーワードを入力してください'
+  if (!args.hasChips && args.inputTrimmed === '') return 'キャラを選んで検索'
+  if (args.hasChips) return '条件を変えてみてください'
+  return '見つかりませんでした'
+}
+
 function TextSearchPane({ currentUserId }: { currentUserId: string | null }) {
-  const [query, setQuery] = useState('')
+  const [input, setInput] = useState('')
+  const [selectedChars, setSelectedChars] = useState<MasterCharacter[]>([])
+  const [selectedItems, setSelectedItems] = useState<MasterItemType[]>([])
   const [results, setResults] = useState<Card[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
 
+  // master ready の reactive 取得 (emptyHint 出し分け用、SearchAutocomplete 内部とは独立)
+  const [masterReady, setMasterReady] = useState(() => isMasterCacheReady())
+  useEffect(() => {
+    if (masterReady) return
+    const intervalId = setInterval(() => {
+      if (isMasterCacheReady()) {
+        setMasterReady(true)
+        clearInterval(intervalId)
+      }
+    }, 100)
+    const timeoutId = setTimeout(() => clearInterval(intervalId), 5000)
+    return () => {
+      clearInterval(intervalId)
+      clearTimeout(timeoutId)
+    }
+  }, [masterReady])
+
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const handleSearch = useCallback(async (text: string) => {
-    setQuery(text)
+  const hasChips = selectedChars.length > 0 || selectedItems.length > 0
+  const trimmedInput = input.trim()
 
-    if (debounceTimer.current != null) {
-      clearTimeout(debounceTimer.current)
+  // チップ変化 effect (即時、debounce なし)
+  // selectedChars / selectedItems が変わったら searchCards を呼んで sort
+  const selectedCharIds = useMemo(
+    () => selectedChars.map((c) => c.id),
+    [selectedChars],
+  )
+  const selectedItemTypeIds = useMemo(
+    () => selectedItems.map((t) => t.id),
+    [selectedItems],
+  )
+
+  useEffect(() => {
+    if (!hasChips) {
+      // チップ 0 → text fallback effect が担当、ここでは何もしない
+      return
     }
+    let cancelled = false
+    const run = async () => {
+      setLoading(true)
+      const cards = await searchCards({
+        characterIds: selectedCharIds,
+        itemTypeIds: selectedItemTypeIds,
+      })
+      if (cancelled) return
+      setResults(sortByScore(cards, selectedCharIds, selectedItemTypeIds))
+      setSearched(true)
+      setLoading(false)
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [hasChips, selectedCharIds, selectedItemTypeIds])
 
-    if (text.trim() === '') {
+  // 入力テキスト変化 effect (debounce 400ms、チップ 0 時のみ走る)
+  useEffect(() => {
+    if (hasChips) return // チップありはチップ effect が担当
+    if (debounceTimer.current != null) clearTimeout(debounceTimer.current)
+
+    if (trimmedInput === '') {
       setResults([])
       setSearched(false)
       return
@@ -363,42 +466,46 @@ function TextSearchPane({ currentUserId }: { currentUserId: string | null }) {
 
     debounceTimer.current = setTimeout(async () => {
       setLoading(true)
-      const cards = await searchCardsByText(text)
-      setResults(cards)
+      const cards = await searchCards({ query: trimmedInput })
+      setResults(cards) // text fallback は created_at DESC のまま
       setSearched(true)
       setLoading(false)
     }, 400)
+
+    return () => {
+      if (debounceTimer.current != null) clearTimeout(debounceTimer.current)
+    }
+  }, [trimmedInput, hasChips])
+
+  // フリーテキスト確定シグナル (R9/R20)。
+  // 入力ベースの effect で既にライブ検索が走っているので追加処理なし、将来 user_keyword_history 記録等の拡張点。
+  const handleSubmitFreeText = useCallback((_text: string) => {
+    // no-op: search.tsx 側では既に input effect で fallback 走行中
   }, [])
 
   return (
     <View style={styles.pane}>
-      <View style={styles.inputWrap}>
-        <View style={styles.inputBar}>
-          <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
-          <TextInput
-            style={styles.input}
-            placeholder="キャラ・アイテム名で検索 (例: 炭治郎、アクスタ)"
-            placeholderTextColor={colors.textTertiary}
-            value={query}
-            onChangeText={handleSearch}
-            autoCorrect={false}
-            autoCapitalize="none"
-            returnKeyType="search"
-            clearButtonMode="while-editing"
-          />
-        </View>
-      </View>
+      <SearchAutocomplete
+        selectedCharacters={selectedChars}
+        onChangeCharacters={setSelectedChars}
+        selectedItemTypes={selectedItems}
+        onChangeItemTypes={setSelectedItems}
+        inputText={input}
+        onChangeInputText={setInput}
+        onSubmitFreeText={handleSubmitFreeText}
+        placeholder="キャラ・アイテム名で検索 (例: 炭治郎)"
+      />
 
       <ResultArea
         loading={loading}
         searched={searched}
         results={results}
         currentUserId={currentUserId}
-        emptyHint={
-          query.trim() === ''
-            ? 'キャラ・アイテム・グループで検索'
-            : '見つかりませんでした'
-        }
+        emptyHint={getEmptyHint({
+          masterReady,
+          inputTrimmed: trimmedInput,
+          hasChips,
+        })}
       />
     </View>
   )

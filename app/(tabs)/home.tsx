@@ -5,6 +5,7 @@ import { HomeLargeCard } from '@/components/HomeLargeCard'
 import { HomeSmallCard } from '@/components/HomeSmallCard'
 import { LaneSectionLabel } from '@/components/LaneSectionLabel'
 import { SearchBar } from '@/components/SearchBar'
+import { TabHeader } from '@/components/TabHeader'
 import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
 import { Card, WantedCard, WantMatchScore } from '@/lib/types'
 import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
@@ -152,6 +153,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <TabHeader title="ホーム" />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}

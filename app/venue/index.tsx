@@ -1,5 +1,6 @@
 // app/venue/index.tsx
 // 会場一覧画面
+import { TabHeader } from '@/components/TabHeader'
 import { checkInVenue, fetchMyCheckin, fetchVenueCheckinCount, fetchVenues } from '@/lib/supabase'
 import { Venue } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
@@ -99,6 +100,7 @@ export default function VenueListScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
+        <TabHeader title="会場" />
         <View style={styles.centerBox}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -108,6 +110,7 @@ export default function VenueListScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <TabHeader title="会場" />
       <ScrollView contentContainerStyle={styles.content}>
         {/* 説明バナー */}
         <View style={styles.banner}>

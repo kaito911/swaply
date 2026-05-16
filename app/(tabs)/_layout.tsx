@@ -11,7 +11,7 @@ export default function TabsLayout() {
       tabBar={(props) => <CustomTabBar {...props} />}
     >
       <Tabs.Screen name="index" />
-      <Tabs.Screen name="propose" />
+      <Tabs.Screen name="trades" />
       <Tabs.Screen name="mypage" />
       <Tabs.Screen name="venue-tab" />
 

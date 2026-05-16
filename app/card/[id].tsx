@@ -93,7 +93,7 @@ export default function CardDetailScreen() {
           style={styles.primaryButton}
           onPress={() =>
             router.push({
-              pathname: "/propose",
+              pathname: "/trades",
               params: { id: card.id },
             })
           }

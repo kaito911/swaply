@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useBadge } from '@/providers/BadgeProvider'
 
 type VisibleTab = {
-  name: 'index' | 'propose' | 'mypage' | 'search' | 'venue-tab'
+  name: 'index' | 'trades' | 'mypage' | 'search' | 'venue-tab'
   icon: keyof typeof Ionicons.glyphMap
   iconActive: keyof typeof Ionicons.glyphMap
   label: string
@@ -34,10 +34,10 @@ const TABS: VisibleTab[] = [
     label: '検索',
   },
   {
-    name: 'propose',
+    name: 'trades',
     icon: 'swap-horizontal-outline',
     iconActive: 'swap-horizontal',
-    label: '提案/取引',
+    label: '取引',
   },
   {
     name: 'venue-tab',
@@ -76,7 +76,7 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
       }
     }
 
-    const showBadge = tab.name === 'propose' && pendingOfferCount > 0
+    const showBadge = tab.name === 'trades' && pendingOfferCount > 0
 
     return (
       <Pressable

@@ -572,7 +572,7 @@ export default function ProposeScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
         <View style={styles.screenHeader}>
-          <Text style={styles.screenTitle}>提案 / 取引</Text>
+          <Text style={styles.screenTitle}>取引</Text>
         </View>
 
         <View style={styles.tabs}>

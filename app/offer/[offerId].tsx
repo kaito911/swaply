@@ -26,12 +26,12 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-// 戻り先 fallback (canGoBack=false のとき提案タブに replace)
+// 戻り先 fallback (canGoBack=false のとき取引タブに replace)
 function backToProposeFallback() {
   if (router.canGoBack()) {
     router.back()
   } else {
-    router.replace('/(tabs)/propose' as never)
+    router.replace('/(tabs)/trades' as never)
   }
 }
 

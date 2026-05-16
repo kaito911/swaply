@@ -30,6 +30,17 @@
 - **v1.6 (2026-05-07)**: **C-S3 を写真ベース追跡番号自動入力に拡張** (Claude Vision API、伝票写真撮影 → OCR 自動抽出 → ユーザー確認 UI)、C-S3 工数を 2-3h → 5-7h に増、Phase S 合計を 16-23h → 20-27h、β 前必須累計を 87-127h → 91-131h、Vision API 運用設計セクション追加 (API key 管理 / コスト ~$0.017/OCR / fallback 手動入力 / プライバシー)、詐欺パターン b (追跡番号偽造) の防御を「△ 検出不可」→「○ Vision API + 配送業者 prefix 検証で抑止」に強化、教訓 7.9「UX × 詐欺対策の同時達成」追加
 - **v1.7**: スキップ (中間バージョンとして予定されていたが、戦略議論優先のためターゲット転換を含む v1.8 へ統合)
 - **v1.8 (2026-05-09)**: **Phase 1 ターゲット転換** (TREASURE/K-POP → 鬼滅 + コナン + サンリオ) を反映。新章追加: 章 3.8 スコープ拡張 (cards → items)、章 3.9 DB schema 移行設計 (additive migration、後方互換)、章 3.10 マスタデータ整備計画 (3 候補のキャラ × グッズシリーズ × コラボ網羅)、章 3.11 KPI 更新 (カテゴリ別流動性目標 + 月成立件数 + 撤退判定閾値再設定)、章 3.12 メッセージング戦略 (「アニメ・推し活グッズの交換アプリ」)。Phase 順序の再評価 (UI-7 出品画面改修は items 対応を含むため scope 増、Phase M/S は変更なし)。教訓 7.10「現場一次データ > Web リサーチスコア」追加 (X 過去 10 分観察でアニメ系 12-16 件 vs INI 22 件 vs TREASURE 1 件、定常型 vs スパイク型の構造視点)。strategy_master v2.1 → v2.2 と同期
+- **v1.12 (2026-05-16)**: **3.5a 着手反映 — ナビ案 A → E5 修正 + 右上 3 アイコン + ScreenHeader 拡張 + いいね命名 + 通知 MVP + R19 fallback**。
+  - **章 3.14-5 全面書き換え**: ナビ 5 タブを **案 A (探す/通知/出品/マイグッズ/マイページ) → E5 (ホーム / 検索 / + / 取引 / 会場)** に確定。中央 + は CustomTabBar の CTA (`/listing/new/image` 起動)、会場タブ維持 (戦略的差別化、規約レベル優位 章 3.18)
+  - **右上 3 アイコン全画面共通** (HeaderActions): 通知ベル / いいね♡ / マイページアバター、useSegments で active 判定
+  - **ScreenHeader 拡張 (案 X)**: `rightActions?: ReactNode` + `showBackButton?: boolean = true` optional props 追加、既存呼出元は完全後方互換
+  - **「いいね」UI 命名統一** (path `/wants` 維持、DB テーブル `wanted_cards` 維持): 「ほしいカード」表記を wants.tsx / mypage 設定リンク / listing 詳細 / EmptyHomeState で「いいね」に統一
+  - **通知 MVP** (案 iii): 空表示画面のみ実装 (`app/notifications.tsx`)、3.5d で matcher v3 ヒット時のレコード生成、Phase 1.5 で運営お知らせ追加
+  - **R19 対策 (案 ii)**: Card interface に 3.5b の DB migration 列 (want_characters[] / want_item_types[] / want_works[] / want_image_url / want_image_back_url / bbox_x/y/w/h / image_url_cropped) を optional 先取り、matcher v2 (scoreWantMatchV2) に hybrid fallback ロジックを追加 (3.5b 投入後に自動有効化)
+  - **propose → trades リネーム**: `app/(tabs)/propose.tsx` → `trades.tsx`、BottomTabBar ラベル「提案/取引」→「取引」
+  - 教訓: 案 A は claude.ai が業界実態未確認のまま提案、3.5a 着手時の整合性チェック (教訓 7) + 業界実態確認 (教訓 8) + 技術判断 Claude Code 検証 (教訓 9) を経て修正。整合性チェック [x] の形骸化防止 (教訓 10、handoff_uiN template の [x] は section 引用を伴って実施) を運用ルール化
+  - 関連 commits: `33e1724` ScreenHeader 拡張 / `1112629` HeaderActions + 通知画面 / `d486fe5` propose→trades / `7cca94c` 6 画面統一注入 + いいね命名 / `7c25014` 機能 H (求 > 商品名 > Trust) / `ebbc21a` Card interface + matcher v2 fallback
+  - 関連 memory: `session_handoff_ui12.md` (現役、整合性チェック section 内包) / `feedback_handoff_consistency_check.md` (教訓 7) / `feedback_industry_implementation_check.md` (教訓 8) / `feedback_technical_verification_in_claude_code.md` (教訓 9)
 - **v1.11 (2026-05-10)**: **トレポータル利用規約全文分析 + Swaply 利用規約ドラフト v1 作成 — 規約レベルで構造的優位を確定**。
   - **★最重要発見**: トレポータル第 11 条「商品の手渡しを強要する行為」を禁止 = Swaply 会場モードが規約レベルで競合の構造的弱点を突く差別化として証明
   - 章 3.13 補強: 「**規約レベルでの構造的優位**」セクション追加 (会場モード + 削除申立窓口 + キーワードフィルタ + Trust 仲裁の 4 点が規約準拠で証明)
@@ -1150,16 +1161,31 @@ CREATE INDEX idx_master_chars_display_trgm
 
 → 実装は Step 1 (DB schema 移行) 内に組み込み。
 
-### 3.14-5. ナビ 5 タブ構成 (案 A 採用)
+### 3.14-5. ナビ 5 タブ構成 (案 E5 採用、v1.12 で確定)
 
-**確定**: **探す / 通知 / 出品 / マイグッズ / マイページ**
+**確定**: **ホーム / 検索 / + / 取引 / 会場**
 
-**根拠**:
-- 5 タブは業界標準 (claude.ai 自身が前回判断ミスを補正済)
-- 出品ベースの C2C で「自分の在庫」(マイグッズ) は最頻参照ニーズ
-- 取引中はマイページ内のサブタブで対応
+中央 + は `CustomTabBar` の CTA (`router.push('/listing/new/image')`)。右上ヘッダーには **HeaderActions** (通知ベル / いいね♡ / マイページアバター) を全画面共通配置。
 
-→ 実装は UI-7 内のリネーム + 順序調整で吸収。
+**根拠 (案 A → E5 への修正経緯)**:
+- 旧案 A (v1.10「探す/通知/出品/マイグッズ/マイページ」) は claude.ai が業界実態未確認のまま提案、3.5a 着手時の整合性チェック (教訓 7) + 業界実態確認 (教訓 8) + Claude Code 技術検証 (教訓 9) を経て修正
+- メルカリ最新は「ホーム / お知らせ / 出品 / マイページ / さがす」5 タブ、Swaply は「検索型志向」をメルカリ以上に明確化 (検索タブを 2 番目に固定)
+- 「会場」は規約レベル優位の戦略的差別化要素 (章 3.13 補強 + 3.18)、Phase 1.5 後も維持
+- 通知・いいね・マイページは右上アイコン化することで、5 タブのスロットを「行動の起点」(ホーム / 検索 / + / 取引 / 会場) に振り切る
+
+**実装 (3.5a 完了済)**:
+- 中央 + CTA: `components/BottomTabBar.tsx` の CustomTabBar に組み込み済 (`/listing/new/image` 起動)
+- 右上 3 アイコン: `components/HeaderActions.tsx` 新規、`components/ScreenHeader.tsx` の `rightActions?: ReactNode` 拡張 (案 X) で各画面に注入
+- マイページアバター active 判定: `expo-router` の `useSegments()` で `(tabs)/mypage` を検出、active 時は person アイコン filled + primary 色 + tap 無効
+- propose タブ → trades にリネーム (ファイル名 + ラベル「提案/取引」→「取引」)
+- 通知一覧画面: `app/notifications.tsx` 新規、3.5a では空表示 MVP、3.5d で matcher v3 ヒット時のレコード生成
+- いいね動線: 右上♡ → 既存 `app/wants.tsx` (tabs 外維持)、UI 命名のみ「ほしいカード → いいね」(DB テーブル `wanted_cards` / path `/wants` 維持)
+- 見送り (3.5a スコープ外): `app/onboarding.tsx` の「ほしいカード」UI 文言 → 別 commit、`app/card/[id].tsx` 削除 (dead code 推定) → cleanup commit
+
+**判断ログ**:
+- claude.ai 案 A は v1.10 採用済だったが、UI 実機テスト・業界調査・3.5a 着手時の整合性チェックで「業界実態と乖離 + 検索型志向の埋没 + 会場戦略との不整合」が判明
+- claude.ai 内 4 Phase 議論 (`memory/project_team_protocol_v2.md`) で E5 に最終確定、ユーザー承認
+- 教訓 10「整合性チェック [x] の形骸化防止」を v1.12 から運用ルール化 (handoff_uiN.md template の [x] チェックは該当 section の引用を伴って実施)
 
 ---
 

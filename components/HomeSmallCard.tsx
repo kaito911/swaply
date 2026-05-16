@@ -88,13 +88,8 @@ export function HomeSmallCard({
       </View>
 
       <View style={styles.body}>
-        {/* ★ 機能 H 真意 (3.5a): 求 or matchReason を大強調、商品名は補助 */}
-        {headlineText != null && (
-          <Text style={styles.headline} numberOfLines={2}>
-            {headlineText}
-          </Text>
-        )}
-
+        {/* ★ 機能 H 真意 v2 (3.5a fix): 機能 H は Trust ホーム削除のみ。
+            表示順は商品名 → 求 (matchReason 優先) の自然な視覚読み順、同サイズ、求は補助色 */}
         {card.group_name != null && (
           <Text style={styles.group} numberOfLines={1}>
             {card.group_name}
@@ -104,6 +99,12 @@ export function HomeSmallCard({
         <Text style={styles.name} numberOfLines={2}>
           {card.name}
         </Text>
+
+        {headlineText != null && (
+          <Text style={styles.want} numberOfLines={2}>
+            {headlineText}
+          </Text>
+        )}
       </View>
     </Pressable>
   )
@@ -172,24 +173,26 @@ const styles = StyleSheet.create({
   body: {
     padding: spacing.sm,
   },
-  headline: {
-    fontSize: 13,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-    lineHeight: 17,
-  },
   group: {
     fontSize: 10,
     color: colors.textSecondary,
-    fontWeight: fontWeight.regular,
-    marginTop: spacing.xs,
+    fontWeight: fontWeight.medium,
   },
+  // 商品名 (メイン): 通常見出し + 太字、Small は CARD_WIDTH=120 に合わせて 12px
   name: {
-    fontSize: 11,
-    fontWeight: fontWeight.regular,
-    color: colors.textSecondary,
-    lineHeight: 14,
+    fontSize: 12,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    lineHeight: 16,
     marginTop: 2,
+  },
+  // 求 / matchReason (補助): 商品名と同サイズ、太字控えめ、secondary 色
+  want: {
+    fontSize: 12,
+    fontWeight: fontWeight.medium,
+    color: colors.textSecondary,
+    lineHeight: 16,
+    marginTop: 3,
   },
   wantMatchOverlay: {
     position: 'absolute',

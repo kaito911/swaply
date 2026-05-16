@@ -82,14 +82,9 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
       </View>
 
       {/* Body */}
-      {/* ★ 機能 H 真意 (3.5a): 求を大強調、商品名は補助的、Trust 完全削除 */}
+      {/* ★ 機能 H 真意 v2 (3.5a fix): 機能 H は Trust ホーム削除のみ。求の過剰強調は撤回、
+          表示順は商品名 → 求の自然な視覚読み順、サイズは同じ、求は補助色控えめ */}
       <View style={styles.body}>
-        {card.want_description != null && (
-          <Text style={styles.want} numberOfLines={2}>
-            求: {card.want_description}
-          </Text>
-        )}
-
         {card.group_name != null && (
           <Text style={styles.group} numberOfLines={1}>
             {card.group_name}
@@ -99,6 +94,12 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
         <Text style={styles.name} numberOfLines={2}>
           {card.name}
         </Text>
+
+        {card.want_description != null && (
+          <Text style={styles.want} numberOfLines={2}>
+            求: {card.want_description}
+          </Text>
+        )}
 
         <PrimaryCTA
           label={isOwn ? '自分の出品' : '提案する'}
@@ -178,24 +179,26 @@ const styles = StyleSheet.create({
   body: {
     padding: spacing.md,
   },
-  want: {
-    fontSize: 18,
+  group: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    fontWeight: fontWeight.medium,
+  },
+  // 商品名 (メイン情報): 通常見出しサイズ + 太字
+  name: {
+    fontSize: 15,
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
-    lineHeight: 24,
+    lineHeight: 20,
+    marginTop: spacing.xs,
   },
-  group: {
-    fontSize: 12,
+  // 求 (補助情報): 商品名と同サイズ、太字控えめ、secondary 色
+  want: {
+    fontSize: 15,
+    fontWeight: fontWeight.medium,
     color: colors.textSecondary,
-    fontWeight: fontWeight.regular,
-    marginTop: spacing.sm,
-  },
-  name: {
-    fontSize: 13,
-    fontWeight: fontWeight.regular,
-    color: colors.textSecondary,
-    lineHeight: 18,
-    marginTop: 2,
+    lineHeight: 20,
+    marginTop: spacing.xs,
   },
   cta: {
     marginTop: spacing.md,

@@ -46,6 +46,19 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true)
   const [myWants, setMyWants] = useState<WantedCard[]>([])
 
+  // ★ 3.5a fix: LikeButton optimistic 状態管理 (Map<cardId, wantId> + Set<cardId>)。
+  //
+  // 背景: WantedCard は card_id 列を持たず card_name 等でテキスト紐付け。鬼滅・コナン・
+  // サンリオなど構造化 card (member_name/group_name 等が null) では isWantMatchV2 の
+  // fuzzy match が hit しない → tap 直後の再判定で isLiked が false に戻る現象 (user
+  // 実機 FB「いいねできる商品とできないものがある」の原因)。
+  //
+  // 3.5a 暫定: pendingAdds (cardId → wantId) で add 直後の状態を保持、archive 時にも
+  // 利用。pendingArchives (Set<cardId>) は archive 直後の optimistic ♡ outline 用。
+  // 根本解決は 3.5b で WantedCard.card_id 列追加 (matcher v3 の Card vs Card 化と同時)。
+  const [pendingAdds, setPendingAdds] = useState<Map<string, string>>(new Map())
+  const [pendingArchives, setPendingArchives] = useState<Set<string>>(new Set())
+
   useFocusEffect(
     useCallback(() => {
       let isActive = true
@@ -134,38 +147,66 @@ export default function HomeScreen() {
     router.push('/(tabs)/search')
   }
 
-  // ★ 3.5a 機能 H: いいね♡ overlay の toggle ロジック
-  // WantedCard は card_id を持たないため card_name 等で fuzzy match (isWantMatchV2 流用)。
-  // toggle 後は wants を再 fetch して isLiked を即時更新。
+  // ★ 3.5a 機能 H + LikeButton bug fix: optimistic update を加えた isLiked / toggle 判定
+  // 判定優先順位: pendingArchives (即時 false) > pendingAdds (即時 true) > myWants fuzzy match
   const isCardLiked = useCallback(
-    (card: Card) => myWants.some((w) => isWantMatchV2(card, w)),
-    [myWants],
+    (card: Card) => {
+      if (pendingArchives.has(card.id)) return false
+      if (pendingAdds.has(card.id)) return true
+      return myWants.some((w) => isWantMatchV2(card, w))
+    },
+    [myWants, pendingAdds, pendingArchives],
   )
 
   const handleToggleLike = useCallback(
     async (card: Card) => {
       if (user == null) return
-      const matched = myWants.find((w) => isWantMatchV2(card, w))
-      try {
-        if (matched != null) {
-          await archiveWantedCard(matched.id)
-        } else {
-          await addWantedCard({
+      const liked = isCardLiked(card)
+      if (liked) {
+        // archive: pending 由来 or myWants 由来の wantId を解決
+        const pendingWantId = pendingAdds.get(card.id)
+        const matched = myWants.find((w) => isWantMatchV2(card, w))
+        const wantIdToArchive = pendingWantId ?? matched?.id
+        // 先に optimistic 状態更新 (UI ♡ outline を即時反映)
+        setPendingArchives((prev) => new Set(prev).add(card.id))
+        setPendingAdds((prev) => {
+          const next = new Map(prev)
+          next.delete(card.id)
+          return next
+        })
+        if (wantIdToArchive != null) {
+          try {
+            await archiveWantedCard(wantIdToArchive)
+          } catch (e) {
+            console.error('[home][handleToggleLike][archive]', e)
+          }
+        }
+      } else {
+        // add: optimistic 表示は新規 wantId 取得後に更新 (失敗時に false 維持)
+        setPendingArchives((prev) => {
+          if (!prev.has(card.id)) return prev
+          const next = new Set(prev)
+          next.delete(card.id)
+          return next
+        })
+        try {
+          const newWant = await addWantedCard({
             userId: user.id,
             cardName: card.name,
             groupName: card.group_name,
             memberName: card.member_name,
             series: card.series,
           })
+          setPendingAdds((prev) => new Map(prev).set(card.id, newWant.id))
+        } catch (e) {
+          console.error('[home][handleToggleLike][add]', e)
         }
-        // 即時反映: wants を再 fetch
-        const next = await fetchMyWantedCards(user.id)
-        setMyWants(next)
-      } catch (e) {
-        console.error('[home][handleToggleLike]', e)
       }
+      // 最終整合: server 側 wants を再 fetch
+      const next = await fetchMyWantedCards(user.id)
+      setMyWants(next)
     },
-    [user, myWants],
+    [user, myWants, pendingAdds, isCardLiked],
   )
 
   const getMatchReasonLabel = (score: WantMatchScore): string | null => {

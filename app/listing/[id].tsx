@@ -130,6 +130,11 @@ export default function ListingDetailScreen() {
   const [descExpanded, setDescExpanded] = useState(false)
   const [myWants, setMyWants] = useState<WantedCard[]>([])
   const [likeToggling, setLikeToggling] = useState(false)
+  // ★ 3.5a fix: optimistic 状態 (home.tsx と同じ設計、ただし 1 card のみなので scalar)
+  // 'liked' = add 直後 + wantId 保持、'unliked' = archive 直後、null = myWants 判定にフォール
+  const [pendingLikeState, setPendingLikeState] = useState<
+    { kind: 'liked'; wantId: string } | { kind: 'unliked' } | null
+  >(null)
   const [bestMatchScore, setBestMatchScore] = useState<WantMatchScore>('none')
   const [imageSide, setImageSide] = useState<'front' | 'back'>('front')
 
@@ -270,25 +275,38 @@ export default function ListingDetailScreen() {
     } as never)
   }
 
-  // ★ 3.5a 機能 H: 写真 overlay LikeButton の toggle ロジック
-  // home.tsx と同じ設計: isLiked は myWants との fuzzy match で判定、toggle で add/archive 切替
-  const isLiked = card != null && myWants.some((w) => isWantMatchV2(card, w))
+  // ★ 3.5a 機能 H + LikeButton bug fix: optimistic update で構造化 card の fuzzy match 漏れに対応
+  // home.tsx と同じ設計 (詳細は home.tsx コメント参照)、ここでは 1 card のみなので scalar state
+  const isLiked = (() => {
+    if (card == null) return false
+    if (pendingLikeState?.kind === 'unliked') return false
+    if (pendingLikeState?.kind === 'liked') return true
+    return myWants.some((w) => isWantMatchV2(card, w))
+  })()
 
   const handleToggleLike = async () => {
     if (currentUserId == null || card == null || likeToggling) return
-    const matched = myWants.find((w) => isWantMatchV2(card, w))
+    setLikeToggling(true)
     try {
-      setLikeToggling(true)
-      if (matched != null) {
-        await archiveWantedCard(matched.id)
+      if (isLiked) {
+        // archive: pending 由来 or myWants 由来の wantId を解決
+        const pendingWantId =
+          pendingLikeState?.kind === 'liked' ? pendingLikeState.wantId : null
+        const matched = myWants.find((w) => isWantMatchV2(card, w))
+        const wantIdToArchive = pendingWantId ?? matched?.id
+        setPendingLikeState({ kind: 'unliked' })
+        if (wantIdToArchive != null) {
+          await archiveWantedCard(wantIdToArchive)
+        }
       } else {
-        await addWantedCard({
+        const newWant = await addWantedCard({
           userId: currentUserId,
           cardName: card.name,
           groupName: card.group_name,
           memberName: card.member_name,
           series: card.series,
         })
+        setPendingLikeState({ kind: 'liked', wantId: newWant.id })
       }
       const next = await fetchMyWantedCards(currentUserId)
       setMyWants(next)

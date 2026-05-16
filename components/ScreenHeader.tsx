@@ -3,6 +3,10 @@
 // 戻る動作は onBack を渡せばカスタマイズ可、未指定なら router.back()。
 // canGoBack() で表示制御はしない (常に表示) — 画面が Stack 経由で push されている前提。
 // 中央にタイトル + 任意の subtitle (例: ステップ「1/5」)。
+//
+// 拡張 (3.5a):
+//   - showBackButton=false で戻るボタン非表示 (タブのトップ画面用)、空 spacer で中央タイトル位置を維持。
+//   - rightActions を渡せば右側 spacer をその要素に差し替え (HeaderActions 等、複数アイコン)。
 
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
@@ -14,10 +18,14 @@ export function ScreenHeader({
   title,
   subtitle,
   onBack,
+  rightActions,
+  showBackButton = true,
 }: {
   title: string
   subtitle?: string
   onBack?: () => void
+  rightActions?: React.ReactNode
+  showBackButton?: boolean
 }) {
   const handleBack = () => {
     if (onBack != null) {
@@ -31,13 +39,17 @@ export function ScreenHeader({
 
   return (
     <View style={styles.wrap}>
-      <Pressable
-        onPress={handleBack}
-        hitSlop={12}
-        style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
-      >
-        <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-      </Pressable>
+      {showBackButton ? (
+        <Pressable
+          onPress={handleBack}
+          hitSlop={12}
+          style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
+        >
+          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
+        </Pressable>
+      ) : (
+        <View style={styles.btn} />
+      )}
       <View style={styles.titleWrap}>
         <Text style={styles.title} numberOfLines={1}>
           {title}
@@ -48,7 +60,11 @@ export function ScreenHeader({
           </Text>
         )}
       </View>
-      <View style={styles.btn} />
+      {rightActions != null ? (
+        <View style={styles.rightWrap}>{rightActions}</View>
+      ) : (
+        <View style={styles.btn} />
+      )}
     </View>
   )
 }
@@ -87,5 +103,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textSecondary,
     marginTop: 1,
+  },
+  rightWrap: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 })

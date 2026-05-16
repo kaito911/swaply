@@ -441,7 +441,7 @@ export default function MyPageScreen() {
           {([
             { label: 'プロフィール編集', path: '/profile-edit' },
             { label: '推し編集', path: '/oshi-edit' },
-            { label: 'いいね', path: '/wants' },
+            // 「いいね」リンクは右上 Heart アイコン (HeaderActions) で動線確保済のため削除 (3.5a fix、動線 ⑦)
             { label: '配送情報', path: '/shipping' },
           ] as const).map((item, i, arr) => (
             <Pressable

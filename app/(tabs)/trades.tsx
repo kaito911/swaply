@@ -879,6 +879,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     paddingHorizontal: 16,
+    paddingTop: 16, // ★ 3.5a fix: ScreenHeader 置換で消えた余白を回復
     paddingBottom: 12,
   },
   tab: {

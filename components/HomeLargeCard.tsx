@@ -5,7 +5,7 @@
 // 写真右上に LikeButton (size=small) overlay。Trust は出品詳細画面で密度確保 (機能 H 戦略)。
 
 import { LikeButton } from '@/components/LikeButton'
-import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card } from '@/lib/types'
 import { router } from 'expo-router'
 import React from 'react'

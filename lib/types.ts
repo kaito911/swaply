@@ -93,6 +93,23 @@ export interface Card {
   created_at: string
   updated_at: string
   owner?: Profile
+
+  // 3.5a 先取り (3.5b の DB migration 投入後に SELECT で返り始める)。
+  // それまでは全 undefined、各機能は optional chain で defensive に動作する。
+  // 設計詳細: refactor_plan v1.11 章 3.9 (DB schema 拡張) と handoff_ui12 §3 (機能 B / F)。
+  //
+  // 求の構造化 (3.5c 出品 form 再設計、3.5d matcher v3 で active 化):
+  want_characters?: string[]
+  want_item_types?: string[]
+  want_works?: string[]
+  want_image_url?: string | null
+  want_image_back_url?: string | null
+  // bbox 6 列 (3.5c bbox spike + expo-image-manipulator クロップ画像生成):
+  bbox_x?: number | null
+  bbox_y?: number | null
+  bbox_w?: number | null
+  bbox_h?: number | null
+  image_url_cropped?: string | null
 }
 
 // ─────────────────────────────────────────

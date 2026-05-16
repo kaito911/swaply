@@ -61,7 +61,21 @@ export function scoreWantMatchV2(card: Card, want: WantedCard): WantMatchScore {
   // Step 4: overlap 数で score 判定
   const cardCharSet = new Set(card.characters)
   const overlap = candidateIds.filter((id) => cardCharSet.has(id)).length
-  if (overlap === 0) return 'none'
+  if (overlap === 0) {
+    // Step 5 (3.5a R19 対策 ii): hybrid fallback
+    // card.characters[] では hit しないが、card.want_characters[] (出品者が求めるキャラ)
+    // と overlap がある場合、出品者と相互交換の可能性ありとして weak/medium を返す。
+    // 3.5a 時点では card.want_characters は全 undefined のため発火しない (3.5b 投入後に自動有効化)。
+    // 3.5d で matcher v3 (Card vs Card 双方向 overlap) に正式置換予定。
+    if (card.want_characters != null && card.want_characters.length > 0) {
+      const wantSet = new Set(card.want_characters)
+      const wantOverlap = candidateIds.filter((id) => wantSet.has(id)).length
+      if (wantOverlap > 0) {
+        return card.want_characters.length === 1 ? 'medium' : 'weak'
+      }
+    }
+    return 'none'
+  }
 
   const total = card.characters.length
 

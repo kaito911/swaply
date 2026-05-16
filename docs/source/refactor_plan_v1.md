@@ -30,6 +30,21 @@
 - **v1.6 (2026-05-07)**: **C-S3 を写真ベース追跡番号自動入力に拡張** (Claude Vision API、伝票写真撮影 → OCR 自動抽出 → ユーザー確認 UI)、C-S3 工数を 2-3h → 5-7h に増、Phase S 合計を 16-23h → 20-27h、β 前必須累計を 87-127h → 91-131h、Vision API 運用設計セクション追加 (API key 管理 / コスト ~$0.017/OCR / fallback 手動入力 / プライバシー)、詐欺パターン b (追跡番号偽造) の防御を「△ 検出不可」→「○ Vision API + 配送業者 prefix 検証で抑止」に強化、教訓 7.9「UX × 詐欺対策の同時達成」追加
 - **v1.7**: スキップ (中間バージョンとして予定されていたが、戦略議論優先のためターゲット転換を含む v1.8 へ統合)
 - **v1.8 (2026-05-09)**: **Phase 1 ターゲット転換** (TREASURE/K-POP → 鬼滅 + コナン + サンリオ) を反映。新章追加: 章 3.8 スコープ拡張 (cards → items)、章 3.9 DB schema 移行設計 (additive migration、後方互換)、章 3.10 マスタデータ整備計画 (3 候補のキャラ × グッズシリーズ × コラボ網羅)、章 3.11 KPI 更新 (カテゴリ別流動性目標 + 月成立件数 + 撤退判定閾値再設定)、章 3.12 メッセージング戦略 (「アニメ・推し活グッズの交換アプリ」)。Phase 順序の再評価 (UI-7 出品画面改修は items 対応を含むため scope 増、Phase M/S は変更なし)。教訓 7.10「現場一次データ > Web リサーチスコア」追加 (X 過去 10 分観察でアニメ系 12-16 件 vs INI 22 件 vs TREASURE 1 件、定常型 vs スパイク型の構造視点)。strategy_master v2.1 → v2.2 と同期
+- **v1.13 (2026-05-16)**: **3.5a 完了反映 — 機能 H 真意確定 (Trust ホーム削除 + 求大強調 + 出品詳細 Trust 6 項目直接表示) + LikeButton overlay + 検索文言整合 + β1 マイルストーン + Step 3.5c スコープ拡張**。
+  - **章 3.14-5 補強**: 機能 H = 単純な「表示順入れ替え」ではなく **Trust 関連 (TrustBadge overlay + TradeStats) をホームから完全削除 + 求 (want_description) を大強調 + 出品詳細で Trust 6 項目 (成立件数 / 発送遵守率 / 返信中央値 / 差額平均 / 差額偏り / トラブル件数) を default 直接表示** (claude.ai 整理屋訂正パターン 12 回目)
+  - **LikeButton overlay 配置 (メルカリ式)**: 写真右上に♡ (HomeLarge/SmallCard、size=small) / 写真右下に♡ (出品詳細、size=medium)。WantedCard 紐付けは card_id 不在のため `isWantMatchV2` で fuzzy match → add/archive toggle
+  - **検索バー default placeholder**: 「カード名、グループ、メンバーで検索」→「キャラ・アイテム名で検索」(Phase 0.5b 整合、SearchBar default 経由で home.tsx に自動反映)
+  - **ホームレーン 2 サブテキスト**: 「メンバー一致」→「キャラ一致」
+  - **β1 リリースマイルストーン: TREASURE 2026/7 第 3 週 (暫定絶対)** — K-POP master 化はこのタイミングに合わせて β1 必須化。「グループ・メンバーで探す」タブ廃止 + master_characters 拡張を Step 3.5c で対応 (Phase 1.5 INI から前倒し)
+  - **Step 3.5c スコープ拡張** (Z2 持ち越し項目を吸収):
+    - 機能 C 求の構造化 + 複数化 (Card.want_characters[] / want_item_types[] / want_works[] 配列対応、β1 必須)
+    - 機能 D 求商品写真任意 (want_image_url / want_image_back_url、β1 必須)
+    - 出品詳細レイアウト確定 (左右並列 vs 上下並列、技術検証含めて挑戦)
+    - K-POP master 化 (TREASURE 2026/7 第 3 週合わせ、β1 必須)
+  - **教訓 10「整合性チェック [x] の形骸化防止」**: handoff_uiN.md template 冒頭の整合性チェックは、該当 section の引用 (line 番号 + 抜粋) を伴って実施 (v1.12 commit `ba2b875` で 3.14-5 を view せず E5 を提案した事例から)
+  - **教訓 11+「整理屋訂正パターン累積」**: claude.ai が user 真意を平坦化する解釈ミスが累積 (機能 H = 訂正 12 回目)。Phase 2 方針提示で「軽い変更」と表現された項目は Claude Code 側で意味の広さを検証する責任を共有
+  - 関連 commits: `adfd9fb` 機能 H 真意 + LikeButton + 出品詳細 Trust + 検索文言 / `e9d1599` HomeLargeCard 未使用 import cleanup
+  - 関連 memory: `session_handoff_ui12.md` (機能 H 真意 + 教訓 10-11+ 追記)
 - **v1.12 (2026-05-16)**: **3.5a 着手反映 — ナビ案 A → E5 修正 + 右上 3 アイコン + ScreenHeader 拡張 + いいね命名 + 通知 MVP + R19 fallback**。
   - **章 3.14-5 全面書き換え**: ナビ 5 タブを **案 A (探す/通知/出品/マイグッズ/マイページ) → E5 (ホーム / 検索 / + / 取引 / 会場)** に確定。中央 + は CustomTabBar の CTA (`/listing/new/image` 起動)、会場タブ維持 (戦略的差別化、規約レベル優位 章 3.18)
   - **右上 3 アイコン全画面共通** (HeaderActions): 通知ベル / いいね♡ / マイページアバター、useSegments で active 判定
@@ -1186,6 +1201,16 @@ CREATE INDEX idx_master_chars_display_trgm
 - claude.ai 案 A は v1.10 採用済だったが、UI 実機テスト・業界調査・3.5a 着手時の整合性チェックで「業界実態と乖離 + 検索型志向の埋没 + 会場戦略との不整合」が判明
 - claude.ai 内 4 Phase 議論 (`memory/project_team_protocol_v2.md`) で E5 に最終確定、ユーザー承認
 - 教訓 10「整合性チェック [x] の形骸化防止」を v1.12 から運用ルール化 (handoff_uiN.md template の [x] チェックは該当 section の引用を伴って実施)
+
+**機能 H 真意 (v1.13 補強)**:
+- claude.ai 当初解釈「表示順 求 > 商品名 > Trust に並べ替え」は **整理屋訂正パターン 12 回目** で覆された。user 真意は以下:
+  1. HomeLargeCard / HomeSmallCard から **Trust 関連表示 (TrustBadge overlay + TradeStats) を完全削除**
+  2. 求 (want_description) を **「求: XXX」全体同サイズ太字で大強調** (Large 18px、Small 13px、bold)
+  3. 商品名 (group_name + name) は **補助的に小さく** secondary 色
+  4. 写真右上に **♡ LikeButton overlay** (メルカリ式、size=small)
+  5. 出品詳細の Trust は **default で全 6 項目直接表示** (成立件数 / 発送遵守率 / 返信中央値 / 差額平均 / 差額偏り / トラブル件数)、tap 展開 UI なし → ホーム削除分の補完
+- 戦略文脈: 「ホームではノイズ削減して求を即視認 → 出品詳細で Trust 情報密度確保」の二段構成
+- 関連 commit: `adfd9fb` (機能 H 真意実装 + LikeButton + 出品詳細 Trust + 検索文言)
 
 ---
 

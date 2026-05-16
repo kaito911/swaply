@@ -7,7 +7,7 @@ import { ScreenHeader } from '@/components/ScreenHeader'
 import { archiveWantedCard, fetchMyWantedCards } from '@/lib/supabase'
 import { WantedCard } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
-import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
+import { colors } from '@/constants/theme'
 import { useFocusEffect } from 'expo-router'
 import React, { useCallback, useState } from 'react'
 import {

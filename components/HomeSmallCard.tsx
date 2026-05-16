@@ -73,6 +73,17 @@ export function HomeSmallCard({ card, isOwn = false, isWantMatched = false, matc
       </View>
 
       <View style={styles.body}>
+        {/* ★ 機能 H (3.5a): 表示順 求 (or matchReason fallback) > 商品名 */}
+        {matchReasonLabel != null ? (
+          <Text style={styles.matchReason} numberOfLines={1}>
+            {matchReasonLabel}
+          </Text>
+        ) : card.want_description != null ? (
+          <Text style={styles.matchReason} numberOfLines={1}>
+            求: {card.want_description}
+          </Text>
+        ) : null}
+
         {card.group_name != null && (
           <Text style={styles.group} numberOfLines={1}>
             {card.group_name}
@@ -82,12 +93,6 @@ export function HomeSmallCard({ card, isOwn = false, isWantMatched = false, matc
         <Text style={styles.name} numberOfLines={2}>
           {card.name}
         </Text>
-
-        {matchReasonLabel != null && (
-          <Text style={styles.matchReason} numberOfLines={1}>
-            {matchReasonLabel}
-          </Text>
-        )}
       </View>
     </Pressable>
   )

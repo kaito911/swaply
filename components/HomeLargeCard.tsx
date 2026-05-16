@@ -82,7 +82,14 @@ export function HomeLargeCard({ card, isOwn = false }: HomeLargeCardProps) {
       </View>
 
       {/* Body */}
+      {/* ★ 機能 H (3.5a): 表示順 求 > 商品名 > Trust > CTA */}
       <View style={styles.body}>
+        {card.want_description != null && (
+          <Text style={styles.want} numberOfLines={1}>
+            求: {card.want_description}
+          </Text>
+        )}
+
         {card.group_name != null && (
           <Text style={styles.group} numberOfLines={1}>
             {card.group_name}
@@ -92,12 +99,6 @@ export function HomeLargeCard({ card, isOwn = false }: HomeLargeCardProps) {
         <Text style={styles.name} numberOfLines={2}>
           {card.name}
         </Text>
-
-        {card.want_description != null && (
-          <Text style={styles.want} numberOfLines={1}>
-            求: {card.want_description}
-          </Text>
-        )}
 
         {owner != null && (
           <View style={styles.statsWrap}>

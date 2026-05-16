@@ -269,7 +269,7 @@ export default function ListingDetailScreen() {
       })
       setWantAdded(true)
     } catch {
-      Alert.alert('エラー', 'ほしいカードへの追加に失敗しました')
+      Alert.alert('エラー', 'いいねへの追加に失敗しました')
     } finally {
       setWantAdding(false)
     }
@@ -404,7 +404,7 @@ export default function ListingDetailScreen() {
             </Text>
           </View>
           {(isWantSaved || wantAdded) && !isOwn && (
-            <Text style={styles.wantSavedNote}>✓ 保存済みのほしいカードです</Text>
+            <Text style={styles.wantSavedNote}>✓ いいね済みの商品です</Text>
           )}
 
           {/* ③ Conditions ───────────────────────── */}
@@ -479,7 +479,7 @@ export default function ListingDetailScreen() {
             </View>
           )}
 
-          {/* 補足: ほしいカード追加（ログイン・他人のみ） */}
+          {/* 補足: いいね追加（ログイン・他人のみ） */}
           {!isOwn && currentUserId != null && (
             <Pressable
               style={[styles.wantButton, (wantAdded || wantAdding) && styles.wantButtonDone]}
@@ -488,10 +488,10 @@ export default function ListingDetailScreen() {
             >
               <Text style={[styles.wantButtonText, wantAdded && styles.wantButtonTextDone]}>
                 {wantAdded
-                  ? '✓ ほしいカードに追加済み'
+                  ? '✓ いいね済み'
                   : wantAdding
                   ? '追加中...'
-                  : '＋ ほしいカードに追加'}
+                  : '♡ いいね'}
               </Text>
             </Pressable>
           )}

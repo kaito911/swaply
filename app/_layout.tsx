@@ -127,13 +127,7 @@ function RootNavigator() {
 
         <Stack.Screen
           name="search"
-          options={{
-            headerShown: true,
-            title: '検索',
-            headerStyle: { backgroundColor: colors.background },
-            headerTintColor: colors.textPrimary,
-            headerShadowVisible: false,
-          }}
+          options={{ headerShown: false }} // ★ updated (3.5a): タブ内 search は画面内 ScreenHeader、root Stack の search は dead config だが整合性のため false に
         />
 
         <Stack.Screen

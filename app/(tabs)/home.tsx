@@ -1,6 +1,7 @@
 // app/(tabs)/home.tsx
 import { BestTradeCandidateData } from '@/components/BestTradeCandidateCard'
 import { EmptyHomeState } from '@/components/EmptyHomeState'
+import { HeaderActions } from '@/components/HeaderActions'
 import { HomeLargeCard } from '@/components/HomeLargeCard'
 import { HomeSmallCard } from '@/components/HomeSmallCard'
 import { LaneSectionLabel } from '@/components/LaneSectionLabel'
@@ -160,6 +161,7 @@ export default function HomeScreen() {
         <View style={styles.headerWrap}>
           <View style={styles.headerTop}>
             <Text style={styles.logoText}>Swaply</Text>
+            <HeaderActions />
           </View>
           <View style={styles.headerRow}>
             <View style={styles.searchWrap}>

@@ -1,5 +1,7 @@
 // app/(tabs)/mypage.tsx
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
+import { HeaderActions } from '@/components/HeaderActions'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import {
   fetchMyOffers,
   fetchProfile,
@@ -338,6 +340,7 @@ export default function MyPageScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <ScreenHeader title="マイページ" showBackButton={false} rightActions={<HeaderActions />} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -438,7 +441,7 @@ export default function MyPageScreen() {
           {([
             { label: 'プロフィール編集', path: '/profile-edit' },
             { label: '推し編集', path: '/oshi-edit' },
-            { label: 'ほしいカード', path: '/wants' },
+            { label: 'いいね', path: '/wants' },
             { label: '配送情報', path: '/shipping' },
           ] as const).map((item, i, arr) => (
             <Pressable

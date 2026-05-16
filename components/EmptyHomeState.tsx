@@ -11,7 +11,7 @@ export function EmptyHomeState() {
       <Text style={styles.logo}>Swaply</Text>
       <Text style={styles.main}>まだ交換できるカードがありません</Text>
       <Text style={styles.sub}>
-        {'このアプリは\n「出品」と「ほしいカード」から\n交換が生まれます'}
+        {'このアプリは\n「出品」と「いいね」から\n交換が生まれます'}
       </Text>
       <View style={styles.ctaWrap}>
         <PrimaryCTA
@@ -20,7 +20,7 @@ export function EmptyHomeState() {
           size="lg"
         />
         <PrimaryCTA
-          label="ほしいカードを登録する"
+          label="いいねを追加する"
           onPress={() => router.push('/wants' as never)}
           variant="ghost"
           size="lg"

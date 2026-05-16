@@ -1,12 +1,14 @@
 // app/wants.tsx
-// ほしいカード（needs DB）一覧画面
-// mypage から router.push('/wants') でアクセス
+// 「いいね」一覧画面 (DB テーブル名は wanted_cards 維持、UI 命名は「いいね」)。
+// アクセス動線:
+//   1. mypage 設定リンク (label "いいね")
+//   2. 各タブの右上 ♡ アイコン (HeaderActions)
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { archiveWantedCard, fetchMyWantedCards } from '@/lib/supabase'
 import { WantedCard } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
-import { Ionicons } from '@expo/vector-icons'
-import { router, useFocusEffect } from 'expo-router'
+import { useFocusEffect } from 'expo-router'
 import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
@@ -54,7 +56,7 @@ export default function WantsScreen() {
 
   const handleArchive = (want: WantedCard) => {
     Alert.alert(
-      'ほしいカードを削除しますか？',
+      'いいねを削除しますか？',
       `「${want.card_name}」を一覧から外します。`,
       [
         { text: 'キャンセル', style: 'cancel' },
@@ -89,13 +91,7 @@ export default function WantsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-      <View style={styles.customHeader}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-        </Pressable>
-        <Text style={styles.headerTitle}>ほしいカード</Text>
-        <View style={styles.headerRight} />
-      </View>
+      <ScreenHeader title="いいね" />
 
       <ScrollView
         style={styles.scroll}
@@ -104,14 +100,14 @@ export default function WantsScreen() {
       >
         {/* 説明文 */}
         <Text style={styles.note}>
-          登録したカードと一致する出品がホームの「成立しやすい交換」に優先表示されます。
+          いいねした商品と一致する出品がホームの「成立しやすい交換」に優先表示されます。
         </Text>
 
         {wants.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyTitle}>ほしいカードはまだありません</Text>
+            <Text style={styles.emptyTitle}>いいねした商品はまだありません</Text>
             <Text style={styles.emptySub}>
-              出品詳細画面から「ほしいカードに追加」でここに登録できます。
+              出品詳細画面から「いいねに追加」でここに登録できます。
             </Text>
           </View>
         ) : (
@@ -159,29 +155,6 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#F7F7FB',
-  },
-  // ★ added: カスタムヘッダー
-  customHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  backButton: {
-    width: 36,
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-  },
-  headerRight: {
-    width: 36,
   },
   scroll: {
     flex: 1,

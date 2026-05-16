@@ -1,3 +1,5 @@
+import { HeaderActions } from '@/components/HeaderActions'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { TradeStats } from '@/components/TradeStats'
 import { TrustBadge } from '@/components/TrustBadge'
 import { colors } from '@/constants/theme'
@@ -571,9 +573,7 @@ export default function ProposeScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
-        <View style={styles.screenHeader}>
-          <Text style={styles.screenTitle}>取引</Text>
-        </View>
+        <ScreenHeader title="取引" showBackButton={false} rightActions={<HeaderActions />} />
 
         <View style={styles.tabs}>
           <Pressable
@@ -874,21 +874,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  screenHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 14,
-  },
-  screenTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#18181B',
-  },
-  screenSubtitle: {
-    marginTop: 4,
-    fontSize: 13,
-    color: '#71717A',
   },
   tabs: {
     flexDirection: 'row',

@@ -7,6 +7,8 @@
 // タブ切替時は各タブの状態を保持する (i 案、UX 良)。
 // 鬼滅・コナンなどのキャラは「キャラ・アイテムを探す」タブを使う前提。
 
+import { HeaderActions } from '@/components/HeaderActions'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { SearchAutocomplete } from '@/components/SearchAutocomplete'
 import { MemberMaster } from '@/constants/members'
 import { isMasterCacheReady } from '@/lib/master'
@@ -45,6 +47,7 @@ export default function SearchScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScreenHeader title="検索" showBackButton={false} rightActions={<HeaderActions />} />
       {/* タブバー */}
       <View style={styles.tabBar}>
         <Pressable

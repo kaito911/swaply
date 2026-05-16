@@ -1,9 +1,16 @@
 // app/listing/[id].tsx
+import { LikeButton } from '@/components/LikeButton'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { TrustBadge } from '@/components/TrustBadge'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
-import { addWantedCard, fetchCard, fetchMyWantedCards, supabase } from '@/lib/supabase'
-import { Card, computeTrustBadge, Profile, TrustBadgeLevel, WantMatchScore } from '@/lib/types'
+import {
+  addWantedCard,
+  archiveWantedCard,
+  fetchCard,
+  fetchMyWantedCards,
+  supabase,
+} from '@/lib/supabase'
+import { Card, computeTrustBadge, Profile, TrustBadgeLevel, WantedCard, WantMatchScore } from '@/lib/types'
 import { isWantMatchV2, scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
@@ -54,13 +61,21 @@ function getCtaConfig(
   }
 }
 
-// ④ Trust: 判断できる1〜2行（数値の羅列ではなく文脈付き）
-function getTrustLines(owner: Profile): string[] {
+// ④ Trust: ホーム削除分の補完として全項目を直接表示 (3.5a 機能 H 戦略)
+function getTrustRows(owner: Profile): { label: string; value: string }[] {
   return [
-    owner.trade_count >= 1
-      ? `交換実績 ${owner.trade_count}件`
-      : 'まだ交換実績はありません',
-    `発送率 ${owner.ship_rate}%`,
+    { label: '成立件数', value: `${owner.trade_count}件` },
+    { label: '発送遵守率', value: `${owner.ship_rate}%` },
+    {
+      label: '返信中央値',
+      value: owner.reply_median_hours < 999 ? `${owner.reply_median_hours}時間` : '—',
+    },
+    {
+      label: '差額平均',
+      value: owner.adjustment_avg != null ? `¥${owner.adjustment_avg}` : '—',
+    },
+    { label: '差額偏り', value: owner.adjustment_bias ?? '—' },
+    { label: 'トラブル件数', value: `${owner.trouble_count}件` },
   ]
 }
 
@@ -113,9 +128,8 @@ export default function ListingDetailScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [descExpanded, setDescExpanded] = useState(false)
-  const [wantAdded, setWantAdded] = useState(false)
-  const [wantAdding, setWantAdding] = useState(false)
-  const [isWantSaved, setIsWantSaved] = useState(false)
+  const [myWants, setMyWants] = useState<WantedCard[]>([])
+  const [likeToggling, setLikeToggling] = useState(false)
   const [bestMatchScore, setBestMatchScore] = useState<WantMatchScore>('none')
   const [imageSide, setImageSide] = useState<'front' | 'back'>('front')
 
@@ -146,7 +160,7 @@ export default function ListingDetailScreen() {
 
       if (uid != null) {
         const wants = await fetchMyWantedCards(uid)
-        setIsWantSaved(wants.some((want) => isWantMatchV2(fetched, want)))
+        setMyWants(wants)
 
         const best = wants.reduce<WantMatchScore>((acc, want) => {
           const s = scoreWantMatchV2(fetched, want)
@@ -256,22 +270,32 @@ export default function ListingDetailScreen() {
     } as never)
   }
 
-  const handleAddWant = async () => {
-    if (currentUserId == null || card == null || wantAdded || wantAdding) return
+  // ★ 3.5a 機能 H: 写真 overlay LikeButton の toggle ロジック
+  // home.tsx と同じ設計: isLiked は myWants との fuzzy match で判定、toggle で add/archive 切替
+  const isLiked = card != null && myWants.some((w) => isWantMatchV2(card, w))
+
+  const handleToggleLike = async () => {
+    if (currentUserId == null || card == null || likeToggling) return
+    const matched = myWants.find((w) => isWantMatchV2(card, w))
     try {
-      setWantAdding(true)
-      await addWantedCard({
-        userId: currentUserId,
-        cardName: card.name,
-        groupName: card.group_name,
-        memberName: card.member_name,
-        series: card.series,
-      })
-      setWantAdded(true)
+      setLikeToggling(true)
+      if (matched != null) {
+        await archiveWantedCard(matched.id)
+      } else {
+        await addWantedCard({
+          userId: currentUserId,
+          cardName: card.name,
+          groupName: card.group_name,
+          memberName: card.member_name,
+          series: card.series,
+        })
+      }
+      const next = await fetchMyWantedCards(currentUserId)
+      setMyWants(next)
     } catch {
-      Alert.alert('エラー', 'いいねへの追加に失敗しました')
+      Alert.alert('エラー', 'いいねの更新に失敗しました')
     } finally {
-      setWantAdding(false)
+      setLikeToggling(false)
     }
   }
 
@@ -369,6 +393,17 @@ export default function ListingDetailScreen() {
               {diff.text}
             </Text>
           </View>
+
+          {/* ♡ いいね: bottom-right overlay (自分の出品では非表示、3.5a 機能 H) */}
+          {!isOwn && currentUserId != null && (
+            <LikeButton
+              isLiked={isLiked}
+              onToggle={handleToggleLike}
+              size="medium"
+              disabled={likeToggling}
+              style={styles.likeOverlay}
+            />
+          )}
         </View>
 
         {isNonActive && (
@@ -403,7 +438,7 @@ export default function ListingDetailScreen() {
               {card.want_description ?? '未設定'}
             </Text>
           </View>
-          {(isWantSaved || wantAdded) && !isOwn && (
+          {isLiked && !isOwn && (
             <Text style={styles.wantSavedNote}>✓ いいね済みの商品です</Text>
           )}
 
@@ -420,6 +455,7 @@ export default function ListingDetailScreen() {
           </View>
 
           {/* ④ Trust ────────────────────────────── */}
+          {/* ★ 3.5a 機能 H: ホームから Trust 削除した分、出品詳細で全項目を直接表示 (tap 不要) */}
           <Text style={styles.sectionLabel}>出品者</Text>
 
           {owner != null ? (
@@ -443,10 +479,16 @@ export default function ListingDetailScreen() {
                 <Text style={styles.detailLink}>Trust詳細 ›</Text>
               </View>
 
-              {/* 数値の羅列ではなく判断できる形で表示 */}
-              <View style={styles.trustLinesWrap}>
-                {getTrustLines(owner).map((line, i) => (
-                  <Text key={i} style={styles.trustLine}>{line}</Text>
+              {/* Trust 6 項目を default 表示 (成立件数 / 発送遵守率 / 返信中央値 / 差額平均 / 差額偏り / トラブル件数) */}
+              <View style={styles.trustRowsWrap}>
+                {getTrustRows(owner).map((row, i, arr) => (
+                  <View
+                    key={row.label}
+                    style={[styles.trustRow, i < arr.length - 1 && styles.trustRowBorder]}
+                  >
+                    <Text style={styles.trustLabel}>{row.label}</Text>
+                    <Text style={styles.trustValue}>{row.value}</Text>
+                  </View>
                 ))}
               </View>
 
@@ -479,22 +521,7 @@ export default function ListingDetailScreen() {
             </View>
           )}
 
-          {/* 補足: いいね追加（ログイン・他人のみ） */}
-          {!isOwn && currentUserId != null && (
-            <Pressable
-              style={[styles.wantButton, (wantAdded || wantAdding) && styles.wantButtonDone]}
-              onPress={handleAddWant}
-              disabled={wantAdded || wantAdding}
-            >
-              <Text style={[styles.wantButtonText, wantAdded && styles.wantButtonTextDone]}>
-                {wantAdded
-                  ? '✓ いいね済み'
-                  : wantAdding
-                  ? '追加中...'
-                  : '♡ いいね'}
-              </Text>
-            </Pressable>
-          )}
+          {/* 旧「♡ いいね」画面下部ボタンは 3.5a で削除、写真右下 overlay の LikeButton に統合 */}
         </View>
 
         {/* ⑤ CTA ──────────────────────────────── */}
@@ -671,6 +698,11 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     fontWeight: fontWeight.bold,
   },
+  likeOverlay: {
+    position: 'absolute',
+    bottom: spacing.sm,
+    right: spacing.sm,
+  },
 
   // ── status banner ────────────────────────
   statusBanner: {
@@ -820,15 +852,28 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.medium,
     color: colors.primary,
   },
-  trustLinesWrap: {
+  trustRowsWrap: {
     borderTopWidth: 1,
     borderTopColor: colors.borderLight,
     paddingTop: spacing.sm,
-    gap: spacing.xs,
   },
-  trustLine: {
+  trustRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.xs + 2,
+  },
+  trustRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  trustLabel: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.medium,
+    color: colors.textSecondary,
+  },
+  trustValue: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
     color: colors.textPrimary,
   },
   trustNote: {
@@ -860,28 +905,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 22,
     marginTop: spacing.xs,
-  },
-
-  // ── wants 追加導線 ────────────────────────
-  wantButton: {
-    marginTop: spacing.sm,
-    marginBottom: spacing.base,
-    alignSelf: 'center',
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.sm,
-  },
-  wantButtonDone: {
-    opacity: 0.5,
-  },
-  wantButtonText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.medium,
-    color: colors.primary,
-    textDecorationLine: 'underline',
-  },
-  wantButtonTextDone: {
-    color: colors.textTertiary,
-    textDecorationLine: 'none',
   },
 
   // ── ⑤ cta ────────────────────────────────

@@ -1,34 +1,44 @@
 // components/HomeSmallCard.tsx
+// ホーム lane 2 (成立しやすい交換) の小型カード。
+// 3.5a (機能 H 真意): TrustBadge overlay 完全削除、求 or matchReason を大強調、商品名は補助。
+// 写真右上に LikeButton (size=small) overlay。
+
+import { LikeButton } from '@/components/LikeButton'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
-import { Card, computeTrustBadge } from '@/lib/types'
+import { Card } from '@/lib/types'
 import { router } from 'expo-router'
 import React from 'react'
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { TrustBadge } from './TrustBadge'
 
 interface HomeSmallCardProps {
   card: Card
   isOwn?: boolean
   isWantMatched?: boolean
   matchReasonLabel?: string | null
+  isLiked?: boolean
+  onToggleLike?: () => void
 }
 
-export function HomeSmallCard({ card, isOwn = false, isWantMatched = false, matchReasonLabel }: HomeSmallCardProps) {
-  const owner = card.owner
-  const trustLevel = owner
-    ? computeTrustBadge({
-        trade_count: owner.trade_count,
-        ship_rate: owner.ship_rate,
-        reply_median_hours: owner.reply_median_hours,
-        trouble_count: owner.trouble_count,
-        last_active_at: owner.last_active_at,
-      })
-    : 'green'
-
+export function HomeSmallCard({
+  card,
+  isOwn = false,
+  isWantMatched = false,
+  matchReasonLabel,
+  isLiked = false,
+  onToggleLike,
+}: HomeSmallCardProps) {
   const handlePress = () => {
     router.push({ pathname: '/listing/[id]', params: { id: card.id } })
   }
+
+  // ★ 機能 H 真意 (3.5a): 求 or matchReason を強調表示するテキスト
+  const headlineText =
+    matchReasonLabel != null
+      ? matchReasonLabel
+      : card.want_description != null
+      ? `求: ${card.want_description}`
+      : null
 
   return (
     <Pressable style={styles.card} onPress={handlePress}>
@@ -44,11 +54,6 @@ export function HomeSmallCard({ card, isOwn = false, isWantMatched = false, matc
             <Ionicons name="image-outline" size={20} color={colors.border} />
           </View>
         )}
-
-        {/* TrustBadge: top-right overlay */}
-        <View style={styles.trustOverlay}>
-          <TrustBadge level={trustLevel} size="sm" />
-        </View>
 
         {/* 差額なしタグ: bottom-left overlay（Lane 2 の責務を視覚的に伝える） */}
         {!card.allows_adjustment && (
@@ -70,19 +75,25 @@ export function HomeSmallCard({ card, isOwn = false, isWantMatched = false, matc
             <Text style={styles.ownBadgeText}>自分</Text>
           </View>
         )}
+
+        {/* ♡ いいね: top-right overlay (自分の出品では非表示) */}
+        {!isOwn && onToggleLike != null && (
+          <LikeButton
+            isLiked={isLiked}
+            onToggle={onToggleLike}
+            size="small"
+            style={styles.likeOverlay}
+          />
+        )}
       </View>
 
       <View style={styles.body}>
-        {/* ★ 機能 H (3.5a): 表示順 求 (or matchReason fallback) > 商品名 */}
-        {matchReasonLabel != null ? (
-          <Text style={styles.matchReason} numberOfLines={1}>
-            {matchReasonLabel}
+        {/* ★ 機能 H 真意 (3.5a): 求 or matchReason を大強調、商品名は補助 */}
+        {headlineText != null && (
+          <Text style={styles.headline} numberOfLines={2}>
+            {headlineText}
           </Text>
-        ) : card.want_description != null ? (
-          <Text style={styles.matchReason} numberOfLines={1}>
-            求: {card.want_description}
-          </Text>
-        ) : null}
+        )}
 
         {card.group_name != null && (
           <Text style={styles.group} numberOfLines={1}>
@@ -125,7 +136,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  trustOverlay: {
+  likeOverlay: {
     position: 'absolute',
     top: spacing.xs,
     right: spacing.xs,
@@ -161,24 +172,24 @@ const styles = StyleSheet.create({
   body: {
     padding: spacing.sm,
   },
+  headline: {
+    fontSize: 13,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    lineHeight: 17,
+  },
   group: {
     fontSize: 10,
     color: colors.textSecondary,
-    fontWeight: fontWeight.medium,
-  },
-  name: {
-    fontSize: 12,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-    lineHeight: 16,
+    fontWeight: fontWeight.regular,
     marginTop: spacing.xs,
   },
-  matchReason: {
-    fontSize: 10, // ★ updated: 9 → 10 (可読性向上)
-    lineHeight: 13,
-    fontWeight: fontWeight.medium,
+  name: {
+    fontSize: 11,
+    fontWeight: fontWeight.regular,
     color: colors.textSecondary,
-    marginTop: 3,
+    lineHeight: 14,
+    marginTop: 2,
   },
   wantMatchOverlay: {
     position: 'absolute',

@@ -15,7 +15,7 @@ interface SearchBarProps {
 export function SearchBar({
   value,
   onChangeText,
-  placeholder = 'カード名、グループ、メンバーで検索',
+  placeholder = 'キャラ・アイテム名で検索',
   onPress,
 }: SearchBarProps) {
   const inner = (

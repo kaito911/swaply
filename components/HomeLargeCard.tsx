@@ -1,17 +1,23 @@
 // components/HomeLargeCard.tsx
-import { colors, fontWeight, radius, spacing } from '@/constants/theme'
-import { Card, computeTrustBadge } from '@/lib/types'
+// ホーム lane 1/3 (おすすめ / 新着) の大型カード。
+// 3.5a (機能 H 真意): Trust 表示 (TrustBadge overlay + TradeStats) を完全削除、
+// 求 (want_description) を「求: XXX」全体同サイズ太字で大強調、商品名は補助的に小さく。
+// 写真右上に LikeButton (size=small) overlay。Trust は出品詳細画面で密度確保 (機能 H 戦略)。
+
+import { LikeButton } from '@/components/LikeButton'
+import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { Card } from '@/lib/types'
 import { router } from 'expo-router'
 import React from 'react'
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { PrimaryCTA } from './PrimaryCTA'
-import { TradeStats } from './TradeStats'
-import { TrustBadge } from './TrustBadge'
 
 interface HomeLargeCardProps {
   card: Card
   isOwn?: boolean
+  isLiked?: boolean
+  onToggleLike?: () => void
 }
 
 function getDiffLabel(card: Card): { text: string; bg: string; textColor: string } {
@@ -28,18 +34,7 @@ function getDiffLabel(card: Card): { text: string; bg: string; textColor: string
   return { text: '要相談', bg: colors.tagInfoBg, textColor: colors.tagInfoText }
 }
 
-export function HomeLargeCard({ card, isOwn = false }: HomeLargeCardProps) {
-  const owner = card.owner
-  const trustLevel = owner
-    ? computeTrustBadge({
-        trade_count: owner.trade_count,
-        ship_rate: owner.ship_rate,
-        reply_median_hours: owner.reply_median_hours,
-        trouble_count: owner.trouble_count,
-        last_active_at: owner.last_active_at,
-      })
-    : 'green'
-
+export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLike }: HomeLargeCardProps) {
   const diff = getDiffLabel(card)
 
   const handlePress = () => {
@@ -63,11 +58,6 @@ export function HomeLargeCard({ card, isOwn = false }: HomeLargeCardProps) {
           </View>
         )}
 
-        {/* TrustBadge: top-right overlay */}
-        <View style={styles.trustOverlay}>
-          <TrustBadge level={trustLevel} size="sm" />
-        </View>
-
         {/* Diff label: bottom-left overlay */}
         <View style={[styles.diffOverlay, { backgroundColor: diff.bg }]}>
           <Text style={[styles.diffText, { color: diff.textColor }]}>{diff.text}</Text>
@@ -79,13 +69,23 @@ export function HomeLargeCard({ card, isOwn = false }: HomeLargeCardProps) {
             <Text style={styles.ownBadgeText}>自分の出品</Text>
           </View>
         )}
+
+        {/* ♡ いいね: top-right overlay (自分の出品では非表示) */}
+        {!isOwn && onToggleLike != null && (
+          <LikeButton
+            isLiked={isLiked}
+            onToggle={onToggleLike}
+            size="small"
+            style={styles.likeOverlay}
+          />
+        )}
       </View>
 
       {/* Body */}
-      {/* ★ 機能 H (3.5a): 表示順 求 > 商品名 > Trust > CTA */}
+      {/* ★ 機能 H 真意 (3.5a): 求を大強調、商品名は補助的、Trust 完全削除 */}
       <View style={styles.body}>
         {card.want_description != null && (
-          <Text style={styles.want} numberOfLines={1}>
+          <Text style={styles.want} numberOfLines={2}>
             求: {card.want_description}
           </Text>
         )}
@@ -99,17 +99,6 @@ export function HomeLargeCard({ card, isOwn = false }: HomeLargeCardProps) {
         <Text style={styles.name} numberOfLines={2}>
           {card.name}
         </Text>
-
-        {owner != null && (
-          <View style={styles.statsWrap}>
-            <TradeStats
-              tradeCount={owner.trade_count}
-              shipRate={owner.ship_rate}
-              replyMedianHours={owner.reply_median_hours}
-              layout="grid"
-            />
-          </View>
-        )}
 
         <PrimaryCTA
           label={isOwn ? '自分の出品' : '提案する'}
@@ -155,7 +144,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  trustOverlay: {
+  likeOverlay: {
     position: 'absolute',
     top: spacing.sm,
     right: spacing.sm,
@@ -189,27 +178,26 @@ const styles = StyleSheet.create({
   body: {
     padding: spacing.md,
   },
-  group: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    fontWeight: fontWeight.medium,
-  },
-  name: {
-    fontSize: 14,
+  want: {
+    fontSize: 18,
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
-    lineHeight: 20,
-    marginTop: spacing.xs,
+    lineHeight: 24,
   },
-  want: {
+  group: {
     fontSize: 12,
     color: colors.textSecondary,
-    marginTop: spacing.xs,
+    fontWeight: fontWeight.regular,
+    marginTop: spacing.sm,
   },
-  statsWrap: {
-    marginTop: spacing.xs,
+  name: {
+    fontSize: 13,
+    fontWeight: fontWeight.regular,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginTop: 2,
   },
   cta: {
-    marginTop: spacing.sm,
+    marginTop: spacing.md,
   },
 })

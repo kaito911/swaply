@@ -8,8 +8,10 @@ import { LaneSectionLabel } from '@/components/LaneSectionLabel'
 import { SearchBar } from '@/components/SearchBar'
 import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
 import { Card, WantedCard, WantMatchScore } from '@/lib/types'
-import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
+import { isWantMatchV2, scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import {
+  addWantedCard,
+  archiveWantedCard,
   fetchEasyCards,
   fetchMyWantedCards,
   fetchNewCards,
@@ -132,6 +134,40 @@ export default function HomeScreen() {
     router.push('/(tabs)/search')
   }
 
+  // ★ 3.5a 機能 H: いいね♡ overlay の toggle ロジック
+  // WantedCard は card_id を持たないため card_name 等で fuzzy match (isWantMatchV2 流用)。
+  // toggle 後は wants を再 fetch して isLiked を即時更新。
+  const isCardLiked = useCallback(
+    (card: Card) => myWants.some((w) => isWantMatchV2(card, w)),
+    [myWants],
+  )
+
+  const handleToggleLike = useCallback(
+    async (card: Card) => {
+      if (user == null) return
+      const matched = myWants.find((w) => isWantMatchV2(card, w))
+      try {
+        if (matched != null) {
+          await archiveWantedCard(matched.id)
+        } else {
+          await addWantedCard({
+            userId: user.id,
+            cardName: card.name,
+            groupName: card.group_name,
+            memberName: card.member_name,
+            series: card.series,
+          })
+        }
+        // 即時反映: wants を再 fetch
+        const next = await fetchMyWantedCards(user.id)
+        setMyWants(next)
+      } catch (e) {
+        console.error('[home][handleToggleLike]', e)
+      }
+    },
+    [user, myWants],
+  )
+
   const getMatchReasonLabel = (score: WantMatchScore): string | null => {
     if (score === 'strong') return 'あなたの求と一致'
     if (score === 'medium') return '同メンバーで交換しやすい'
@@ -197,6 +233,8 @@ export default function HomeScreen() {
                   key={card.id}
                   card={card}
                   isOwn={user != null && card.owner_user_id === user.id}
+                  isLiked={isCardLiked(card)}
+                  onToggleLike={user != null ? () => handleToggleLike(card) : undefined}
                 />
               ))}
             </ScrollView>
@@ -206,9 +244,9 @@ export default function HomeScreen() {
               title="成立しやすい交換"
               sub="初心者でも"
             />
-            {/* ★ added: レーン全体の意味を伝える補足文 */}
+            {/* ★ added: レーン全体の意味を伝える補足文 (3.5a: キャラ一致 = Phase 0.5b 整合) */}
             <Text style={styles.laneSubNote} numberOfLines={1}>
-              あなたの求やメンバー一致をもとに表示
+              あなたの求やキャラ一致をもとに表示
             </Text>
             <ScrollView
               horizontal
@@ -223,6 +261,8 @@ export default function HomeScreen() {
                   isOwn={user != null && card.owner_user_id === user.id}
                   isWantMatched={bestMatch !== 'none'}
                   matchReasonLabel={matchReasonLabel}
+                  isLiked={isCardLiked(card)}
+                  onToggleLike={user != null ? () => handleToggleLike(card) : undefined}
                 />
               ))}
             </ScrollView>
@@ -242,6 +282,8 @@ export default function HomeScreen() {
                   key={card.id}
                   card={card}
                   isOwn={user != null && card.owner_user_id === user.id}
+                  isLiked={isCardLiked(card)}
+                  onToggleLike={user != null ? () => handleToggleLike(card) : undefined}
                 />
               ))}
             </ScrollView>

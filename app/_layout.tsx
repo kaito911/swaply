@@ -142,6 +142,11 @@ function RootNavigator() {
         />
 
         <Stack.Screen
+          name="notifications"
+          options={{ headerShown: false }}
+        />
+
+        <Stack.Screen
           name="offer-insights"
           options={{
             headerShown: true,

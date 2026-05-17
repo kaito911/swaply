@@ -30,6 +30,19 @@
 - **v1.6 (2026-05-07)**: **C-S3 を写真ベース追跡番号自動入力に拡張** (Claude Vision API、伝票写真撮影 → OCR 自動抽出 → ユーザー確認 UI)、C-S3 工数を 2-3h → 5-7h に増、Phase S 合計を 16-23h → 20-27h、β 前必須累計を 87-127h → 91-131h、Vision API 運用設計セクション追加 (API key 管理 / コスト ~$0.017/OCR / fallback 手動入力 / プライバシー)、詐欺パターン b (追跡番号偽造) の防御を「△ 検出不可」→「○ Vision API + 配送業者 prefix 検証で抑止」に強化、教訓 7.9「UX × 詐欺対策の同時達成」追加
 - **v1.7**: スキップ (中間バージョンとして予定されていたが、戦略議論優先のためターゲット転換を含む v1.8 へ統合)
 - **v1.8 (2026-05-09)**: **Phase 1 ターゲット転換** (TREASURE/K-POP → 鬼滅 + コナン + サンリオ) を反映。新章追加: 章 3.8 スコープ拡張 (cards → items)、章 3.9 DB schema 移行設計 (additive migration、後方互換)、章 3.10 マスタデータ整備計画 (3 候補のキャラ × グッズシリーズ × コラボ網羅)、章 3.11 KPI 更新 (カテゴリ別流動性目標 + 月成立件数 + 撤退判定閾値再設定)、章 3.12 メッセージング戦略 (「アニメ・推し活グッズの交換アプリ」)。Phase 順序の再評価 (UI-7 出品画面改修は items 対応を含むため scope 増、Phase M/S は変更なし)。教訓 7.10「現場一次データ > Web リサーチスコア」追加 (X 過去 10 分観察でアニメ系 12-16 件 vs INI 22 件 vs TREASURE 1 件、定常型 vs スパイク型の構造視点)。strategy_master v2.1 → v2.2 と同期
+- **v1.14 (2026-05-17)**: **Round 1-5 三角検証でビジネスモデル B 改 v5.2 確定 — Phase 2 章新設 + Step 3.5e 移管 + Pioneer 50 名上限**。
+  - **ビジネスモデル大転換**: 月額 Standard ¥300 / Premium ¥600 (pricing_v1) → **完全無料コア + 差額決済 10% (Phase 2+) + 控えめ広告 (Phase 2.5+) + 軽 Plus A/B (Phase 3) + B2B (Phase 4+)**
+  - **pricing_v1.md → pricing_v2.md リライト**: 月額コア機能課金廃止 (Round 2 で「コア機能月額は推し活市場で成立事例ゼロ」と確定)、4 分類ルール + 調整金 ¥1,000 上限は維持、差額手数料 5% → 10% (Stripe Connect 収納代行)
+  - **Phase 2 章新設**: Step 3.5e (Stripe Connect 本実装) を β1 から **Phase 2 開始時に移管**。β1 開始判定基準は「DAU 300 + 月間取引 500 + Stripe Connect 法務クリア」全て満たす
+  - **Pioneer 制度新設 (v5.2)**: 50 名上限 (β1 先着 30 + 運営推薦 20)、4 特典 (称号永久 / 広告非表示永久 / 差額決済段階逓減 Y1-Y3 100% → Y4 5% → Y5 2.5% → Y6+ 通常 / Plus 3 年無料)。累計機会損失 ¥4.5 万 (実損 ¥1.35 万) で Base 利益への影響無視可能
+  - **β1 必須タスク更新**: Pioneer 制度 DB / 表示最小実装 を「余力」→「必須」に格上げ (戦略の核心)。差額決済 schema 準備は「余力」維持
+  - **PL v5.2 (4 シナリオ)**: Worst (DAU 500、-¥50 万) / Base Conservative (DAU 2,500-3,000、+¥30-80 万) / Target Base (DAU 5,000、+¥150-200 万) / Best (DAU 20,000、+¥1,400-2,000 万)、Conservative + Target Base 併記
+  - **法務スケジュール追加**: Stripe Connect 資金移動業 = Phase 2 開始前 6 ヶ月 (2026/Q4-2027/Q1) に専門家相談、β1 期間中は BILLING_ENABLED=false で影響なし
+  - **4 レーン構成 commit `00d8b5b`** (Step 3.5a 完了) 反映、Step 3.5b 着手準備
+  - 教訓 12「ビジネスモデル前提崩壊時は Round N で再検証」: Round 1-5 で 5 回の判断ミス検出 + 修正、整理屋訂正パターン累積を memory 化
+  - 関連 commits: `00d8b5b` (Step 3.5a 4 レーン構成)、Round 1-5 議論は claude.ai セッション完結 + Claude Code 三角検証
+  - 関連 memory: `project_monetization_round5_finalized.md` (確定モデル v5.2)、`session_handoff_ui12.md` (Round 5 確定追記)
+  - 関連 docs: `docs/source/pricing_v2.md` (正本)、`docs/source/pricing_v1.md` (Deprecated)、`docs/financials/PL_v5.2.md` (4 シナリオ)、`docs/policies/pioneer_policy_v1.md` (Pioneer 規約)
 - **v1.13 (2026-05-16)**: **3.5a 完了反映 — 機能 H 真意確定 (Trust ホーム削除 + 求大強調 + 出品詳細 Trust 6 項目直接表示) + LikeButton overlay + 検索文言整合 + β1 マイルストーン + Step 3.5c スコープ拡張**。
   - **章 3.14-5 補強**: 機能 H = 単純な「表示順入れ替え」ではなく **Trust 関連 (TrustBadge overlay + TradeStats) をホームから完全削除 + 求 (want_description) を大強調 + 出品詳細で Trust 6 項目 (成立件数 / 発送遵守率 / 返信中央値 / 差額平均 / 差額偏り / トラブル件数) を default 直接表示** (claude.ai 整理屋訂正パターン 12 回目)
   - **LikeButton overlay 配置 (メルカリ式)**: 写真右上に♡ (HomeLarge/SmallCard、size=small) / 写真右下に♡ (出品詳細、size=medium)。WantedCard 紐付けは card_id 不在のため `isWantMatchV2` で fuzzy match → add/archive toggle

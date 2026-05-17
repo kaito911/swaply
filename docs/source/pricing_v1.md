@@ -1,8 +1,24 @@
-# Swaply 料金体系 確定版 v1
+# [DEPRECATED] Swaply 料金体系 v1
+
+> ## ⚠️ DEPRECATED — 履歴参照用として保持
+>
+> **本ドキュメントは 2026-05-17 に廃止されました**。
+>
+> 最新の正本: **`docs/source/pricing_v2.md`**
+>
+> 経緯: Round 1-5 三角検証 (claude.ai + Claude Code + ChatGPT) を経て、月額 Standard ¥300 / Premium ¥600 モデルが推し活市場で成立しないと判明。完全無料コア + 差額決済 10% + 段階的収益化モデル (B 改 v5.2) に転換。
+>
+> 詳細は `memory/project_monetization_round5_finalized.md` 参照。
+>
+> 本ファイルは **参照禁止**。新規実装・議論では `pricing_v2.md` のみを Source of Truth とする。
+
+---
+
+# Swaply 料金体系 v1 (旧版、参照履歴)
 
 最終更新: 2026-05-04 / バージョン: v1 / 前提: feat/trade-pr1 完了時点
 
-> **本ドキュメントの位置づけ**:
+> **本ドキュメントの位置づけ** (旧):
 > Swaply の課金構造を確定する Source of Truth。事業母艦v2 の「料金設計」章を実装可能な粒度まで詳細化したもの。戦略 v3 と並列に運用される。
 >
 > **関連ドキュメント**:

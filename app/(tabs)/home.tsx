@@ -1,14 +1,28 @@
 // app/(tabs)/home.tsx
+//
+// 3.5a commit 3 (機能 H v2 確定): ホーム 4 レーン構成に再構築。
+//   Lane 1: いいねした交換 (新規、最上部、LargeCard)
+//   Lane 2: あなたへのおすすめ (既存、LargeCard)
+//   Lane 3: 新着の交換 (既存、LargeCard、ラベル「新着」→「新着の交換」)
+//   Lane 4: 成立しやすい交換 (移動 + Small→Large 化)
+//
+// 機能 H v2: Trust ホーム削除のみが本質 (求強調撤回済、商品名 → 求の自然順)。
+// LikeButton 構造的問題は 3.5b で wanted_cards.card_id 列追加で根本解決予定。
+//
+// 「いいねした交換」データソースの暫定対応:
+//   wanted_cards に card_id 列がないため、現状は 3 レーン分の fetch 結果から
+//   isCardLiked() でフィルタしてユニーク化する近似で表示。
+//   3.5b で wanted_cards.card_id + 専用 fetch (fetchLikedCards) に置換予定。
+
 import { BestTradeCandidateData } from '@/components/BestTradeCandidateCard'
 import { EmptyHomeState } from '@/components/EmptyHomeState'
 import { HeaderActions } from '@/components/HeaderActions'
 import { HomeLargeCard } from '@/components/HomeLargeCard'
-import { HomeSmallCard } from '@/components/HomeSmallCard'
 import { LaneSectionLabel } from '@/components/LaneSectionLabel'
 import { SearchBar } from '@/components/SearchBar'
 import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
-import { Card, WantedCard, WantMatchScore } from '@/lib/types'
-import { isWantMatchV2, scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
+import { Card, WantedCard } from '@/lib/types'
+import { isWantMatchV2 } from '@/lib/matcher'
 import {
   addWantedCard,
   archiveWantedCard,
@@ -20,7 +34,7 @@ import {
 } from '@/lib/supabase'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { router, useFocusEffect } from 'expo-router'
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   ScrollView,
@@ -29,13 +43,6 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-
-// ★ updated: easyCardsWithMatch の要素型
-type EasyCardWithMatch = {
-  card: Card
-  bestMatch: WantMatchScore
-  matchReasonLabel: string | null
-}
 
 export default function HomeScreen() {
   const { user } = useAuthContext()
@@ -86,7 +93,7 @@ export default function HomeScreen() {
         const wants = user != null ? await fetchMyWantedCards(user.id) : []
         if (isActive) setMyWants(wants)
 
-        // TODO: 推薦RPC実装後に差し替え (Lane 1: 現行は自分以外のアクティブカードによる近似)
+        // TODO: 推薦RPC実装後に差し替え (Lane 2: 現行は自分以外のアクティブカードによる近似)
         const [rec, easy, newest] = await Promise.all([
           user != null ? fetchRecommendedCards(user.id) : fetchNewCards(),
           fetchEasyCards(user?.id, wants),
@@ -209,24 +216,31 @@ export default function HomeScreen() {
     [user, myWants, pendingAdds, isCardLiked],
   )
 
-  const getMatchReasonLabel = (score: WantMatchScore): string | null => {
-    if (score === 'strong') return 'あなたの求と一致'
-    if (score === 'medium') return '同メンバーで交換しやすい'
-    if (score === 'weak') return 'あなたの求に近い'
-    return null
-  }
+  // ★ 3.5a commit 3: Lane 1「いいねした交換」用の暫定データ計算
+  // 現 3 レーン (rec / easy / new) の取得結果から isCardLiked() で抽出 + id 重複排除。
+  // 3.5b で wanted_cards.card_id 列追加 + fetchLikedCards (専用 fetch) に置換予定。
+  const likedCards = useMemo<Card[]>(() => {
+    const all = [...recommendedCards, ...easyCards, ...newCards]
+    const seen = new Set<string>()
+    const result: Card[] = []
+    for (const c of all) {
+      if (seen.has(c.id)) continue
+      if (!isCardLiked(c)) continue
+      seen.add(c.id)
+      result.push(c)
+    }
+    return result
+  }, [recommendedCards, easyCards, newCards, isCardLiked])
 
-  // ★ Step 3 commit 3: scoreWantMatchV2 (any-overlap + overlap 数重み付け)
-  const easyCardsWithMatch: EasyCardWithMatch[] = easyCards.map((card) => {
-    const bestMatch = myWants.reduce<WantMatchScore>((best, want) => {
-      const s = scoreWantMatchV2(card, want)
-      if (s === 'strong') return 'strong'
-      if (s === 'medium' && best !== 'strong') return 'medium'
-      if (s === 'weak' && best === 'none') return 'weak'
-      return best
-    }, 'none')
-    return { card, bestMatch, matchReasonLabel: getMatchReasonLabel(bestMatch) }
-  })
+  const renderLargeCard = (card: Card) => (
+    <HomeLargeCard
+      key={card.id}
+      card={card}
+      isOwn={user != null && card.owner_user_id === user.id}
+      isLiked={isCardLiked(card)}
+      onToggleLike={user != null ? () => handleToggleLike(card) : undefined}
+    />
+  )
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -256,9 +270,25 @@ export default function HomeScreen() {
           <EmptyHomeState />
         ) : (
           <>
-            {/* bestCandidate は easyCards 先頭に統合済み */}
+            {/* Lane 1: いいねした交換 — LargeCard (3.5a commit 3 新規追加、最上部) */}
+            {likedCards.length > 0 && (
+              <>
+                <LaneSectionLabel
+                  title="いいねした交換"
+                  sub="すべて見る"
+                  onSubPress={() => router.push('/wants')}
+                />
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.laneContent}
+                >
+                  {likedCards.map(renderLargeCard)}
+                </ScrollView>
+              </>
+            )}
 
-            {/* Lane 1: あなたへのおすすめ — LargeCard */}
+            {/* Lane 2: あなたへのおすすめ — LargeCard */}
             <LaneSectionLabel
               title="あなたへのおすすめ"
               sub="すべて見る"
@@ -269,23 +299,28 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.laneContent}
             >
-              {recommendedCards.map((card) => (
-                <HomeLargeCard
-                  key={card.id}
-                  card={card}
-                  isOwn={user != null && card.owner_user_id === user.id}
-                  isLiked={isCardLiked(card)}
-                  onToggleLike={user != null ? () => handleToggleLike(card) : undefined}
-                />
-              ))}
+              {recommendedCards.map(renderLargeCard)}
             </ScrollView>
 
-            {/* Lane 2: 成立しやすい交換 — SmallCard */}
+            {/* Lane 3: 新着の交換 — LargeCard (ラベル「新着」→「新着の交換」) */}
+            <LaneSectionLabel
+              title="新着の交換"
+              sub="更新順"
+            />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.laneContent}
+            >
+              {newCards.map(renderLargeCard)}
+            </ScrollView>
+
+            {/* Lane 4: 成立しやすい交換 — LargeCard (3.5a commit 3 で Small→Large 化) */}
             <LaneSectionLabel
               title="成立しやすい交換"
               sub="初心者でも"
             />
-            {/* ★ added: レーン全体の意味を伝える補足文 (3.5a: キャラ一致 = Phase 0.5b 整合) */}
+            {/* レーン全体の意味を伝える補足文 */}
             <Text style={styles.laneSubNote} numberOfLines={1}>
               あなたの求やキャラ一致をもとに表示
             </Text>
@@ -294,39 +329,7 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.laneContent}
             >
-              {/* ★ updated: 描画前に計算済みの easyCardsWithMatch を使う */}
-              {easyCardsWithMatch.map(({ card, bestMatch, matchReasonLabel }) => (
-                <HomeSmallCard
-                  key={card.id}
-                  card={card}
-                  isOwn={user != null && card.owner_user_id === user.id}
-                  isWantMatched={bestMatch !== 'none'}
-                  matchReasonLabel={matchReasonLabel}
-                  isLiked={isCardLiked(card)}
-                  onToggleLike={user != null ? () => handleToggleLike(card) : undefined}
-                />
-              ))}
-            </ScrollView>
-
-            {/* Lane 3: 新着 — LargeCard */}
-            <LaneSectionLabel
-              title="新着"
-              sub="更新順"
-            />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.laneContent}
-            >
-              {newCards.map((card) => (
-                <HomeLargeCard
-                  key={card.id}
-                  card={card}
-                  isOwn={user != null && card.owner_user_id === user.id}
-                  isLiked={isCardLiked(card)}
-                  onToggleLike={user != null ? () => handleToggleLike(card) : undefined}
-                />
-              ))}
+              {easyCards.map(renderLargeCard)}
             </ScrollView>
           </>
         )}
@@ -381,7 +384,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     paddingBottom: spacing.sm,
   },
-  // ★ added: Lane 2 見出し直下の補足文
+  // Lane 4 (成立しやすい) 見出し直下の補足文
   laneSubNote: {
     paddingHorizontal: spacing.base,
     marginTop: -spacing.xs,

@@ -1,6 +1,7 @@
 // app/(tabs)/mypage.tsx
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { HeaderActions } from '@/components/HeaderActions'
+import { PioneerBadge } from '@/components/PioneerBadge'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import {
   fetchMyOffers,
@@ -361,10 +362,19 @@ export default function MyPageScreen() {
                 <Text style={styles.avatarText}>{avatarChar}</Text>
               )}
             </View>
-            {/* 名前・バッジ */}
+            {/* 名前・バッジ (Pioneer + Trust) */}
             <View style={styles.heroMeta}>
               <Text style={styles.heroHandle}>{handle ?? displayName ?? 'ユーザー'}</Text>
-              <TrustBadge level={trustLevel} size="sm" />
+              <View style={styles.heroBadgeRow}>
+                {profile?.is_pioneer === true && (
+                  <PioneerBadge
+                    pioneerNumber={profile.pioneer_number ?? null}
+                    showNumber
+                    size="sm"
+                  />
+                )}
+                <TrustBadge level={trustLevel} size="sm" />
+              </View>
             </View>
             {/* 設定ボタン */}
             <Pressable
@@ -520,6 +530,12 @@ const styles = StyleSheet.create({
   heroMeta: {
     flex: 1,
     gap: spacing.xs,
+  },
+  heroBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
   },
   heroHandle: {
     fontSize: fontSize.lg,

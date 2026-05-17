@@ -11,6 +11,11 @@ export type CardStatus = 'active' | 'inactive' | 'reserved' | 'traded'
 export type CardCondition = 'mint' | 'near_mint' | 'good' | 'fair' | 'poor'
 export type UserMode = 'oshi' | 'trading_card' | 'collection'
 
+// Pioneer 制度 (Round 5 確定モデル v5.2、50 名上限)
+// 詳細規約: docs/policies/pioneer_policy_v1.md
+export type PioneerStatus = 'pending' | 'active' | 'forfeited'
+export type PioneerApplicationStatus = 'pending' | 'approved' | 'rejected'
+
 // マスタカテゴリ (cards.category と master_works.category で共有)
 export type MasterCategory = 'anime' | 'idol' | 'character' | 'manga' | 'other'
 
@@ -58,6 +63,27 @@ export interface Profile {
   // fetchMyOffers / get_trade_detail_by_offer で返る可能性がある補助項目
   username?: string | null
   full_name?: string | null
+
+  // Pioneer 制度 (Round 5、50 名上限、migration_pioneer_program.sql で追加)
+  // is_pioneer = true のとき pioneer_number / pioneer_joined_at / pioneer_status='active' は必須
+  is_pioneer?: boolean
+  pioneer_number?: number | null     // 1-50 の範囲、unique
+  pioneer_joined_at?: string | null
+  pioneer_status?: PioneerStatus
+  pioneer_forfeited_reason?: string | null
+}
+
+// Pioneer 申請レコード (pioneer_applications テーブル、Phase 2 で本格運用)
+export interface PioneerApplication {
+  id: string
+  applicant_user_id: string
+  application_reason: string
+  contribution_notes: string | null
+  status: PioneerApplicationStatus
+  reviewed_at: string | null
+  reviewed_by: string | null
+  created_at: string
+  updated_at: string
 }
 
 // ─────────────────────────────────────────

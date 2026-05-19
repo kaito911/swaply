@@ -118,6 +118,19 @@ npm run android
 - 通知一覧 (空表示のみ)
 - 提案・取引フロー (実取引 + 配送データ必要)
 
+### ⚠️ 既存 seed が画像表示されない場合の修正手順
+
+commit `3d6ddca` / `ba4dbb1` の旧 seed は `placehold.co` URL を拡張子なしで指定していたため、
+SVG 返却されて RN/expo-image で表示できない問題がありました。修正手順:
+
+1. Supabase SQL Editor → New query
+2. `docs/seed_video9_demo_fix_image_urls.sql` の中身をコピペ
+3. **Run** ボタンクリック
+4. 確認: `updated_count: 30`, `png_url_count: 30`, `old_svg_url_count: 0`
+5. アプリでホーム再読み込み → 画像が表示される
+
+新規環境では本修正済 seed (`docs/seed_video9_demo.sql`) を使用すれば不要。
+
 ### Step 5: ロールバック (録画完了後、任意)
 1. Supabase Dashboard → SQL Editor → New query
 2. `docs/seed_video9_demo_rollback.sql` の中身をコピペ

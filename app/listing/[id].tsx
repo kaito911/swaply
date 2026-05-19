@@ -12,12 +12,12 @@ import {
 } from '@/lib/supabase'
 import { Card, computeTrustBadge, Profile, TrustBadgeLevel, WantedCard, WantMatchScore } from '@/lib/types'
 import { isWantMatchV2, scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
+import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -354,7 +354,13 @@ export default function ListingDetailScreen() {
         {/* ① Card ─────────────────────────────── */}
         <View style={styles.imageWrap}>
           {displayImageUrl != null ? (
-            <Image source={{ uri: displayImageUrl }} style={styles.image} resizeMode="contain" />
+            <Image
+              source={{ uri: displayImageUrl }}
+              style={styles.image}
+              contentFit="contain"
+              transition={200}
+              cachePolicy="memory-disk"
+            />
           ) : (
             <View style={[styles.image, styles.imageFallback]}>
               <Ionicons name="image-outline" size={40} color={colors.border} />

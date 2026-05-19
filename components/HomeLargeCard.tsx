@@ -7,9 +7,10 @@
 import { LikeButton } from '@/components/LikeButton'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card } from '@/lib/types'
+import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import React from 'react'
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { PrimaryCTA } from './PrimaryCTA'
 
@@ -49,7 +50,9 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
           <Image
             source={{ uri: card.image_url }}
             style={styles.image}
-            resizeMode="cover"
+            contentFit="cover"
+            transition={200}
+            cachePolicy="memory-disk"
           />
         ) : (
           <View style={styles.imagePlaceholder}>

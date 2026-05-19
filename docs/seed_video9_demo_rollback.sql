@@ -5,7 +5,9 @@
 --
 -- 削除対象:
 --   - cards: description LIKE '[SEED_V9]%' (30 件想定)
---   - wanted_cards: 最新 auth.user 所有 + seed cards 名と一致 (7 件想定)
+--   - wanted_cards: seed_demo_ プロフィール所有 + seed cards 名と一致 (13 件想定)
+--     - Part A: seed_idx=1 用 7 件 (Lane 1 表示用)
+--     - Part B: seed_idx=2-5 用 6 件 (直接交換 demo 用)
 --
 -- ⚠️ 重要な制約:
 --   - profiles の seed 化 UPDATE は元データを保存していないため**復元不可**
@@ -14,21 +16,27 @@
 --   - 完全な原状回復が必要なら、seed 適用前に SELECT * FROM profiles を控えること
 
 -- ─────────────────────────────────────────
--- Step 1: wanted_cards 削除
+-- Step 1: wanted_cards 削除 (profile reset より先に実行)
+--   - handle が 'seed_demo_%' のプロフィール所有 wanted_cards のうち
+--   - seed card_name 一覧と一致するもの全件
 -- ─────────────────────────────────────────
 
 DELETE FROM public.wanted_cards
 WHERE user_id IN (
-  SELECT id FROM auth.users ORDER BY created_at DESC LIMIT 1
+  SELECT id FROM public.profiles WHERE handle LIKE 'seed_demo_%'
 )
 AND card_name IN (
+  -- Part A (録画ユーザー = seed_idx=1 用 7 件)
   'アクリルスタンド L サイズ (メンバー X)',
   '公式トレカ 限定版',
   'カフェ限定アクスタ S サイズ',
   'キャラ D アクリルスタンド',
   'TCG カード レア度 SR',
   'ぱしゃっつ 第 〇 弾 ランダム',
-  'グループ E メンバー Y トレカ'
+  'グループ E メンバー Y トレカ',
+  -- Part B (直接交換 demo 用、seed_idx=2-5 用 6 件、重複 card_name 含む)
+  'アイドルカード セット A 第 5 弾',
+  'キャラ F マグネット シート'
 );
 
 -- ─────────────────────────────────────────

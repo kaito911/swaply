@@ -105,6 +105,8 @@ WHERE NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = d.id);
 -- Step 3: cards 30 件 INSERT (6 ジャンル × 5 件、汎用名のみ)
 -- ─────────────────────────────────────────
 
+-- ★ owner 割当の動的 modulo: _seed_v9_users の実件数で循環させる
+--   (auth.users が 5 名なら seed_idx 1-5 で循環、10 名なら 1-10 で循環)
 INSERT INTO public.cards (
   owner_user_id, name, group_name, member_name, series, image_url,
   description, want_description, status, condition,
@@ -113,7 +115,7 @@ INSERT INTO public.cards (
   created_at, updated_at
 )
 SELECT
-  (SELECT id FROM _seed_v9_users WHERE seed_idx = ((v.row_id - 1) % 10) + 1),
+  (SELECT id FROM _seed_v9_users WHERE seed_idx = ((v.row_id - 1) % (SELECT COUNT(*)::int FROM _seed_v9_users)) + 1),
   v.name, v.group_name, v.member_name, v.series,
   v.image_url,
   '[SEED_V9] ' || v.descr, v.want, 'active', v.cond,
@@ -261,11 +263,13 @@ FROM (VALUES
 );
 
 -- ─────────────────────────────────────────
--- Step 4: wanted_cards 7 件 INSERT (Lane 1「いいねした交換」表示用)
---   - 録画ユーザー想定 = seed_idx=1 (最新 auth.user)
---   - card_name は上記 seed cards と一致 → isWantMatchV2 fuzzy match で hit
+-- Step 4: wanted_cards 投入
+--   - Part A (7 件): 録画ユーザー (seed_idx=1) 用、Lane 1「いいねした交換」表示
+--   - Part B (6 件): seed_idx=2-5 に分散、直接交換マッチング demo 用
+--   - 全 13 件、isWantMatchV2 fuzzy match で hit する card_name を使用
 -- ─────────────────────────────────────────
 
+-- Part A: seed_idx=1 所有の 7 件 (Lane 1 表示用、card 30 件の中から fuzzy match)
 INSERT INTO public.wanted_cards (
   user_id, card_name, group_name, member_name, series, status, created_at, updated_at
 )
@@ -284,19 +288,49 @@ FROM (VALUES
 ) AS v(card_name, group_name, member_name, series)
 ON CONFLICT (user_id, card_name, group_name, member_name, series) DO NOTHING;
 
+-- Part B: seed_idx=2-5 に分散 (直接交換マッチング demo 用)
+--   - seed_idx=1 が所有する card と一致する card_name を seed_idx=2-5 が「欲しい」と登録
+--   - これで「seed_idx=1 が seed_idx=2 と直接交換できる相手」として表示される
+--   - 録画ユーザー (seed_idx=1) の譲 = seed_idx=1 所有 card、求 = seed_idx=2-5 所有 card
+INSERT INTO public.wanted_cards (
+  user_id, card_name, group_name, member_name, series, status, created_at, updated_at
+)
+SELECT
+  (SELECT id FROM _seed_v9_users WHERE seed_idx = v.owner_idx),
+  v.card_name, v.group_name, v.member_name, v.series,
+  'active', NOW(), NOW()
+FROM (VALUES
+  -- seed_idx=2 が「アイドルカード」「ぱしゃっつ」を欲しい
+  (2, 'アイドルカード セット A 第 5 弾',     'グループ A', 'メンバー X', 'Tour 2026'),
+  (2, 'ぱしゃっつ 第 〇 弾 ランダム',         NULL,         'メンバー V', '第 12 弾'),
+  -- seed_idx=3 が「キャラ D アクリルスタンド」を欲しい
+  (3, 'キャラ D アクリルスタンド',           NULL,         NULL,         NULL),
+  -- seed_idx=4 が「グループ E メンバー Y トレカ」を欲しい
+  (4, 'グループ E メンバー Y トレカ',         'グループ E', 'メンバー Y', 'JAPAN TOUR'),
+  -- seed_idx=5 が「キャラ F マグネット」「アイドルカード」を欲しい
+  (5, 'キャラ F マグネット シート',           NULL,         'メンバー V', NULL),
+  (5, 'アイドルカード セット A 第 5 弾',     'グループ A', 'メンバー X', 'Tour 2026')
+) AS v(owner_idx, card_name, group_name, member_name, series)
+WHERE EXISTS (SELECT 1 FROM _seed_v9_users WHERE seed_idx = v.owner_idx)  -- 5 名未満でも安全
+ON CONFLICT (user_id, card_name, group_name, member_name, series) DO NOTHING;
+
 -- ─────────────────────────────────────────
 -- Step 5: 完了確認
 -- ─────────────────────────────────────────
 
-DROP TABLE _seed_v9_users;
-
 SELECT
   'seed_video9_demo completed' AS status,
+  (SELECT COUNT(*) FROM _seed_v9_users) AS seed_users_count,
   (SELECT COUNT(*) FROM public.cards WHERE description LIKE '[SEED_V9]%') AS seed_cards_count,
   (SELECT COUNT(*) FROM public.profiles WHERE handle LIKE 'seed_demo_%') AS seed_profiles_count,
-  (SELECT COUNT(*) FROM public.wanted_cards w
-   WHERE EXISTS (SELECT 1 FROM public.cards c
-                 WHERE c.description LIKE '[SEED_V9]%'
-                 AND c.name = w.card_name
-                 AND w.user_id = c.owner_user_id  -- recording user (seed_idx=1) は自分の card は持たないので別
-                 ) OR w.user_id IN (SELECT id FROM auth.users ORDER BY created_at DESC LIMIT 1)) AS seed_wants_count;
+  (SELECT COUNT(*) FROM public.wanted_cards
+   WHERE user_id IN (SELECT id FROM _seed_v9_users)
+   AND card_name IN (
+     'アクリルスタンド L サイズ (メンバー X)', '公式トレカ 限定版',
+     'カフェ限定アクスタ S サイズ', 'キャラ D アクリルスタンド',
+     'TCG カード レア度 SR', 'ぱしゃっつ 第 〇 弾 ランダム',
+     'グループ E メンバー Y トレカ',
+     'アイドルカード セット A 第 5 弾', 'キャラ F マグネット シート'
+   )) AS seed_wants_count;
+
+DROP TABLE _seed_v9_users;

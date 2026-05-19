@@ -15,9 +15,22 @@
 
 | 種別 | 件数 | 識別マーカー |
 |---|---|---|
-| **profiles** UPSERT | 10 名 | `handle LIKE 'seed_demo_%'` |
-| **cards** INSERT | 30 件 | `description LIKE '[SEED_V9]%'` |
-| **wanted_cards** INSERT | 7 件 | 最新 auth.user + 特定 card_name 一致 |
+| **profiles** UPSERT | 最大 10 名 (auth.users 数に依存) | `handle LIKE 'seed_demo_%'` |
+| **cards** INSERT | **30 件** (auth.users 5 名なら 1 名 6 件、10 名なら 1 名 3 件) | `description LIKE '[SEED_V9]%'` |
+| **wanted_cards** INSERT | **13 件** (Part A 7 + Part B 6) | seed プロフィール所有 + 特定 card_name |
+
+### wanted_cards の分散構成 (直接交換 demo 対応)
+
+| Part | 所有者 | 件数 | 目的 |
+|---|---|---|---|
+| **A** | seed_idx=1 (録画ユーザー) | 7 件 | Lane 1「いいねした交換」表示 |
+| **B** | seed_idx=2-5 (他ユーザー) | 6 件 | 直接交換マッチング demo 成立 |
+
+### 直接交換 demo のマッチングペア例 (seed_idx=1 録画ユーザー視点)
+- 譲: 「アイドルカード」(seed_idx=1 所有) × 求: 「アクリルスタンド」 → seed_idx=2 とマッチ (seed_idx=2 が「アクリルスタンド」card 所有 + 「アイドルカード」を欲しい)
+- 譲: 「ぱしゃっつ」 × 求: 「キャラ D アクリルスタンド」 → seed_idx=3 とマッチ
+- 譲: 「グループ E メンバー Y」 × 求: 「コラボ クッション」 → seed_idx=4 とマッチ
+- 譲: 「キャラ F マグネット」 × 求: 「キャラ F マグネット 別バージョン」 → seed_idx=5 とマッチ
 
 ### 30 件の cards ジャンル配分
 | ジャンル | 件数 | 例 |
@@ -64,7 +77,11 @@
 1. Supabase Dashboard → SQL Editor → New query
 2. `docs/seed_video9_demo.sql` の中身をコピペ
 3. **Run** ボタンクリック
-4. 最後の SELECT で `seed_cards_count: 30`, `seed_profiles_count: 10`, `seed_wants_count: 7` 確認
+4. 最後の SELECT で確認:
+   - `seed_users_count`: 5-10 (auth.users 数)
+   - `seed_cards_count: 30`
+   - `seed_profiles_count`: 5-10
+   - `seed_wants_count: 13` (Part A 7 + Part B 6)
 
 ### Step 2: アプリ起動 (ローカル)
 ```bash

@@ -16,6 +16,15 @@ export type UserMode = 'oshi' | 'trading_card' | 'collection'
 export type PioneerStatus = 'pending' | 'active' | 'forfeited'
 export type PioneerApplicationStatus = 'pending' | 'approved' | 'rejected'
 
+// ─────────────────────────────────────────
+// 求 ⇄ 譲 並列検索 (Pioneer #001 提案実装、2026-05、β1 必須)
+// ─────────────────────────────────────────
+// 検索者の意図に応じた 3 モード:
+//   - offer: 自分が欲しい商品 (譲) を検索 → cards 一覧 (既存 Phase 0.5b 機能)
+//   - want: 自分が譲りたい商品 (求) を検索 → wanted_cards 一覧 (新規)
+//   - direct: 譲 + 求 両方入力 → 直接交換マッチング (新規、目玉機能)
+export type SearchMode = 'offer' | 'want' | 'direct'
+
 // マスタカテゴリ (cards.category と master_works.category で共有)
 export type MasterCategory = 'anime' | 'idol' | 'character' | 'manga' | 'other'
 

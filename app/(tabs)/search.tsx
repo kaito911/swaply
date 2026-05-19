@@ -19,8 +19,13 @@ import {
   getSeriesOptions,
   searchCards,
   searchCardsByMember,
+  searchDirectMatch,
+  searchWantedCards,
+  type DirectMatchResult,
+  type WantedCardWithOwner,
 } from '@/lib/supabase'
-import { Card, MasterCharacter, MasterItemType } from '@/lib/types'
+import { Card, computeTrustBadge, MasterCharacter, MasterItemType, type SearchMode } from '@/lib/types'
+import { TrustBadge } from '@/components/TrustBadge'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
@@ -40,41 +45,84 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 type SearchTab = 'member' | 'text'
 
+// 求 ⇄ 譲 並列検索 (Pioneer #001 提案による実装、2026/5、β1 必須)
+// 「譲 + 求 並列検索」で交換相手を一発で発見する Swaply の核心機能
 export default function SearchScreen() {
   const { user } = useAuthContext()
 
+  // 外側: 検索モード ('offer' | 'want' | 'direct')
+  const [mode, setMode] = useState<SearchMode>('offer')
+  // 内側 (offer モードのみ): 既存 Phase 0.5b の 2 タブ
   const [tab, setTab] = useState<SearchTab>('text')
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader title="検索" showBackButton={false} rightActions={<HeaderActions />} />
-      {/* タブバー */}
-      <View style={styles.tabBar}>
+
+      {/* ★ 外側モードバー: 譲 / 求 / 直接交換 (Pioneer #001 提案) */}
+      <View style={styles.modeBar}>
         <Pressable
-          onPress={() => setTab('text')}
-          style={[styles.tab, tab === 'text' && styles.tabActive]}
+          onPress={() => setMode('offer')}
+          style={[styles.modeTab, mode === 'offer' && styles.modeTabActive]}
         >
-          <Text style={[styles.tabLabel, tab === 'text' && styles.tabLabelActive]}>
-            キャラ・アイテムを探す
+          <Text style={[styles.modeLabel, mode === 'offer' && styles.modeLabelActive]}>
+            譲を探す
           </Text>
         </Pressable>
         <Pressable
-          onPress={() => setTab('member')}
-          style={[styles.tab, tab === 'member' && styles.tabActive]}
+          onPress={() => setMode('want')}
+          style={[styles.modeTab, mode === 'want' && styles.modeTabActive]}
         >
-          <Text style={[styles.tabLabel, tab === 'member' && styles.tabLabelActive]}>
-            グループ・メンバーで探す
+          <Text style={[styles.modeLabel, mode === 'want' && styles.modeLabelActive]}>
+            求を探す
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setMode('direct')}
+          style={[styles.modeTab, mode === 'direct' && styles.modeTabActive]}
+        >
+          <Text style={[styles.modeLabel, mode === 'direct' && styles.modeLabelActive]}>
+            直接交換 ⭐
           </Text>
         </Pressable>
       </View>
 
-      {/* タブ別の中身。両方マウントしておくと state 保持が確実 */}
-      <View style={[styles.tabPane, tab !== 'member' && styles.tabPaneHidden]}>
-        <MemberSearchPane currentUserId={user?.id ?? null} />
-      </View>
-      <View style={[styles.tabPane, tab !== 'text' && styles.tabPaneHidden]}>
-        <TextSearchPane currentUserId={user?.id ?? null} />
-      </View>
+      {/* 譲 (offer) モード: 既存 Phase 0.5b の 2 タブ構造を内包 */}
+      {mode === 'offer' && (
+        <>
+          <View style={styles.tabBar}>
+            <Pressable
+              onPress={() => setTab('text')}
+              style={[styles.tab, tab === 'text' && styles.tabActive]}
+            >
+              <Text style={[styles.tabLabel, tab === 'text' && styles.tabLabelActive]}>
+                キャラ・アイテムを探す
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setTab('member')}
+              style={[styles.tab, tab === 'member' && styles.tabActive]}
+            >
+              <Text style={[styles.tabLabel, tab === 'member' && styles.tabLabelActive]}>
+                グループ・メンバーで探す
+              </Text>
+            </Pressable>
+          </View>
+          {/* 両方マウントで state 保持 */}
+          <View style={[styles.tabPane, tab !== 'member' && styles.tabPaneHidden]}>
+            <MemberSearchPane currentUserId={user?.id ?? null} />
+          </View>
+          <View style={[styles.tabPane, tab !== 'text' && styles.tabPaneHidden]}>
+            <TextSearchPane currentUserId={user?.id ?? null} />
+          </View>
+        </>
+      )}
+
+      {/* 求 (want) モード: wanted_cards を検索 */}
+      {mode === 'want' && <WantedSearchPane currentUserId={user?.id ?? null} />}
+
+      {/* 直接交換 (direct) モード: 譲 + 求 並列入力で完全マッチング */}
+      {mode === 'direct' && <DirectMatchPane currentUserId={user?.id ?? null} />}
     </SafeAreaView>
   )
 }
@@ -609,6 +657,270 @@ function ResultArea({
 }
 
 // ─────────────────────────────────────────
+// 求検索ペイン (want モード、Pioneer #001 提案)
+// wanted_cards を検索者の譲商品名で fuzzy 検索、所有者を表示
+// ─────────────────────────────────────────
+
+function WantedSearchPane({ currentUserId }: { currentUserId: string | null }) {
+  const [input, setInput] = useState('')
+  const [results, setResults] = useState<WantedCardWithOwner[]>([])
+  const [loading, setLoading] = useState(false)
+  const [searched, setSearched] = useState(false)
+
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const trimmed = input.trim()
+
+  useEffect(() => {
+    if (debounceTimer.current != null) clearTimeout(debounceTimer.current)
+    if (trimmed === '') {
+      setResults([])
+      setSearched(false)
+      return
+    }
+    debounceTimer.current = setTimeout(async () => {
+      setLoading(true)
+      const data = await searchWantedCards({
+        query: trimmed,
+        excludeUserId: currentUserId,
+      })
+      setResults(data)
+      setSearched(true)
+      setLoading(false)
+    }, 400)
+    return () => {
+      if (debounceTimer.current != null) clearTimeout(debounceTimer.current)
+    }
+  }, [trimmed, currentUserId])
+
+  const handleUserPress = (userId: string) => {
+    router.push({ pathname: '/trust/[id]', params: { id: userId } } as never)
+  }
+
+  return (
+    <View style={styles.pane}>
+      <View style={styles.inputWrap}>
+        <View style={styles.inputBar}>
+          <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
+          <TextInput
+            style={styles.input}
+            placeholder="譲りたい商品名で検索 (例: アクリルスタンド)"
+            placeholderTextColor={colors.textTertiary}
+            value={input}
+            onChangeText={setInput}
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+          />
+        </View>
+      </View>
+
+      {loading ? (
+        <View style={styles.centerBox}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : searched && results.length === 0 ? (
+        <View style={styles.centerBox}>
+          <Text style={styles.emptyTitle}>該当する求が見つかりませんでした</Text>
+          <Text style={styles.emptySub}>別のキーワードで試してください</Text>
+        </View>
+      ) : !searched ? (
+        <View style={styles.centerBox}>
+          <Ionicons name="search-outline" size={40} color={colors.border} />
+          <Text style={styles.emptySub}>譲りたい商品名を入力</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={results}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => {
+            const o = item.owner
+            const trustLevel = o
+              ? computeTrustBadge({
+                  trade_count: o.trade_count,
+                  ship_rate: o.ship_rate,
+                  reply_median_hours: o.reply_median_hours,
+                  trouble_count: o.trouble_count,
+                  last_active_at: o.last_active_at,
+                })
+              : 'green'
+            const ownerName = o?.handle ? `@${o.handle}` : (o?.display_name ?? 'ユーザー')
+            return (
+              <Pressable
+                style={({ pressed }) => [styles.cardItem, pressed && styles.cardItemPressed]}
+                onPress={() => handleUserPress(item.user_id)}
+              >
+                <View style={styles.wantAvatar}>
+                  <Text style={styles.wantAvatarText}>
+                    {(o?.handle || o?.display_name || '?').slice(0, 1).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.cardMeta}>
+                  <Text style={styles.cardOwner} numberOfLines={1}>{ownerName}</Text>
+                  <Text style={styles.cardName} numberOfLines={2}>求: {item.card_name}</Text>
+                  <View style={styles.wantTrustRow}>
+                    <TrustBadge level={trustLevel} size="sm" />
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+              </Pressable>
+            )
+          }}
+        />
+      )}
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────
+// 直接交換マッチングペイン (direct モード、Pioneer #001 提案、目玉機能)
+// 譲 (自分が出す) + 求 (自分が欲しい) 並列入力 → 完全マッチング相手を表示
+// ─────────────────────────────────────────
+
+function DirectMatchPane({ currentUserId }: { currentUserId: string | null }) {
+  const [offerInput, setOfferInput] = useState('')
+  const [wantInput, setWantInput] = useState('')
+  const [results, setResults] = useState<DirectMatchResult[]>([])
+  const [loading, setLoading] = useState(false)
+  const [searched, setSearched] = useState(false)
+
+  const offerTrim = offerInput.trim()
+  const wantTrim = wantInput.trim()
+  const canSearch = offerTrim !== '' && wantTrim !== ''
+
+  const handleSearch = async () => {
+    if (!canSearch) return
+    setLoading(true)
+    const data = await searchDirectMatch({
+      userOffers: offerTrim,
+      userWants: wantTrim,
+      excludeUserId: currentUserId,
+    })
+    setResults(data)
+    setSearched(true)
+    setLoading(false)
+  }
+
+  const handleMatchPress = (cardId: string) => {
+    router.push({ pathname: '/listing/[id]', params: { id: cardId } } as never)
+  }
+
+  return (
+    <View style={styles.pane}>
+      <View style={styles.directInputWrap}>
+        <Text style={styles.directLabel}>あなたが出す商品 (譲)</Text>
+        <View style={styles.inputBar}>
+          <Ionicons name="arrow-up-circle-outline" size={18} color={colors.textTertiary} />
+          <TextInput
+            style={styles.input}
+            placeholder="例: アイドルカード セット A"
+            placeholderTextColor={colors.textTertiary}
+            value={offerInput}
+            onChangeText={setOfferInput}
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+          />
+        </View>
+        <Text style={[styles.directLabel, { marginTop: spacing.sm }]}>
+          あなたが欲しい商品 (求)
+        </Text>
+        <View style={styles.inputBar}>
+          <Ionicons name="arrow-down-circle-outline" size={18} color={colors.textTertiary} />
+          <TextInput
+            style={styles.input}
+            placeholder="例: アクリルスタンド L サイズ"
+            placeholderTextColor={colors.textTertiary}
+            value={wantInput}
+            onChangeText={setWantInput}
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+          />
+        </View>
+        <Pressable
+          onPress={handleSearch}
+          disabled={!canSearch || loading}
+          style={({ pressed }) => [
+            styles.directSearchBtn,
+            (!canSearch || loading) && styles.directSearchBtnDisabled,
+            pressed && canSearch && styles.directSearchBtnPressed,
+          ]}
+        >
+          <Text style={styles.directSearchBtnText}>
+            {loading ? '検索中…' : '直接交換できる相手を探す'}
+          </Text>
+        </Pressable>
+        <Text style={styles.directNote} numberOfLines={2}>
+          あなたが出す商品を求めている人 × あなたが欲しい商品を持っている人を一発で発見
+        </Text>
+      </View>
+
+      {loading ? (
+        <View style={styles.centerBox}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : searched && results.length === 0 ? (
+        <View style={styles.centerBox}>
+          <Text style={styles.emptyTitle}>マッチング相手が見つかりませんでした</Text>
+          <Text style={styles.emptySub}>条件を緩めて再検索してください</Text>
+        </View>
+      ) : !searched ? (
+        <View style={styles.centerBox}>
+          <Ionicons name="git-compare-outline" size={40} color={colors.border} />
+          <Text style={styles.emptySub}>譲 + 求 を入力して検索</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={results}
+          keyExtractor={(item) => item.offering_card.id}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => {
+            const o = item.user
+            const trustLevel = computeTrustBadge({
+              trade_count: o.trade_count,
+              ship_rate: o.ship_rate,
+              reply_median_hours: o.reply_median_hours,
+              trouble_count: o.trouble_count,
+              last_active_at: o.last_active_at,
+            })
+            const ownerName = o.handle ? `@${o.handle}` : (o.display_name ?? 'ユーザー')
+            return (
+              <Pressable
+                style={({ pressed }) => [styles.directMatchCard, pressed && styles.cardItemPressed]}
+                onPress={() => handleMatchPress(item.offering_card.id)}
+              >
+                <View style={styles.directMatchHeader}>
+                  <Text style={styles.cardOwner} numberOfLines={1}>{ownerName}</Text>
+                  <TrustBadge level={trustLevel} size="sm" />
+                </View>
+                <View style={styles.directMatchRow}>
+                  <View style={styles.directMatchSide}>
+                    <Text style={styles.directMatchSideLabel}>相手が出す (譲)</Text>
+                    <Text style={styles.directMatchSideValue} numberOfLines={2}>
+                      {item.offering_card.name}
+                    </Text>
+                  </View>
+                  <Ionicons name="swap-horizontal" size={22} color={colors.primary} />
+                  <View style={styles.directMatchSide}>
+                    <Text style={styles.directMatchSideLabel}>相手が欲しい (求)</Text>
+                    <Text style={styles.directMatchSideValue} numberOfLines={2}>
+                      {item.wanted_card.card_name}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.directMatchCta}>
+                  <Text style={styles.directMatchCtaText}>提案する →</Text>
+                </View>
+              </Pressable>
+            )
+          }}
+        />
+      )}
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────
 // styles
 // ─────────────────────────────────────────
 
@@ -616,6 +928,142 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+
+  // ★ 外側モードバー (Pioneer #001 提案、3 モード切替)
+  modeBar: {
+    flexDirection: 'row',
+    backgroundColor: colors.backgroundCard,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  modeTab: {
+    flex: 1,
+    paddingVertical: spacing.sm + 2,
+    alignItems: 'center',
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'transparent',
+  },
+  modeTabActive: {
+    borderBottomColor: colors.primary,
+  },
+  modeLabel: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.textTertiary,
+  },
+  modeLabelActive: {
+    color: colors.primary,
+    fontWeight: fontWeight.bold,
+  },
+
+  // 求モード: ユーザー avatar
+  wantAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.backgroundMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  wantAvatarText: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
+  },
+  wantTrustRow: {
+    flexDirection: 'row',
+    marginTop: spacing.xs,
+  },
+
+  // 直接交換モード: 並列入力 + 結果カード
+  directInputWrap: {
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  directLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: colors.textSecondary,
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
+  },
+  directSearchBtn: {
+    marginTop: spacing.md,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.full,
+    alignItems: 'center',
+  },
+  directSearchBtnDisabled: {
+    opacity: 0.4,
+  },
+  directSearchBtnPressed: {
+    opacity: 0.85,
+  },
+  directSearchBtnText: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: colors.textInverse,
+  },
+  directNote: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    lineHeight: 16,
+  },
+  directMatchCard: {
+    backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginHorizontal: spacing.base,
+    marginVertical: spacing.xs,
+    gap: spacing.sm,
+  },
+  directMatchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  directMatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  directMatchSide: {
+    flex: 1,
+    backgroundColor: colors.backgroundMuted,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    minHeight: 60,
+  },
+  directMatchSideLabel: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    fontWeight: fontWeight.medium,
+    marginBottom: 2,
+  },
+  directMatchSideValue: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    lineHeight: 18,
+  },
+  directMatchCta: {
+    alignItems: 'flex-end',
+    marginTop: spacing.xs,
+  },
+  directMatchCtaText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
   },
 
   // タブバー

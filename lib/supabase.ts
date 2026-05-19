@@ -264,6 +264,139 @@ export async function addWantedCard(params: {
   return data as WantedCard
 }
 
+// ─────────────────────────────────────────
+// 求 ⇄ 譲 並列検索 (Pioneer #001 提案、2026-05)
+// 「譲 + 求 並列検索」で交換相手を一発で発見する Swaply の核心機能
+// ─────────────────────────────────────────
+
+/** 求検索結果: WantedCard + 所有者 Profile */
+export type WantedCardWithOwner = WantedCard & { owner: Profile }
+
+/** 求検索: wanted_cards から検索者の譲商品名で検索、所有者 Profile を join */
+export async function searchWantedCards(params: {
+  query: string
+  excludeUserId?: string | null
+  limit?: number
+}): Promise<WantedCardWithOwner[]> {
+  const q = params.query.trim()
+  if (q === '') return []
+
+  let query = supabase
+    .from('wanted_cards')
+    .select('*, owner:profiles!wanted_cards_user_id_fkey(*)')
+    .ilike('card_name', `%${q}%`)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(params.limit ?? 50)
+
+  if (params.excludeUserId != null && params.excludeUserId !== '') {
+    query = query.neq('user_id', params.excludeUserId)
+  }
+
+  const { data, error } = await query
+  if (error) {
+    console.error('[searchWantedCards]', error)
+    return []
+  }
+  return (data ?? []) as unknown as WantedCardWithOwner[]
+}
+
+/** 直接交換マッチング結果: 相手の Profile + 提供 card + 求 want */
+export interface DirectMatchResult {
+  user: Profile
+  offering_card: Card    // 相手が持っている card (検索者の求と一致)
+  wanted_card: WantedCard // 相手が欲しがっている want (検索者の譲と一致)
+}
+
+/**
+ * 直接交換マッチング: 譲 + 求 並列検索 (Pioneer #001 提案)
+ *
+ * クエリ意味論:
+ *   - userWants (= 検索者が欲しい) と cards.name を ILIKE → 相手の提供候補
+ *   - userOffers (= 検索者が出す) と wanted_cards.card_name を ILIKE → 相手の欲求
+ *   - 上記両方を同一ユーザーが満たす場合に「相互交換可能」と判定
+ *
+ * 実装: 2 段階 fetch + client-side join (Postgres function 化は Phase 2 で検討)
+ *   1. cards (status=active) を userWants で ILIKE 検索、owner_user_id の集合取得
+ *   2. その owner 集合に対して wanted_cards を userOffers で ILIKE 検索
+ *   3. JS でユーザー単位に pair してマッチング結果生成
+ */
+export async function searchDirectMatch(params: {
+  userOffers: string
+  userWants: string
+  excludeUserId?: string | null
+  limit?: number
+}): Promise<DirectMatchResult[]> {
+  const userOffers = params.userOffers.trim()
+  const userWants = params.userWants.trim()
+  if (userOffers === '' || userWants === '') return []
+
+  // Step 1: cards (相手が持っている、検索者が欲しい商品名) を取得
+  let cardsQuery = supabase
+    .from('cards')
+    .select('*, owner:profiles!cards_owner_user_id_fkey(*)')
+    .ilike('name', `%${userWants}%`)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  if (params.excludeUserId != null && params.excludeUserId !== '') {
+    cardsQuery = cardsQuery.neq('owner_user_id', params.excludeUserId)
+  }
+
+  const { data: cardsData, error: cardsError } = await cardsQuery
+  if (cardsError) {
+    console.error('[searchDirectMatch] cards', cardsError)
+    return []
+  }
+  if (cardsData == null || cardsData.length === 0) return []
+
+  // Step 2: candidate user 集合に対して wanted_cards を検索者の譲で照合
+  const candidateUserIds = Array.from(
+    new Set(
+      (cardsData as { owner_user_id: string }[]).map((c) => c.owner_user_id),
+    ),
+  )
+
+  const { data: wantsData, error: wantsError } = await supabase
+    .from('wanted_cards')
+    .select('*')
+    .ilike('card_name', `%${userOffers}%`)
+    .eq('status', 'active')
+    .in('user_id', candidateUserIds)
+
+  if (wantsError) {
+    console.error('[searchDirectMatch] wants', wantsError)
+    return []
+  }
+  if (wantsData == null || wantsData.length === 0) return []
+
+  // Step 3: client-side join (ユーザー単位、最初の card + 最初の want を pair)
+  const wantsByUser = new Map<string, WantedCard[]>()
+  for (const w of wantsData as WantedCard[]) {
+    const arr = wantsByUser.get(w.user_id) ?? []
+    arr.push(w)
+    wantsByUser.set(w.user_id, arr)
+  }
+
+  const results: DirectMatchResult[] = []
+  const usedUserIds = new Set<string>()
+  for (const cardRow of cardsData as Array<Card & { owner: Profile | null }>) {
+    if (usedUserIds.has(cardRow.owner_user_id)) continue
+    const userWants = wantsByUser.get(cardRow.owner_user_id)
+    if (userWants == null || userWants.length === 0) continue
+    if (cardRow.owner == null) continue
+    usedUserIds.add(cardRow.owner_user_id)
+    results.push({
+      user: cardRow.owner,
+      offering_card: cardRow,
+      wanted_card: userWants[0]!,
+    })
+  }
+
+  return results.slice(0, params.limit ?? 50)
+}
+
 export async function archiveWantedCard(wantId: string): Promise<void> {
   const { error } = await supabase
     .from('wanted_cards')

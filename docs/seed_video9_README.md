@@ -11,13 +11,15 @@
 - **音声・BGM・ロゴは含まない** (DB データのみ)
 - 詳細: `memory/project_copyright_research_2026-05-09.md`
 
-## 投入されるデータ
+## 投入されるデータ (2026-05-23 更新版)
 
 | 種別 | 件数 | 識別マーカー |
 |---|---|---|
 | **profiles** UPSERT | 最大 10 名 (auth.users 数に依存) | `handle LIKE 'seed_demo_%'` |
 | **cards** INSERT | **30 件** (auth.users 5 名なら 1 名 6 件、10 名なら 1 名 3 件) | `description LIKE '[SEED_V9]%'` |
-| **wanted_cards** INSERT | **13 件** (Part A 7 + Part B 6) | seed プロフィール所有 + 特定 card_name |
+| **wanted_cards** INSERT | **13 件** (Part A 7 + Part B 6) | seed プロフィール所有 + 完全一致 card_name |
+
+詳細マッピング (row_id ↔ card-0NN.png ↔ カード名): **`docs/seed_video9_card_image_mapping.md`** 参照。
 
 ### wanted_cards の分散構成 (直接交換 demo 対応)
 
@@ -72,16 +74,44 @@
    SELECT count(*) FROM auth.users;
    ```
 2. 不足してる場合は Supabase Auth Dashboard or signup フローで追加作成
+3. **Supabase Storage に `seed-card-images` バケット (public) 作成済** + `card-001.png〜card-030.png` アップロード済 (後述「Storage アップロード手順」)
+4. **`{PROJECT_REF}` を実 ref に置換**してから seed SQL を実行
+
+### Storage アップロード手順 (初回のみ)
+
+1. Supabase Dashboard → Storage → New bucket
+2. バケット名: `seed-card-images`、Public **ON** で作成
+3. アップロード対象: 30 ファイル (`card-001.png` 〜 `card-030.png`)
+4. アップロード方法:
+   - Dashboard UI: ドラッグ&ドロップで 30 ファイル一括
+   - または Supabase CLI: `npx supabase storage cp ./動画9/card-*.png seed-card-images/`
+5. 公開 URL 確認: 任意のファイルクリック → "Public URL" コピー
+   形式: `https://{PROJECT_REF}.supabase.co/storage/v1/object/public/seed-card-images/card-001.png`
+
+### `{PROJECT_REF}` の確認・置換手順
+
+1. Supabase Dashboard → Settings → API → "Project URL" の `https://XXXXXXX.supabase.co` の `XXXXXXX` 部分が `{PROJECT_REF}`
+2. SQL 置換:
+   - macOS/Linux: `sed -i '' 's/{PROJECT_REF}/XXXXXXX/g' docs/seed_video9_demo.sql`
+   - Windows (Git Bash): `sed -i 's/{PROJECT_REF}/XXXXXXX/g' docs/seed_video9_demo.sql`
+   - または SQL Editor 内で直接 Find & Replace
+3. **注意**: 置換後の SQL は git にコミットしない (PROJECT_REF が漏洩する)。
+   ```bash
+   git stash  # 置換後にコミット汚染を防ぐ
+   # SQL Editor で実行
+   git checkout docs/seed_video9_demo.sql  # 置換前に戻す
+   ```
 
 ### Step 1: シード投入 (Supabase SQL Editor で実行)
-1. Supabase Dashboard → SQL Editor → New query
-2. `docs/seed_video9_demo.sql` の中身をコピペ
-3. **Run** ボタンクリック
-4. 最後の SELECT で確認:
-   - `seed_users_count`: 5-10 (auth.users 数)
-   - `seed_cards_count: 30`
-   - `seed_profiles_count`: 5-10
-   - `seed_wants_count: 13` (Part A 7 + Part B 6)
+1. **Storage アップロード完了 + PROJECT_REF 置換済 SQL** を準備
+2. Supabase Dashboard → SQL Editor → New query
+3. PROJECT_REF 置換後の `docs/seed_video9_demo.sql` の中身をコピペ
+4. **Run** ボタンクリック
+5. 完了確認 (3 つの SELECT 結果):
+   - **件数集計**: `seed_users_count`: 5-10 / `seed_cards_count: 30` / `seed_profiles_count`: 5-10 / `seed_wants_count: 13`
+   - **direct_match verification**: `matchable_offering_cards: 5+`, `total_match_pairs: 6+`
+   - **直接交換マッチング ペア詳細**: 6+ 行表示 (動画 #9 録画前の必須確認)
+6. 直接交換ペアが 0 件の場合は wanted_cards の card_name と cards.name が完全一致してない可能性、SQL ログ確認
 
 ### Step 2: アプリ起動 (ローカル)
 ```bash
@@ -118,18 +148,23 @@ npm run android
 - 通知一覧 (空表示のみ)
 - 提案・取引フロー (実取引 + 配送データ必要)
 
-### ⚠️ 既存 seed が画像表示されない場合の修正手順
+### ⚠️ 画像 URL の切替 (placehold.co → Supabase Storage、2026-05-23 更新)
 
-commit `3d6ddca` / `ba4dbb1` の旧 seed は `placehold.co` URL を拡張子なしで指定していたため、
-SVG 返却されて RN/expo-image で表示できない問題がありました。修正手順:
+2026-05-23 に AI 生成画像 30 枚 (`card-001.png〜card-030.png`) を Supabase Storage に
+切替。`seed_video9_demo_fix_image_urls.sql` (旧 placehold.co PNG 化用) は **DEPRECATED**。
 
-1. Supabase SQL Editor → New query
-2. `docs/seed_video9_demo_fix_image_urls.sql` の中身をコピペ
-3. **Run** ボタンクリック
-4. 確認: `updated_count: 30`, `png_url_count: 30`, `old_svg_url_count: 0`
-5. アプリでホーム再読み込み → 画像が表示される
+新運用:
+- 新規環境: `seed_video9_demo.sql` (`{PROJECT_REF}` 置換必須) を実行
+- 既存環境 (placehold.co URL 適用済): `seed_video9_update_to_storage_urls.sql` で URL 切替
 
-新規環境では本修正済 seed (`docs/seed_video9_demo.sql`) を使用すれば不要。
+#### 既存環境向けの URL 切替手順
+1. **Supabase Storage に画像アップロード** (後述「Storage アップロード手順」)
+2. Supabase SQL Editor → New query
+3. `docs/seed_video9_update_to_storage_urls.sql` を開く
+4. `{PROJECT_REF}` を実 ref に置換 (Settings → API → Project URL より)
+5. SQL Editor にペースト → **Run**
+6. 確認: `updated_count: 30`, `storage_url_count: 30`, `remaining_placehold_count: 0`
+7. アプリで cache clear + reload → 画像が表示される
 
 ### Step 5: ロールバック (録画完了後、任意)
 1. Supabase Dashboard → SQL Editor → New query

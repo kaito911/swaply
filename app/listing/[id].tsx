@@ -277,11 +277,18 @@ export default function ListingDetailScreen() {
 
   // ★ 3.5a 機能 H + LikeButton bug fix: optimistic update で構造化 card の fuzzy match 漏れに対応
   // home.tsx と同じ設計 (詳細は home.tsx コメント参照)、ここでは 1 card のみなので scalar state
+  //
+  // exact name match (card.name === w.card_name) を最優先:
+  //   wanted_cards_unique_per_user (user_id, card_name, ...) と整合、Pioneer #001 直接交換と同じ思想
+  //   2026-05-23 のホーム ♡ tap バグ (23505 duplicate key) と同根の対策
+  const matchesCard = (c: Card, w: WantedCard): boolean =>
+    w.card_name === c.name || isWantMatchV2(c, w)
+
   const isLiked = (() => {
     if (card == null) return false
     if (pendingLikeState?.kind === 'unliked') return false
     if (pendingLikeState?.kind === 'liked') return true
-    return myWants.some((w) => isWantMatchV2(card, w))
+    return myWants.some((w) => matchesCard(card, w))
   })()
 
   const handleToggleLike = async () => {
@@ -292,7 +299,7 @@ export default function ListingDetailScreen() {
         // archive: pending 由来 or myWants 由来の wantId を解決
         const pendingWantId =
           pendingLikeState?.kind === 'liked' ? pendingLikeState.wantId : null
-        const matched = myWants.find((w) => isWantMatchV2(card, w))
+        const matched = myWants.find((w) => matchesCard(card, w))
         const wantIdToArchive = pendingWantId ?? matched?.id
         setPendingLikeState({ kind: 'unliked' })
         if (wantIdToArchive != null) {

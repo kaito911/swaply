@@ -237,6 +237,19 @@ export async function fetchMyWantedCards(userId: string): Promise<WantedCard[]> 
   return (data ?? []) as WantedCard[]
 }
 
+/**
+ * ほしいカード追加 (冪等 upsert)
+ *
+ * 冪等性の根拠:
+ *   DB 制約 wanted_cards_unique_per_user = (user_id, card_name, group_name, member_name, series)
+ *   が既に存在する場合、upsert で既存行を更新 (status='active' に戻す = archived からの復活も兼ねる)。
+ *   重複 INSERT で 23505 (duplicate key) を投げない設計。
+ *
+ * 経緯:
+ *   ホーム ♡ tap 時に「UI 上 ♡ outline (未 like) だが DB には既存行あり」のケースで
+ *   INSERT が衝突するバグ (2026-05-23 発覚) を修正。
+ *   呼出元: home.tsx / listing[id].tsx / onboarding.tsx の 3 箇所すべて冪等化される。
+ */
 export async function addWantedCard(params: {
   userId: string
   cardName: string
@@ -246,14 +259,19 @@ export async function addWantedCard(params: {
 }): Promise<WantedCard> {
   const { data, error } = await supabase
     .from('wanted_cards')
-    .insert({
-      user_id: params.userId,
-      card_name: params.cardName,
-      group_name: params.groupName,
-      member_name: params.memberName,
-      series: params.series,
-      status: 'active',
-    })
+    .upsert(
+      {
+        user_id: params.userId,
+        card_name: params.cardName,
+        group_name: params.groupName,
+        member_name: params.memberName,
+        series: params.series,
+        status: 'active',
+      },
+      {
+        onConflict: 'user_id,card_name,group_name,member_name,series',
+      },
+    )
     .select()
     .single()
 

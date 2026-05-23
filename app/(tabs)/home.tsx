@@ -155,12 +155,20 @@ export default function HomeScreen() {
   }
 
   // ★ 3.5a 機能 H + LikeButton bug fix: optimistic update を加えた isLiked / toggle 判定
-  // 判定優先順位: pendingArchives (即時 false) > pendingAdds (即時 true) > myWants fuzzy match
+  // 判定優先順位: pendingArchives (即時 false) > pendingAdds (即時 true) > exact name match > fuzzy match
+  //
+  // exact name match (card.name === w.card_name) を最優先:
+  //   wanted_cards_unique_per_user (user_id, card_name, ...) と整合、Pioneer #001 直接交換と同じ思想
+  //   fuzzy match だけだと「UI 上 ♡ outline だが DB に既存行あり」で 23505 (duplicate key) を踏むため
+  //   2026-05-23 のホーム ♡ tap バグ修正で導入
+  const matchesCard = (card: Card, w: WantedCard): boolean =>
+    w.card_name === card.name || isWantMatchV2(card, w)
+
   const isCardLiked = useCallback(
     (card: Card) => {
       if (pendingArchives.has(card.id)) return false
       if (pendingAdds.has(card.id)) return true
-      return myWants.some((w) => isWantMatchV2(card, w))
+      return myWants.some((w) => matchesCard(card, w))
     },
     [myWants, pendingAdds, pendingArchives],
   )
@@ -172,7 +180,7 @@ export default function HomeScreen() {
       if (liked) {
         // archive: pending 由来 or myWants 由来の wantId を解決
         const pendingWantId = pendingAdds.get(card.id)
-        const matched = myWants.find((w) => isWantMatchV2(card, w))
+        const matched = myWants.find((w) => matchesCard(card, w))
         const wantIdToArchive = pendingWantId ?? matched?.id
         // 先に optimistic 状態更新 (UI ♡ outline を即時反映)
         setPendingArchives((prev) => new Set(prev).add(card.id))

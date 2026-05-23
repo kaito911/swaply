@@ -82,7 +82,7 @@ export default function SearchScreen() {
           style={[styles.modeTab, mode === 'direct' && styles.modeTabActive]}
         >
           <Text style={[styles.modeLabel, mode === 'direct' && styles.modeLabelActive]}>
-            直接交換 ⭐
+            マッチ
           </Text>
         </Pressable>
       </View>
@@ -846,7 +846,7 @@ function DirectMatchPane({ currentUserId }: { currentUserId: string | null }) {
           ]}
         >
           <Text style={styles.directSearchBtnText}>
-            {loading ? '検索中…' : '直接交換できる相手を探す'}
+            {loading ? '検索中…' : 'マッチする相手を探す'}
           </Text>
         </Pressable>
         <Text style={styles.directNote} numberOfLines={2}>

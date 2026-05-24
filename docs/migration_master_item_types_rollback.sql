@@ -1,0 +1,10 @@
+-- migration_master_item_types.sql の rollback
+-- Supabase SQL Editor で手動実行してください
+--
+-- 注意: cards.item_type が論理参照しているため、
+--       本 rollback 前に migration_extend_cards_to_items_rollback.sql を先に実行することを推奨。
+--       (FK 制約はないので技術的には独立 drop 可能、データ整合性のみ要注意)
+
+drop table if exists public.master_item_types;
+
+-- 関連 trigger / index は drop table で自動削除される

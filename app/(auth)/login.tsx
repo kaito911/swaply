@@ -1,7 +1,6 @@
 import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
 import { supabase } from '@/lib/supabase'
 import { Ionicons } from '@expo/vector-icons'
-import { LinearGradient } from 'expo-linear-gradient'
 import { router } from 'expo-router'
 import React, { useState } from 'react'
 import {
@@ -40,16 +39,18 @@ export default function LoginScreen() {
         throw error
       }
 
-      router.replace('/(tabs)')
+      // ログイン成功後は _layout.tsx の session 監視が自動でルーティングする
+      // router.replace は不要（onboardingDone チェックを経由させるため）
     } catch (error) {
-      console.error('[LoginScreen][handleLogin]', error)
-
       const message =
-        error instanceof Error
-          ? error.message
-          : 'ログインに失敗しました'
+        error instanceof Error ? error.message : ''
 
-      Alert.alert('ログインエラー', message)
+      if (message.includes('Invalid login credentials')) {
+        Alert.alert('ログインエラー', 'メールアドレスまたはパスワードが違います')
+      } else {
+        console.error('[LoginScreen][handleLogin]', error)
+        Alert.alert('ログインエラー', message || 'ログインに失敗しました')
+      }
     } finally {
       setLoading(false)
     }
@@ -67,14 +68,9 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.logoWrap}>
-            <LinearGradient
-              colors={[colors.gradientStart, colors.gradientEnd]}
-              style={styles.logoMark}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
+            <View style={[styles.logoMark, { backgroundColor: colors.primary }]}>
               <Text style={styles.logoMarkText}>S</Text>
-            </LinearGradient>
+            </View>
 
             <Text style={styles.logoText}>Swaply</Text>
             <Text style={styles.tagline}>交換を、もっと安全に。</Text>
@@ -145,16 +141,11 @@ export default function LoginScreen() {
                 (!canSubmit || loading) && styles.ctaDisabled,
               ]}
             >
-              <LinearGradient
-                colors={[colors.gradientStart, colors.gradientEnd]}
-                style={styles.cta}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
+              <View style={[styles.cta, { backgroundColor: colors.primary }]}>
                 <Text style={styles.ctaText}>
                   {loading ? 'ログイン中...' : 'ログインする'}
                 </Text>
-              </LinearGradient>
+              </View>
             </TouchableOpacity>
 
             <View style={styles.switchRow}>

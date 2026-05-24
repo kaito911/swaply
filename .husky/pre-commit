@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+# Pre-commit: run typecheck + lint locally before allowing commit.
+# Mirrors CI (.github/workflows/ci.yml) so type errors are caught early
+# without waiting for CI feedback. Skip with `git commit --no-verify`
+# if intentional (rare, document why in commit message).
+npm run check

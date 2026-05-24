@@ -3,7 +3,7 @@ import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { TradeStats } from '@/components/TradeStats'
 import { TradeTag } from '@/components/TradeTag'
 import { TrustBadge } from '@/components/TrustBadge'
-import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
+import { colors, fontSize, radius, spacing } from '@/constants/theme'
 import { Card, computeTrustBadge, CONDITION_LABELS } from '@/lib/types'
 import { router } from 'expo-router'
 import React from 'react'
@@ -11,15 +11,13 @@ import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 
 interface CardItemProps {
   card: Card
-  /** レーン2: "成立しやすい"ラベルを表示 */
-  showMatchLabel?: boolean
   onPropose?: (card: Card) => void
 }
 
 const CARD_WIDTH = 204
 const IMAGE_HEIGHT = 136
 
-export function CardItem({ card, showMatchLabel = false, onPropose }: CardItemProps) {
+export function CardItem({ card, onPropose }: CardItemProps) {
   const owner = card.owner
   const trustLevel =
     owner != null
@@ -28,8 +26,9 @@ export function CardItem({ card, showMatchLabel = false, onPropose }: CardItemPr
           ship_rate: owner.ship_rate,
           reply_median_hours: owner.reply_median_hours,
           trouble_count: owner.trouble_count,
+          last_active_at: owner.last_active_at,
         })
-      : 'none'
+      : 'green'
 
   const handlePropose = () => {
     if (onPropose != null) {
@@ -66,18 +65,6 @@ export function CardItem({ card, showMatchLabel = false, onPropose }: CardItemPr
             <Text style={styles.placeholderIcon}>📷</Text>
           </View>
         )}
-        {showMatchLabel && (
-          <View style={styles.matchBadge}>
-            <Text style={styles.matchBadgeText}>✦ 成立しやすい</Text>
-          </View>
-        )}
-        {card.condition != null && (
-          <View style={styles.conditionBadge}>
-            <Text style={styles.conditionBadgeText}>
-              {CONDITION_LABELS[card.condition]}
-            </Text>
-          </View>
-        )}
       </View>
 
       {/* ─ コンテンツ ─ */}
@@ -93,6 +80,15 @@ export function CardItem({ card, showMatchLabel = false, onPropose }: CardItemPr
         <Text style={styles.title} numberOfLines={2}>
           {card.name}
         </Text>
+
+        {/* 状態 chip (元 conditionBadge を image overlay から body 内 chip に降格) */}
+        {card.condition != null && (
+          <View style={styles.conditionBadge}>
+            <Text style={styles.conditionBadgeText}>
+              {CONDITION_LABELS[card.condition]}
+            </Text>
+          </View>
+        )}
 
         {/* 出品者 + Trustバッジ */}
         {owner != null && (
@@ -150,7 +146,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundCard,
     borderRadius: radius.xl,
     overflow: 'hidden',
-    ...shadow.sm,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -171,25 +166,9 @@ const styles = StyleSheet.create({
   placeholderIcon: {
     fontSize: 32,
   },
-  matchBadge: {
-    position: 'absolute',
-    bottom: spacing.sm,
-    left: spacing.sm,
-    backgroundColor: colors.primary,
-    borderRadius: radius.full,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  matchBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '700',
-  },
   conditionBadge: {
-    position: 'absolute',
-    top: spacing.sm,
-    right: spacing.sm,
-    backgroundColor: 'rgba(255,255,255,0.88)',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.tagNeutralBg,
     borderRadius: radius.full,
     paddingHorizontal: 7,
     paddingVertical: 2,
@@ -197,7 +176,7 @@ const styles = StyleSheet.create({
   conditionBadgeText: {
     fontSize: 10,
     fontWeight: '600',
-    color: colors.textPrimary,
+    color: colors.tagNeutralText,
   },
   content: {
     padding: spacing.md,

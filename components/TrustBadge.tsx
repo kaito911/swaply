@@ -1,6 +1,6 @@
 // components/TrustBadge.tsx
 import { colors, radius } from '@/constants/theme'
-import { TrustBadgeLevel } from '@/lib/types'
+import { TRUST_BADGE_LABELS, TrustBadgeLevel } from '@/lib/types'
 import React from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 
@@ -18,32 +18,32 @@ type BadgeConfig = {
 }
 
 const BADGE_CONFIG: Record<TrustBadgeLevel, BadgeConfig> = {
-  none: {
-    label: '未取引',
-    bg: '#F3F4F6',
-    text: '#9CA3AF',
-    border: '#E5E7EB',
+  green: {
+    label: TRUST_BADGE_LABELS.green,
+    bg: colors.trustBadgeGreenBg,
+    text: colors.trustBadgeGreen,
+    border: colors.trustBadgeGreenBorder,
     dot: false,
   },
-  bronze: {
-    label: 'Bronze',
-    bg: colors.trustBronzeBg,
-    text: colors.trustBronze,
-    border: colors.trustBronzeBorder,
+  trial_blue: {
+    label: TRUST_BADGE_LABELS.trial_blue,
+    bg: colors.trustBadgeTrialBlueBg,
+    text: colors.trustBadgeTrialBlue,
+    border: colors.trustBadgeTrialBlueBorder,
     dot: true,
   },
-  silver: {
-    label: 'Silver',
-    bg: colors.trustSilverBg,
-    text: colors.trustSilver,
-    border: colors.trustSilverBorder,
+  blue: {
+    label: TRUST_BADGE_LABELS.blue,
+    bg: colors.trustBadgeBlueBg,
+    text: colors.trustBadgeBlue,
+    border: colors.trustBadgeBlueBorder,
     dot: true,
   },
-  gold: {
-    label: 'Gold',
-    bg: colors.trustGoldBg,
-    text: colors.trustGold,
-    border: colors.trustGoldBorder,
+  gold_blue: {
+    label: TRUST_BADGE_LABELS.gold_blue,
+    bg: colors.trustBadgeGoldBlueBg,
+    text: colors.trustBadgeGoldBlue,
+    border: colors.trustBadgeGoldBlueBorder,
     dot: true,
   },
 }
@@ -59,6 +59,7 @@ export function TrustBadge({ level, size = 'sm' }: TrustBadgeProps) {
         {
           backgroundColor: cfg.bg,
           borderColor: cfg.border,
+          borderWidth: level === 'gold_blue' ? 1.5 : 1,
           paddingHorizontal: isMd ? 10 : 6,
           paddingVertical: isMd ? 3 : 2,
         },
@@ -86,7 +87,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: radius.full,
-    borderWidth: 1,
     gap: 3,
     alignSelf: 'flex-start',
   },

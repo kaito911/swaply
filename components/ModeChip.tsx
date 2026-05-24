@@ -36,19 +36,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: colors.tagPurple,
+    backgroundColor: colors.tagPersonalBg,
     borderRadius: radius.full,
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: 4,
   },
   label: {
     fontSize: fontSize.sm,
-    color: colors.tagPurpleText,
+    color: colors.tagPersonalText,
     fontWeight: '600',
   },
   caret: {
     fontSize: 10,
-    color: colors.tagPurpleText,
+    color: colors.tagPersonalText,
     marginTop: 1,
   },
 })

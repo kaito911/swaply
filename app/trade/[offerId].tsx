@@ -1,4 +1,5 @@
 // app/trade/[offerId].tsx
+import { colors } from '@/constants/theme'
 import {
     cancelTrade,
     confirmTradeReceipt,
@@ -6,8 +7,9 @@ import {
     openTradeDispute,
     submitTradeShipment,
 } from '@/lib/supabase'
+import { useAuthContext } from '@/providers/AuthProvider'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
     ActivityIndicator,
     Alert,
@@ -21,6 +23,10 @@ import {
     View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+
+// ─────────────────────────────────────────
+// 型定義
+// ─────────────────────────────────────────
 
 type TradeStatus =
   | 'pending'
@@ -67,6 +73,10 @@ type ProfileRow = {
   display_name?: string | null
   full_name?: string | null
   avatar_url?: string | null
+  shipping_name?: string | null
+  postal_code?: string | null
+  address_line1?: string | null
+  address_line2?: string | null
 }
 
 type TrustRow = {
@@ -107,6 +117,84 @@ type TradeDetail = {
   counterpartTrust: TrustRow
 }
 
+// ─────────────────────────────────────────
+// UIState
+// ─────────────────────────────────────────
+
+type UIState =
+  | 'waiting_my_ship'
+  | 'waiting_their_ship'
+  | 'waiting_their_receipt'
+  | 'waiting_my_receipt'
+  | 'completed'
+  | 'cancelled'
+  | 'disputed'
+
+type UIStateConfig = {
+  headline: string
+  note: string
+  stepIndex: number // -1 = 進行バー非表示
+}
+
+const UI_STATE_CONFIG: Record<UIState, UIStateConfig> = {
+  waiting_my_ship: {
+    headline: 'あなたの発送待ちです',
+    note: '発送後、追跡番号を入力してください。同時発送ルールにより、相手も同時に発送する必要があります。',
+    stepIndex: 1,
+  },
+  waiting_their_ship: {
+    headline: '相手の発送待ちです',
+    note: '相手が発送すると次のステップに進みます。しばらくお待ちください。',
+    stepIndex: 1,
+  },
+  waiting_their_receipt: {
+    headline: '相手の受取確認待ちです',
+    note: 'あなたの受取確認は完了しています。相手の確認をお待ちください。',
+    stepIndex: 2,
+  },
+  waiting_my_receipt: {
+    headline: '受取確認をしてください',
+    note: '荷物を受け取ったあとに確認してください。双方の確認完了で取引が終了します。',
+    stepIndex: 2,
+  },
+  completed: {
+    headline: '交換が完了しました',
+    note: '双方の受取確認が完了しました。',
+    stepIndex: 3,
+  },
+  cancelled: {
+    headline: 'この取引はキャンセルされました',
+    note: 'これ以上の発送・受取操作はできません。カード状態が元に戻っているか確認してください。',
+    stepIndex: -1,
+  },
+  disputed: {
+    headline: '問題対応中です',
+    note: '運営の対応をお待ちください。追加発送や自己判断のキャンセルは避けてください。',
+    stepIndex: -1,
+  },
+}
+
+const PROGRESS_STEPS = ['承認', '発送', '受取', '完了'] as const
+
+function getUIState(
+  trade: TradeRow,
+  canSubmitShipment: boolean,
+  canConfirmReceipt: boolean,
+  myShipmentStatus: ShipmentStatus | undefined,
+): UIState {
+  if (trade.status === 'completed') return 'completed'
+  if (trade.status === 'cancelled') return 'cancelled'
+  if (trade.status === 'disputed') return 'disputed'
+  if (canConfirmReceipt) return 'waiting_my_receipt'
+  if (canSubmitShipment) return 'waiting_my_ship'
+  if (myShipmentStatus === 'received') return 'waiting_their_receipt'
+  return 'waiting_their_ship'
+}
+
+// ─────────────────────────────────────────
+// ヘルパー関数
+// ─────────────────────────────────────────
+
 function getDisplayName(profile: ProfileRow): string {
   return (
     profile.display_name ||
@@ -135,111 +223,41 @@ function getCardGroup(card: CardPayload): string {
 
 function formatDateTime(value?: string | null): string {
   if (!value) return '未設定'
-
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '未設定'
-
   const yyyy = date.getFullYear()
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   const dd = String(date.getDate()).padStart(2, '0')
   const hh = String(date.getHours()).padStart(2, '0')
   const mi = String(date.getMinutes()).padStart(2, '0')
-
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}`
 }
 
 function formatHoursLeft(deadline?: string | null): string {
-  if (!deadline) return '発送期限未設定'
-
+  if (!deadline) return ''
   const diffMs = new Date(deadline).getTime() - Date.now()
-
-  if (Number.isNaN(diffMs)) return '発送期限未設定'
-  if (diffMs <= 0) return '発送期限を過ぎています'
-
+  if (Number.isNaN(diffMs)) return ''
+  if (diffMs <= 0) return '⚠️ 発送期限を過ぎています'
   const totalHours = Math.floor(diffMs / (1000 * 60 * 60))
   const days = Math.floor(totalHours / 24)
   const hours = totalHours % 24
-
-  if (days > 0) {
-    return `発送期限まで ${days}日 ${hours}時間`
-  }
-
+  if (days > 0) return `発送期限まで ${days}日 ${hours}時間`
   return `発送期限まで ${hours}時間`
-}
-
-function getTradeStatusLabel(status?: TradeStatus): string {
-  switch (status) {
-    case 'pending':
-      return '発送待ち'
-    case 'in_transit':
-      return '配送中'
-    case 'partially_received':
-      return '片側受取済み'
-    case 'completed':
-      return '取引完了'
-    case 'cancelled':
-      return 'キャンセル'
-    case 'disputed':
-      return '問題対応中'
-    default:
-      return '状態不明'
-  }
-}
-
-function getTradeStatusTone(status?: TradeStatus) {
-  switch (status) {
-    case 'pending':
-      return {
-        bg: styles.statusPendingBg,
-        text: styles.statusPendingText,
-      }
-    case 'in_transit':
-      return {
-        bg: styles.statusTransitBg,
-        text: styles.statusTransitText,
-      }
-    case 'partially_received':
-      return {
-        bg: styles.statusPartialBg,
-        text: styles.statusPartialText,
-      }
-    case 'completed':
-      return {
-        bg: styles.statusCompletedBg,
-        text: styles.statusCompletedText,
-      }
-    case 'cancelled':
-      return {
-        bg: styles.statusCancelledBg,
-        text: styles.statusCancelledText,
-      }
-    case 'disputed':
-      return {
-        bg: styles.statusDisputedBg,
-        text: styles.statusDisputedText,
-      }
-    default:
-      return {
-        bg: styles.statusCancelledBg,
-        text: styles.statusCancelledText,
-      }
-  }
 }
 
 function getShipmentLabel(status?: ShipmentStatus): string {
   switch (status) {
-    case 'pending':
-      return '未発送'
-    case 'shipped':
-      return '発送済み'
-    case 'received':
-      return '受取確認済み'
-    case 'cancelled':
-      return 'キャンセル'
-    default:
-      return '未設定'
+    case 'pending': return '未発送'
+    case 'shipped': return '発送済み'
+    case 'received': return '受取確認済み'
+    case 'cancelled': return 'キャンセル'
+    default: return '未設定'
   }
 }
+
+// ─────────────────────────────────────────
+// サブコンポーネント
+// ─────────────────────────────────────────
 
 function CardItemRow({
   item,
@@ -249,7 +267,6 @@ function CardItemRow({
   roleLabel: string
 }) {
   const imageUrl = item.card?.image_url
-
   return (
     <View style={styles.cardItemRow}>
       {imageUrl ? (
@@ -259,12 +276,10 @@ function CardItemRow({
           <Text style={styles.cardImageFallbackText}>NO IMAGE</Text>
         </View>
       )}
-
       <View style={styles.cardMeta}>
         <View style={styles.rolePill}>
           <Text style={styles.rolePillText}>{roleLabel}</Text>
         </View>
-
         <Text style={styles.cardTitle}>{getCardName(item.card)}</Text>
         <Text style={styles.cardMetaText}>グループ: {getCardGroup(item.card)}</Text>
         <Text style={styles.cardMetaText}>メンバー: {getCardMember(item.card)}</Text>
@@ -299,8 +314,15 @@ function ShipmentBox({
   )
 }
 
+// ─────────────────────────────────────────
+// メイン画面
+// ─────────────────────────────────────────
+
 export default function TradeDetailScreen() {
   const { offerId } = useLocalSearchParams<{ offerId: string }>()
+  const { session } = useAuthContext()
+
+  const currentUserId = session?.user?.id ?? null
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -314,19 +336,15 @@ export default function TradeDetailScreen() {
   const [carrier, setCarrier] = useState('')
   const [disputeReason, setDisputeReason] = useState('')
   const [disputeDetail, setDisputeDetail] = useState('')
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const loadTrade = useCallback(async () => {
     if (!offerId || typeof offerId !== 'string') {
       throw new Error('offerId が不正です。')
     }
-
     const payload = await fetchTradeDetailByOffer(offerId)
-
     if (!payload?.trade?.id) {
       throw new Error('trade 情報が取得できませんでした。')
     }
-
     setDetail(payload as TradeDetail)
     setTrackingNumber(payload?.myShipment?.tracking_number || '')
     setCarrier(payload?.myShipment?.carrier || '')
@@ -336,11 +354,9 @@ export default function TradeDetailScreen() {
     try {
       setLoading(true)
       await loadTrade()
-    } catch (error: any) {
-      Alert.alert(
-        '読み込みエラー',
-        error?.message || '取引情報の取得に失敗しました。'
-      )
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '取引情報の取得に失敗しました。'
+      Alert.alert('読み込みエラー', message)
     } finally {
       setLoading(false)
     }
@@ -350,11 +366,9 @@ export default function TradeDetailScreen() {
     try {
       setRefreshing(true)
       await loadTrade()
-    } catch (error: any) {
-      Alert.alert(
-        '更新エラー',
-        error?.message || '最新状態の取得に失敗しました。'
-      )
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '最新状態の取得に失敗しました。'
+      Alert.alert('更新エラー', message)
     } finally {
       setRefreshing(false)
     }
@@ -370,10 +384,6 @@ export default function TradeDetailScreen() {
     }, [loadTrade])
   )
 
-  useEffect(() => {
-    fetchTradeDetailByOffer('__auth_check__').catch(() => undefined)
-  }, [])
-
   const trade = detail?.trade
   const myCards = detail?.myCards ?? []
   const counterpartCards = detail?.counterpartCards ?? []
@@ -381,27 +391,6 @@ export default function TradeDetailScreen() {
   const counterpartShipment = detail?.counterpartShipment ?? {}
   const counterpartProfile = detail?.counterpartProfile ?? {}
   const counterpartTrust = detail?.counterpartTrust ?? {}
-
-  useEffect(() => {
-    let mounted = true
-
-    async function loadCurrentUser() {
-      const { data, error } = await import('@/lib/supabase').then(({ supabase }) =>
-        supabase.auth.getUser()
-      )
-
-      if (error) return
-      if (!mounted) return
-
-      setCurrentUserId(data.user?.id ?? null)
-    }
-
-    void loadCurrentUser()
-
-    return () => {
-      mounted = false
-    }
-  }, [])
 
   const myShipmentStatus = myShipment.status
   const counterpartShipmentStatus = counterpartShipment.status
@@ -433,69 +422,27 @@ export default function TradeDetailScreen() {
     trade.status !== 'completed' &&
     trade.status !== 'cancelled'
 
-  const headerStatusTone = getTradeStatusTone(trade?.status)
-
-  const footerMessage = useMemo(() => {
-    if (!trade) return ''
-
-    if (trade.status === 'completed') {
-      return 'この取引は完了しています。双方の交換処理は終了しました。'
-    }
-
-    if (trade.status === 'cancelled') {
-      return 'この取引はキャンセルされています。カード状態は復元済みの前提です。'
-    }
-
-    if (trade.status === 'disputed') {
-      return 'この取引は問題対応中です。これ以上の自己判断操作は避け、状況記録を残してください。'
-    }
-
-    if (canConfirmReceipt) {
-      return '相手の発送が確認できています。荷物を受け取ったあとに受取確認を行ってください。'
-    }
-
-    if (canSubmitShipment) {
-      return 'あなたの発送通知がまだです。発送後に追跡番号を入力してください。'
-    }
-
-    if (myShipmentStatus === 'shipped' && counterpartShipmentStatus !== 'shipped') {
-      return 'あなたは発送済みです。相手の発送または運営判断を待ってください。'
-    }
-
-    if (myShipmentStatus === 'received') {
-      return 'あなたの受取確認は完了しています。相手側の確認待ちです。'
-    }
-
-    return '取引状況を確認してください。'
-  }, [trade, canConfirmReceipt, canSubmitShipment, myShipmentStatus, counterpartShipmentStatus])
-
   const handleSubmitShipment = useCallback(async () => {
     if (!trade?.id) {
       Alert.alert('エラー', '取引IDが取得できません。')
       return
     }
-
     if (!trackingNumber.trim()) {
       Alert.alert('入力エラー', '追跡番号を入力してください。')
       return
     }
-
     try {
       setSubmittingShipment(true)
-
       await submitTradeShipment({
         tradeId: trade.id,
         trackingNumber: trackingNumber.trim(),
         carrier: carrier.trim() || null,
       })
-
       Alert.alert('発送通知完了', '発送状況を更新しました。')
       await loadTrade()
-    } catch (error: any) {
-      Alert.alert(
-        '発送通知エラー',
-        error?.message || '発送通知に失敗しました。'
-      )
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '発送通知に失敗しました。'
+      Alert.alert('発送通知エラー', message)
     } finally {
       setSubmittingShipment(false)
     }
@@ -506,7 +453,6 @@ export default function TradeDetailScreen() {
       Alert.alert('エラー', '取引IDが取得できません。')
       return
     }
-
     Alert.alert(
       '受取確認',
       '相手から届いた荷物を受け取ったあとに実行してください。よろしいですか？',
@@ -517,16 +463,12 @@ export default function TradeDetailScreen() {
           onPress: async () => {
             try {
               setConfirmingReceipt(true)
-
               await confirmTradeReceipt(trade.id)
-
               Alert.alert('受取確認完了', '受取状態を更新しました。')
               await loadTrade()
-            } catch (error: any) {
-              Alert.alert(
-                '受取確認エラー',
-                error?.message || '受取確認に失敗しました。'
-              )
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : '受取確認に失敗しました。'
+              Alert.alert('受取確認エラー', message)
             } finally {
               setConfirmingReceipt(false)
             }
@@ -541,7 +483,6 @@ export default function TradeDetailScreen() {
       Alert.alert('エラー', '必要な情報が取得できません。')
       return
     }
-
     Alert.alert(
       '取引をキャンセル',
       '発送前のみキャンセルできます。キャンセルすると取引は中断され、対象カードは active に戻ります。実行しますか？',
@@ -556,11 +497,9 @@ export default function TradeDetailScreen() {
               await cancelTrade(trade.id, currentUserId)
               Alert.alert('キャンセル完了', '取引をキャンセルしました。')
               await loadTrade()
-            } catch (error: any) {
-              Alert.alert(
-                'キャンセルエラー',
-                error?.message || '取引のキャンセルに失敗しました。'
-              )
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : '取引のキャンセルに失敗しました。'
+              Alert.alert('キャンセルエラー', message)
             } finally {
               setCancellingTrade(false)
             }
@@ -575,37 +514,33 @@ export default function TradeDetailScreen() {
       Alert.alert('エラー', '必要な情報が取得できません。')
       return
     }
-
     if (!disputeReason.trim()) {
       Alert.alert('入力エラー', '問題区分を入力してください。')
       return
     }
-
     try {
       setOpeningDispute(true)
-
       await openTradeDispute({
         tradeId: trade.id,
         userId: currentUserId,
         disputeReason: disputeReason.trim(),
         detailText: disputeDetail.trim() || null,
       })
-
       Alert.alert('問題報告を受け付けました', '取引状態を問題対応中に更新しました。')
       await loadTrade()
-    } catch (error: any) {
-      Alert.alert(
-        '問題報告エラー',
-        error?.message || '問題報告に失敗しました。'
-      )
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '問題報告に失敗しました。'
+      Alert.alert('問題報告エラー', message)
     } finally {
       setOpeningDispute(false)
     }
   }, [currentUserId, disputeDetail, disputeReason, loadTrade, trade?.id])
 
+  // ── Loading ──────────────────────────────
+
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.centerBox}>
           <ActivityIndicator size="large" color="#6D5EF5" />
           <Text style={styles.centerText}>取引情報を読み込み中です</Text>
@@ -616,13 +551,12 @@ export default function TradeDetailScreen() {
 
   if (!detail || !trade) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.centerBox}>
           <Text style={styles.emptyTitle}>取引情報が見つかりません</Text>
           <Text style={styles.emptyBody}>
             offer と trade の紐付けが取得できませんでした。
           </Text>
-
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Text style={styles.backButtonText}>戻る</Text>
           </Pressable>
@@ -630,6 +564,22 @@ export default function TradeDetailScreen() {
       </SafeAreaView>
     )
   }
+
+  // ── UIState 導出 ──────────────────────────
+
+  const uiState = getUIState(trade, canSubmitShipment, canConfirmReceipt, myShipmentStatus)
+  const uiConfig = UI_STATE_CONFIG[uiState]
+  const stepIndex = uiConfig.stepIndex
+  const showProgress = stepIndex >= 0
+  const deadlineText = formatHoursLeft(trade.ship_deadline_at)
+  const isDeadlinePast =
+    !!trade.ship_deadline_at &&
+    new Date(trade.ship_deadline_at).getTime() < Date.now()
+  const hasAddress =
+    counterpartProfile.shipping_name != null ||
+    counterpartProfile.address_line1 != null
+
+  // ── Main ─────────────────────────────────
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -639,73 +589,154 @@ export default function TradeDetailScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerCard}>
-          <View style={styles.headerTopRow}>
-            <View style={styles.headerLeft}>
-              <Text style={styles.pageTitle}>取引進行</Text>
-              <Text style={styles.pageSubtitle}>
-                発送・受取確認・問題報告をこの画面で進めます
-              </Text>
-            </View>
 
-            <Pressable style={styles.headerBackButton} onPress={() => router.back()}>
-              <Text style={styles.headerBackButtonText}>戻る</Text>
+        {/* [1] Header ── 今なに待ちか */}
+        <View style={[
+          styles.headerCard,
+          uiState === 'completed' ? styles.headerCardCompleted :
+          uiState === 'cancelled' ? styles.headerCardCancelled :
+          uiState === 'disputed' ? styles.headerCardDisputed :
+          undefined,
+        ]}>
+          <Pressable style={styles.headerBackButton} onPress={() => router.back()}>
+            <Text style={styles.headerBackButtonText}>← 戻る</Text>
+          </Pressable>
+
+          <Text style={[
+            styles.uiStateHeadline,
+            uiState === 'completed' ? styles.headlineCompleted :
+            uiState === 'cancelled' ? styles.headlineCancelled :
+            uiState === 'disputed' ? styles.headlineDisputed :
+            uiState === 'waiting_my_ship' || uiState === 'waiting_my_receipt' ? styles.headlineMyTurn :
+            undefined,
+          ]}>
+            {uiConfig.headline}
+          </Text>
+
+          <Text style={styles.counterpartLabel}>
+            {getDisplayName(counterpartProfile)} との取引
+          </Text>
+
+          {uiState === 'waiting_my_ship' && deadlineText !== '' && (
+            <Text style={[styles.deadlineText, isDeadlinePast && styles.deadlineTextExpired]}>
+              {deadlineText}
+            </Text>
+          )}
+        </View>
+
+        {/* [2] Progress ── 今どこか */}
+        {showProgress && (
+          <View style={styles.progressCard}>
+            <View style={styles.progressRow}>
+              {PROGRESS_STEPS.map((label, i) => (
+                <React.Fragment key={label}>
+                  <View style={styles.progressStep}>
+                    <View style={[
+                      styles.progressDot,
+                      i < stepIndex ? styles.progressDotDone :
+                      i === stepIndex ? styles.progressDotActive :
+                      styles.progressDotFuture,
+                    ]}>
+                      <Text style={[
+                        styles.progressDotText,
+                        i < stepIndex ? styles.progressDotTextDone :
+                        i === stepIndex ? styles.progressDotTextActive :
+                        styles.progressDotTextFuture,
+                      ]}>
+                        {i < stepIndex ? '✓' : String(i + 1)}
+                      </Text>
+                    </View>
+                    <Text style={[
+                      styles.progressLabel,
+                      i === stepIndex ? styles.progressLabelActive :
+                      i < stepIndex ? styles.progressLabelDone :
+                      styles.progressLabelFuture,
+                    ]}>
+                      {label}
+                    </Text>
+                  </View>
+                  {i < PROGRESS_STEPS.length - 1 && (
+                    <View style={[
+                      styles.progressLine,
+                      i < stepIndex ? styles.progressLineDone : styles.progressLineFuture,
+                    ]} />
+                  )}
+                </React.Fragment>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* [3] Primary Action ── 今やること */}
+        {uiState === 'waiting_my_ship' && (
+          <View style={styles.actionCard}>
+            <Text style={styles.actionTitle}>発送を通知する</Text>
+            <Text style={styles.noticeText}>
+              追跡番号は必須です。発送後に登録してください。
+            </Text>
+
+            <Text style={styles.inputLabel}>追跡番号</Text>
+            <TextInput
+              value={trackingNumber}
+              onChangeText={setTrackingNumber}
+              placeholder="追跡番号を入力"
+              placeholderTextColor="#9A94AA"
+              style={styles.input}
+              autoCapitalize="none"
+            />
+
+            <Text style={styles.inputLabel}>配送会社（任意）</Text>
+            <TextInput
+              value={carrier}
+              onChangeText={setCarrier}
+              placeholder="ヤマト / 日本郵便 など"
+              placeholderTextColor="#9A94AA"
+              style={styles.input}
+            />
+
+            <Pressable
+              style={[styles.primaryButton, submittingShipment && styles.disabledButton]}
+              onPress={handleSubmitShipment}
+              disabled={submittingShipment}
+            >
+              <Text style={styles.primaryButtonText}>
+                {submittingShipment ? '送信中...' : '発送を通知する'}
+              </Text>
+            </Pressable>
+
+            {canCancelTrade && (
+              <Pressable
+                style={styles.cancelLink}
+                onPress={handleCancelTrade}
+                disabled={cancellingTrade}
+              >
+                <Text style={styles.cancelLinkText}>
+                  {cancellingTrade ? '処理中...' : '取引をキャンセルする'}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+
+        {uiState === 'waiting_my_receipt' && (
+          <View style={styles.actionCard}>
+            <Text style={styles.actionTitle}>受け取りを確認する</Text>
+            <Text style={styles.noticeText}>
+              相手の荷物を受け取ったあとに押してください。
+            </Text>
+            <Pressable
+              style={[styles.primaryButton, confirmingReceipt && styles.disabledButton]}
+              onPress={handleConfirmReceipt}
+              disabled={confirmingReceipt}
+            >
+              <Text style={styles.primaryButtonText}>
+                {confirmingReceipt ? '確認中...' : '受け取りを確認する'}
+              </Text>
             </Pressable>
           </View>
+        )}
 
-          <View style={[styles.statusChip, headerStatusTone.bg]}>
-            <Text style={[styles.statusChipText, headerStatusTone.text]}>
-              {getTradeStatusLabel(trade.status)}
-            </Text>
-          </View>
-
-          <Text
-            style={[
-              styles.deadlineText,
-              trade.status === 'pending' &&
-              trade.ship_deadline_at &&
-              new Date(trade.ship_deadline_at).getTime() < Date.now()
-                ? styles.deadlineExpiredText
-                : undefined,
-            ]}
-          >
-            {formatHoursLeft(trade.ship_deadline_at)}
-          </Text>
-          <Text style={styles.metaText}>発送期限: {formatDateTime(trade.ship_deadline_at)}</Text>
-          <Text style={styles.metaText}>offerId: {offerId}</Text>
-          <Text style={styles.metaText}>tradeId: {trade.id}</Text>
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>相手情報</Text>
-          <Text style={styles.partnerName}>{getDisplayName(counterpartProfile)}</Text>
-
-          <View style={styles.trustGrid}>
-            <View style={styles.trustCard}>
-              <Text style={styles.trustLabel}>Badge</Text>
-              <Text style={styles.trustValue}>{counterpartTrust.badge || 'None'}</Text>
-            </View>
-
-            <View style={styles.trustCard}>
-              <Text style={styles.trustLabel}>成立件数</Text>
-              <Text style={styles.trustValue}>
-                {counterpartTrust.completed_trade_count ?? 0}
-              </Text>
-            </View>
-
-            <View style={styles.trustCard}>
-              <Text style={styles.trustLabel}>発送率</Text>
-              <Text style={styles.trustValue}>
-                {counterpartTrust.shipping_compliance_rate ?? 0}%
-              </Text>
-            </View>
-          </View>
-
-          <Text style={styles.trustFootText}>
-            受取確認速度: {counterpartTrust.receive_confirm_median_hours ?? '-'} 時間
-          </Text>
-        </View>
-
+        {/* [4] Trade Summary ── 何を交換しているか */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>交換内容</Text>
 
@@ -730,115 +761,74 @@ export default function TradeDetailScreen() {
           )}
         </View>
 
+        {/* [5] 相手の配送先 ── 発送に必要な情報 */}
+        {hasAddress && uiState !== 'completed' && uiState !== 'cancelled' && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>相手の配送先</Text>
+            <Text style={styles.addressNote}>
+              発送時に使用してください。取引成立後に開示された住所です。
+            </Text>
+            {counterpartProfile.shipping_name != null && (
+              <View style={styles.addressRow}>
+                <Text style={styles.addressLabel}>氏名</Text>
+                <Text style={styles.addressValue}>{counterpartProfile.shipping_name}</Text>
+              </View>
+            )}
+            {counterpartProfile.postal_code != null && (
+              <View style={styles.addressRow}>
+                <Text style={styles.addressLabel}>郵便番号</Text>
+                <Text style={styles.addressValue}>{counterpartProfile.postal_code}</Text>
+              </View>
+            )}
+            {counterpartProfile.address_line1 != null && (
+              <View style={styles.addressRow}>
+                <Text style={styles.addressLabel}>住所</Text>
+                <Text style={styles.addressValue}>{counterpartProfile.address_line1}</Text>
+              </View>
+            )}
+            {counterpartProfile.address_line2 != null && (
+              <View style={styles.addressRow}>
+                <Text style={styles.addressLabel}>建物名</Text>
+                <Text style={styles.addressValue}>{counterpartProfile.address_line2}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* [6] 発送状況 ── 追跡情報 */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>発送状況</Text>
-          <ShipmentBox title="あなたの発送状況" shipment={myShipment} />
+          <ShipmentBox title="あなたの発送" shipment={myShipment} />
           <View style={styles.divider} />
-          <ShipmentBox title="相手の発送状況" shipment={counterpartShipment} />
+          <ShipmentBox title="相手の発送" shipment={counterpartShipment} />
         </View>
 
-        {trade.status === 'disputed' ? (
-          <View style={styles.warningCard}>
-            <Text style={styles.warningTitle}>この取引は問題対応中です</Text>
-            <Text style={styles.warningBody}>
-              追加発送や自己判断のキャンセルは避けてください。必要情報を整理し、運営判断前提で進めます。
-            </Text>
-          </View>
-        ) : null}
+        {/* [7] Note ── 状態に応じた1〜2行の補足 */}
+        <View style={[
+          styles.noteCard,
+          uiState === 'completed' ? styles.noteCardCompleted :
+          uiState === 'cancelled' || uiState === 'disputed' ? styles.noteCardWarning :
+          undefined,
+        ]}>
+          <Text style={[
+            styles.noteText,
+            uiState === 'completed' ? styles.noteTextCompleted :
+            uiState === 'cancelled' || uiState === 'disputed' ? styles.noteTextWarning :
+            undefined,
+          ]}>
+            {uiConfig.note}
+          </Text>
+        </View>
 
-        {trade.status === 'cancelled' ? (
-          <View style={styles.warningCard}>
-            <Text style={styles.warningTitle}>この取引はキャンセル済みです</Text>
-            <Text style={styles.warningBody}>
-              これ以上の発送・受取操作はできません。カード状態復元が反映されているかを確認してください。
-            </Text>
-          </View>
-        ) : null}
-
-        {trade.status === 'completed' ? (
-          <View style={styles.successCard}>
-            <Text style={styles.successTitle}>この取引は完了しています</Text>
-            <Text style={styles.successBody}>
-              双方の受取確認まで完了しています。以後の操作は不要です。
-            </Text>
-          </View>
-        ) : null}
-
-        {canSubmitShipment ? (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>発送通知</Text>
-            <Text style={styles.noticeText}>
-              追跡番号は必須です。発送後に登録してください。誤入力は dispute の原因になります。
-            </Text>
-
-            <Text style={styles.inputLabel}>追跡番号</Text>
-            <TextInput
-              value={trackingNumber}
-              onChangeText={setTrackingNumber}
-              placeholder="追跡番号を入力"
-              placeholderTextColor="#9A94AA"
-              style={styles.input}
-              autoCapitalize="none"
-            />
-
-            <Text style={styles.inputLabel}>配送会社（任意）</Text>
-            <TextInput
-              value={carrier}
-              onChangeText={setCarrier}
-              placeholder="ヤマト / 日本郵便 など"
-              placeholderTextColor="#9A94AA"
-              style={styles.input}
-            />
-
-            <Pressable
-              style={[
-                styles.primaryButton,
-                submittingShipment ? styles.disabledButton : undefined,
-              ]}
-              onPress={handleSubmitShipment}
-              disabled={submittingShipment}
-            >
-              <Text style={styles.primaryButtonText}>
-                {submittingShipment ? '送信中...' : '発送を通知する'}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {canConfirmReceipt ? (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>受取確認</Text>
-            <Text style={styles.noticeText}>
-              相手の荷物を受け取ったあとに押してください。誤操作は Trust と dispute 導線に影響します。
-            </Text>
-
-            <Pressable
-              style={[
-                styles.primaryButton,
-                confirmingReceipt ? styles.disabledButton : undefined,
-              ]}
-              onPress={handleConfirmReceipt}
-              disabled={confirmingReceipt}
-            >
-              <Text style={styles.primaryButtonText}>
-                {confirmingReceipt ? '確認中...' : '受け取りを確認する'}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {canCancelTrade ? (
+        {/* キャンセル（waiting_my_ship 以外で表示可能なケース） */}
+        {canCancelTrade && uiState !== 'waiting_my_ship' && (
           <View style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>発送前キャンセル</Text>
             <Text style={styles.noticeText}>
-              双方とも未発送の間だけキャンセルできます。発送後はキャンセルではなく問題報告で処理します。
+              双方とも未発送の間だけキャンセルできます。
             </Text>
-
             <Pressable
-              style={[
-                styles.dangerButton,
-                cancellingTrade ? styles.disabledButton : undefined,
-              ]}
+              style={[styles.dangerButton, cancellingTrade && styles.disabledButton]}
               onPress={handleCancelTrade}
               disabled={cancellingTrade}
             >
@@ -847,9 +837,10 @@ export default function TradeDetailScreen() {
               </Text>
             </Pressable>
           </View>
-        ) : null}
+        )}
 
-        {canOpenDispute ? (
+        {/* 問題報告 */}
+        {canOpenDispute && (
           <View style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>問題報告</Text>
             <Text style={styles.noticeText}>
@@ -877,10 +868,7 @@ export default function TradeDetailScreen() {
             />
 
             <Pressable
-              style={[
-                styles.secondaryDangerButton,
-                openingDispute ? styles.disabledButton : undefined,
-              ]}
+              style={[styles.secondaryDangerButton, openingDispute && styles.disabledButton]}
               onPress={handleOpenDispute}
               disabled={openingDispute}
             >
@@ -889,17 +877,16 @@ export default function TradeDetailScreen() {
               </Text>
             </Pressable>
           </View>
-        ) : null}
+        )}
 
-        <View style={styles.footerCard}>
-          <Text style={styles.footerTitle}>現在の案内</Text>
-          <Text style={styles.footerMessage}>{footerMessage}</Text>
-          <Text style={styles.footerMeta}>ログインユーザー: {currentUserId || '未取得'}</Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   )
 }
+
+// ─────────────────────────────────────────
+// スタイル
+// ─────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -913,8 +900,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 40,
-    gap: 16,
+    gap: 12,
   },
+
+  // ── Loading / Error ──────────────────────
   centerBox: {
     flex: 1,
     alignItems: 'center',
@@ -955,105 +944,167 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
+
+  // ── [1] Header ───────────────────────────
   headerCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 18,
     borderWidth: 1,
     borderColor: '#ECE8FA',
+    gap: 8,
   },
-  headerTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 14,
+  headerCardCompleted: {
+    backgroundColor: '#ECFDF3',
+    borderColor: '#A7F3D0',
   },
-  headerLeft: {
-    flex: 1,
+  headerCardCancelled: {
+    backgroundColor: '#F4F4F5',
+    borderColor: '#D4D4D8',
   },
-  pageTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#18181B',
-  },
-  pageSubtitle: {
-    marginTop: 4,
-    fontSize: 13,
-    color: '#71717A',
+  headerCardDisputed: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
   },
   headerBackButton: {
-    height: 38,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    backgroundColor: '#F4F1FF',
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignSelf: 'flex-start',
+    marginBottom: 4,
   },
   headerBackButtonText: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#5A45D6',
+    fontWeight: '600',
+    color: '#6D5EF5',
   },
-  statusChip: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-    marginBottom: 10,
-  },
-  statusChipText: {
-    fontSize: 12,
+  uiStateHeadline: {
+    fontSize: 24,
     fontWeight: '800',
+    color: '#18181B',
+    letterSpacing: -0.3,
   },
-  statusPendingBg: {
-    backgroundColor: '#F5F3FF',
+  headlineMyTurn: {
+    color: '#4F35C2',
   },
-  statusPendingText: {
-    color: '#6D28D9',
-  },
-  statusTransitBg: {
-    backgroundColor: '#EEF6FF',
-  },
-  statusTransitText: {
-    color: '#1D4ED8',
-  },
-  statusPartialBg: {
-    backgroundColor: '#FFF7ED',
-  },
-  statusPartialText: {
-    color: '#C2410C',
-  },
-  statusCompletedBg: {
-    backgroundColor: '#ECFDF3',
-  },
-  statusCompletedText: {
+  headlineCompleted: {
     color: '#047857',
   },
-  statusCancelledBg: {
-    backgroundColor: '#F4F4F5',
-  },
-  statusCancelledText: {
+  headlineCancelled: {
     color: '#52525B',
   },
-  statusDisputedBg: {
-    backgroundColor: '#FEF2F2',
-  },
-  statusDisputedText: {
+  headlineDisputed: {
     color: '#B91C1C',
+  },
+  counterpartLabel: {
+    fontSize: 14,
+    color: '#71717A',
   },
   deadlineText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#B25A00',
-    marginBottom: 8,
   },
-  deadlineExpiredText: {
+  deadlineTextExpired: {
     color: '#B91C1C',
   },
-  metaText: {
-    fontSize: 12,
-    color: '#8A8499',
+
+  // ── [2] Progress ─────────────────────────
+  progressCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#ECE8FA',
   },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  progressStep: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  progressDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  progressDotDone: {
+    backgroundColor: '#059669',
+  },
+  progressDotActive: {
+    backgroundColor: '#6D5EF5',
+  },
+  progressDotFuture: {
+    backgroundColor: '#F4F4F5',
+    borderWidth: 1.5,
+    borderColor: '#D4D4D8',
+  },
+  progressDotText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  progressDotTextDone: {
+    color: '#FFFFFF',
+  },
+  progressDotTextActive: {
+    color: '#FFFFFF',
+  },
+  progressDotTextFuture: {
+    color: '#A1A1AA',
+  },
+  progressLine: {
+    flex: 1,
+    height: 2,
+    marginBottom: 18,
+  },
+  progressLineDone: {
+    backgroundColor: '#059669',
+  },
+  progressLineFuture: {
+    backgroundColor: '#E4E4E7',
+  },
+  progressLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  progressLabelActive: {
+    color: '#6D5EF5',
+  },
+  progressLabelDone: {
+    color: '#059669',
+  },
+  progressLabelFuture: {
+    color: '#A1A1AA',
+  },
+
+  // ── [3] Action ───────────────────────────
+  actionCard: {
+    backgroundColor: colors.tagAccentBg,
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1.5,
+    borderColor: colors.tagAccentBorder,
+  },
+  actionTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.tagAccentText,
+    marginBottom: 6,
+  },
+  cancelLink: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  cancelLinkText: {
+    fontSize: 13,
+    color: '#B91C1C',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+
+  // ── [4,5,6] Section Cards ────────────────
   sectionCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
@@ -1062,50 +1113,28 @@ const styles = StyleSheet.create({
     borderColor: '#ECE8FA',
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
     color: '#18181B',
     marginBottom: 14,
   },
   sectionSubTitle: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#27272A',
-    marginBottom: 10,
+    color: '#5B556D',
+    marginBottom: 8,
   },
-  partnerName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#18181B',
-    marginBottom: 12,
+  divider: {
+    height: 1,
+    backgroundColor: '#ECE8FA',
+    marginVertical: 14,
   },
-  trustGrid: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  trustCard: {
-    flex: 1,
-    minHeight: 82,
-    borderRadius: 16,
-    padding: 12,
-    backgroundColor: '#F8F7FC',
-    justifyContent: 'center',
-  },
-  trustLabel: {
-    fontSize: 11,
-    color: '#8A8499',
-    marginBottom: 4,
-  },
-  trustValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#18181B',
-  },
-  trustFootText: {
-    marginTop: 12,
+  emptyInlineText: {
     fontSize: 13,
     color: '#71717A',
   },
+
+  // ── Card rows ────────────────────────────
   cardItemRow: {
     flexDirection: 'row',
     gap: 12,
@@ -1160,6 +1189,33 @@ const styles = StyleSheet.create({
     color: '#5B556D',
     marginBottom: 3,
   },
+
+  // ── Address ──────────────────────────────
+  addressNote: {
+    fontSize: 13,
+    color: '#71717A',
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  addressRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  addressLabel: {
+    fontSize: 13,
+    color: '#8A8499',
+    width: 68,
+    flexShrink: 0,
+  },
+  addressValue: {
+    flex: 1,
+    fontSize: 13,
+    color: '#18181B',
+    fontWeight: '600',
+  },
+
+  // ── Shipment ─────────────────────────────
   shipmentBox: {
     backgroundColor: '#F8F7FC',
     borderRadius: 16,
@@ -1170,6 +1226,36 @@ const styles = StyleSheet.create({
     color: '#5B556D',
     marginBottom: 6,
   },
+
+  // ── [7] Note ─────────────────────────────
+  noteCard: {
+    backgroundColor: '#F4F1FF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E5DEFF',
+  },
+  noteCardCompleted: {
+    backgroundColor: '#ECFDF3',
+    borderColor: '#A7F3D0',
+  },
+  noteCardWarning: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  noteText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#4B5563',
+  },
+  noteTextCompleted: {
+    color: '#065F46',
+  },
+  noteTextWarning: {
+    color: '#7F1D1D',
+  },
+
+  // ── Inputs / Buttons ─────────────────────
   inputLabel: {
     fontSize: 13,
     fontWeight: '700',
@@ -1192,15 +1278,21 @@ const styles = StyleSheet.create({
     height: 104,
     paddingTop: 14,
   },
+  noticeText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#71717A',
+    marginBottom: 14,
+  },
   primaryButton: {
-    height: 48,
-    borderRadius: 14,
+    height: 52,
+    borderRadius: 16,
     backgroundColor: '#6D5EF5',
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryButtonText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
     color: '#FFFFFF',
   },
@@ -1232,79 +1324,5 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.6,
-  },
-  noticeText: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: '#71717A',
-    marginBottom: 14,
-  },
-  warningCard: {
-    backgroundColor: '#FEF2F2',
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  warningTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#991B1B',
-    marginBottom: 8,
-  },
-  warningBody: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#7F1D1D',
-  },
-  successCard: {
-    backgroundColor: '#ECFDF3',
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-  },
-  successTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#047857',
-    marginBottom: 8,
-  },
-  successBody: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#065F46',
-  },
-  footerCard: {
-    backgroundColor: '#F4F1FF',
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E5DEFF',
-  },
-  footerTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#18181B',
-    marginBottom: 8,
-  },
-  footerMessage: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#4B5563',
-    marginBottom: 8,
-  },
-  footerMeta: {
-    fontSize: 12,
-    color: '#8A8499',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#ECE8FA',
-    marginVertical: 14,
-  },
-  emptyInlineText: {
-    fontSize: 13,
-    color: '#71717A',
   },
 })

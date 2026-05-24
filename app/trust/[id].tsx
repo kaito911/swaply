@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { CardItem } from '@/components/CardItem'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
+import { ScreenHeader } from '@/components/ScreenHeader'
 import { SectionHeader } from '@/components/SectionHeader'
 import { TrustBadge } from '@/components/TrustBadge'
 import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
@@ -110,20 +111,26 @@ export default function TrustProfileScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator color={colors.primary} size="large" />
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScreenHeader title="Trustプロフィール" />
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </View>
+      </SafeAreaView>
     )
   }
 
   if (profile == null) {
     return (
-      <View style={styles.loadingWrap}>
-        <Text style={styles.errorText}>プロフィールが見つかりませんでした</Text>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backLink}>戻る</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScreenHeader title="Trustプロフィール" />
+        <View style={styles.loadingWrap}>
+          <Text style={styles.errorText}>プロフィールが見つかりませんでした</Text>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={styles.backLink}>戻る</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     )
   }
 
@@ -136,7 +143,8 @@ export default function TrustProfileScreen() {
   })
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <ScreenHeader title="Trustプロフィール" />
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ─ プロフィールヘッダー ─ */}

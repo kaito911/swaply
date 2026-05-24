@@ -116,13 +116,7 @@ function RootNavigator() {
 
         <Stack.Screen
           name="trust/[id]"
-          options={{
-            headerShown: true,
-            title: 'Trustプロフィール',
-            headerStyle: { backgroundColor: colors.background },
-            headerTintColor: colors.textPrimary,
-            headerShadowVisible: false,
-          }}
+          options={{ headerShown: false }} // 画面内 ScreenHeader 統一 (3.5a 規約)
         />
 
         <Stack.Screen

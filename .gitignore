@@ -46,3 +46,12 @@ app-example
 # その他（推奨）
 swaply-review-package.zip
 swaply-review-package/
+
+# IDE / Editor (Claude Code)
+.claude/
+
+# Recording assets (動画録画素材)
+動画*/
+
+# Commit message scratch (heredoc 回避用、feedback_avoid_heredoc_for_commit_messages)
+.commit_msg_tmp.txt

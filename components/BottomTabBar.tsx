@@ -14,12 +14,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useBadge } from '@/providers/BadgeProvider'
 
 type VisibleTab = {
-  name: 'index' | 'trades' | 'mypage' | 'search' | 'venue-tab'
+  name: 'index' | 'trades' | 'search' | 'venue-tab'
   icon: keyof typeof Ionicons.glyphMap
   iconActive: keyof typeof Ionicons.glyphMap
   label: string
 }
 
+// 案 E5 確定 (refactor_plan §3.14-5): ホーム / 検索 / + / 取引 / 会場 の 5 スロット。
+// マイページはボトム外 — 右上 HeaderActions のアバターからのみ到達可能。
 const TABS: VisibleTab[] = [
   {
     name: 'index',
@@ -44,12 +46,6 @@ const TABS: VisibleTab[] = [
     icon: 'location-outline',
     iconActive: 'location',
     label: '会場',
-  },
-  {
-    name: 'mypage',
-    icon: 'person-outline',
-    iconActive: 'person',
-    label: 'マイページ',
   },
 ]
 
@@ -131,7 +127,6 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
         </Pressable>
         {renderTab(TABS[2])}
         {renderTab(TABS[3])}
-        {renderTab(TABS[4])}
       </View>
     </View>
   )

@@ -414,7 +414,8 @@ export default function ListingDetailScreen() {
         {activeTab === 'offer' ? (
           // ─ 譲タブ: 相手が出しているグッズの情報 ─
           <>
-            {/* 出品画像 + overlay (TrustBadge / 差額 / Like / 表裏切替) */}
+            {/* 出品画像 + overlay (差額 / Like / 表裏切替)
+                Trust 表示は下部「出品者 / Trust」共通エリアに集約済 — 画像 overlay には載せない */}
             <View style={styles.imageWrap}>
               {displayImageUrl != null ? (
                 <Image
@@ -468,11 +469,6 @@ export default function ListingDetailScreen() {
                   </Pressable>
                 </View>
               )}
-
-              {/* TrustBadge: 画像上の即時スキャン用 (小サイズ overlay)、メインの Trust 表示は下部共通エリア */}
-              <View style={styles.trustOverlay}>
-                <TrustBadge level={trustLevel} size="sm" />
-              </View>
 
               {/* 差額: bottom-left overlay（即時スキャン用）*/}
               <View style={[styles.diffOverlay, { backgroundColor: diff.bgColor }]}>
@@ -584,39 +580,6 @@ export default function ListingDetailScreen() {
                   : '相手の求める内容は未設定です'}
               </Text>
             </View>
-
-            {/* 参考: 出品ジャンル (既存データから推測できる文脈情報) */}
-            {(card.group_name != null ||
-              card.member_name != null ||
-              card.series != null) && (
-              <>
-                <Text style={styles.sectionLabel}>参考: 出品ジャンル</Text>
-                <View style={styles.wantGenreBox}>
-                  {card.group_name != null && (
-                    <View style={styles.wantGenreRow}>
-                      <Text style={styles.wantGenreLabel}>グループ</Text>
-                      <Text style={styles.wantGenreValue}>
-                        {card.group_name}
-                      </Text>
-                    </View>
-                  )}
-                  {card.member_name != null && (
-                    <View style={styles.wantGenreRow}>
-                      <Text style={styles.wantGenreLabel}>メンバー</Text>
-                      <Text style={styles.wantGenreValue}>
-                        {card.member_name}
-                      </Text>
-                    </View>
-                  )}
-                  {card.series != null && (
-                    <View style={styles.wantGenreRow}>
-                      <Text style={styles.wantGenreLabel}>シリーズ</Text>
-                      <Text style={styles.wantGenreValue}>{card.series}</Text>
-                    </View>
-                  )}
-                </View>
-              </>
-            )}
 
             {/* 交換条件 (求タブにも表示: 提案時に必要な条件として参照) */}
             <Text style={styles.sectionLabel}>交換条件</Text>
@@ -857,11 +820,6 @@ const styles = StyleSheet.create({
   sideToggleSegTextActive: {
     color: '#18181B',
   },
-  trustOverlay: {
-    position: 'absolute',
-    top: spacing.sm,
-    right: spacing.sm,
-  },
   diffOverlay: {
     position: 'absolute',
     bottom: spacing.sm,
@@ -1004,31 +962,6 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
     lineHeight: 22,
-  },
-
-  // ── 求タブ: 出品ジャンル (参考表示) ─────────
-  wantGenreBox: {
-    backgroundColor: colors.backgroundCard,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-  },
-  wantGenreRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: spacing.xs + 2,
-  },
-  wantGenreLabel: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-  },
-  wantGenreValue: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
   },
 
   // ── ③ conditions ─────────────────────────

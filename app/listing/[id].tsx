@@ -94,6 +94,16 @@ function getPushReason(
 }
 
 // ─────────────────────────────────────────
+// types
+// ─────────────────────────────────────────
+
+// 出品詳細のタブ:
+//   'offer' (譲) = 相手が出しているグッズの情報
+//   'want'  (求) = 相手が求めているもの
+// Trust / 出品者情報 / CTA は交換判断全体に関わるためタブ外 (共通エリア / 画面下部) に維持。
+type ListingDetailTab = 'offer' | 'want'
+
+// ─────────────────────────────────────────
 // inline component
 // ─────────────────────────────────────────
 
@@ -137,6 +147,8 @@ export default function ListingDetailScreen() {
   >(null)
   const [bestMatchScore, setBestMatchScore] = useState<WantMatchScore>('none')
   const [imageSide, setImageSide] = useState<'front' | 'back'>('front')
+  // 譲 / 求 タブ: 初期表示は譲 (まず相手が何を出しているかを見せる)
+  const [activeTab, setActiveTab] = useState<ListingDetailTab>('offer')
 
   const load = useCallback(async () => {
     if (!listingId) {
@@ -358,135 +370,282 @@ export default function ListingDetailScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* ① Card ─────────────────────────────── */}
-        <View style={styles.imageWrap}>
-          {displayImageUrl != null ? (
-            <Image
-              source={{ uri: displayImageUrl }}
-              style={styles.image}
-              contentFit="contain"
-              transition={200}
-              cachePolicy="memory-disk"
-            />
-          ) : (
-            <View style={[styles.image, styles.imageFallback]}>
-              <Ionicons name="image-outline" size={40} color={colors.border} />
-              <Text style={styles.imageFallbackText}>写真未登録</Text>
-            </View>
-          )}
-
-          {/* 表/裏切替: 裏面ありのときのみ */}
-          {hasBackImage && (
-            <View style={styles.sideToggleOverlay}>
-              <Pressable
-                style={[
-                  styles.sideToggleSeg,
-                  imageSide === 'front' && styles.sideToggleSegActive,
-                ]}
-                onPress={() => setImageSide('front')}
-              >
-                <Text
-                  style={[
-                    styles.sideToggleSegText,
-                    imageSide === 'front' && styles.sideToggleSegTextActive,
-                  ]}
-                >
-                  表面
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.sideToggleSeg,
-                  imageSide === 'back' && styles.sideToggleSegActive,
-                ]}
-                onPress={() => setImageSide('back')}
-              >
-                <Text
-                  style={[
-                    styles.sideToggleSegText,
-                    imageSide === 'back' && styles.sideToggleSegTextActive,
-                  ]}
-                >
-                  裏面
-                </Text>
-              </Pressable>
-            </View>
-          )}
-
-          {/* TrustBadge: top-right overlay */}
-          <View style={styles.trustOverlay}>
-            <TrustBadge level={trustLevel} size="sm" />
-          </View>
-
-          {/* 差額: bottom-left overlay（即時スキャン用）*/}
-          <View style={[styles.diffOverlay, { backgroundColor: diff.bgColor }]}>
-            <Text style={[styles.diffOverlayText, { color: diff.textColor }]}>
-              {diff.text}
+        {/* ① タブバー (画面トップ): 譲 / 求 */}
+        <View style={styles.tabBar}>
+          <Pressable
+            style={[
+              styles.tabSegment,
+              activeTab === 'offer' && styles.tabSegmentActive,
+            ]}
+            onPress={() => setActiveTab('offer')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === 'offer' }}
+          >
+            <Text
+              style={[
+                styles.tabSegmentText,
+                activeTab === 'offer' && styles.tabSegmentTextActive,
+              ]}
+            >
+              譲
             </Text>
-          </View>
-
-          {/* ♡ いいね: bottom-right overlay (自分の出品では非表示、3.5a 機能 H) */}
-          {!isOwn && currentUserId != null && (
-            <LikeButton
-              isLiked={isLiked}
-              onToggle={handleToggleLike}
-              size="medium"
-              disabled={likeToggling}
-              style={styles.likeOverlay}
-            />
-          )}
+          </Pressable>
+          <Pressable
+            style={[
+              styles.tabSegment,
+              activeTab === 'want' && styles.tabSegmentActive,
+            ]}
+            onPress={() => setActiveTab('want')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === 'want' }}
+          >
+            <Text
+              style={[
+                styles.tabSegmentText,
+                activeTab === 'want' && styles.tabSegmentTextActive,
+              ]}
+            >
+              求
+            </Text>
+          </Pressable>
         </View>
 
-        {isNonActive && (
-          <View style={[
-            styles.statusBanner,
-            card.status === 'reserved' ? styles.statusBannerAmber : styles.statusBannerGray,
-          ]}>
-            <Text style={styles.statusBannerText}>
-              {card.status === 'traded'
-                ? 'この出品は交換済みです'
-                : card.status === 'inactive'
-                ? 'この出品は現在出品停止中です'
-                : 'この出品は現在取引進行中です'}
-            </Text>
+        {/* ② タブコンテンツ — activeTab で切替 */}
+        {activeTab === 'offer' ? (
+          // ─ 譲タブ: 相手が出しているグッズの情報 ─
+          <>
+            {/* 出品画像 + overlay (TrustBadge / 差額 / Like / 表裏切替) */}
+            <View style={styles.imageWrap}>
+              {displayImageUrl != null ? (
+                <Image
+                  source={{ uri: displayImageUrl }}
+                  style={styles.image}
+                  contentFit="contain"
+                  transition={200}
+                  cachePolicy="memory-disk"
+                />
+              ) : (
+                <View style={[styles.image, styles.imageFallback]}>
+                  <Ionicons name="image-outline" size={40} color={colors.border} />
+                  <Text style={styles.imageFallbackText}>写真未登録</Text>
+                </View>
+              )}
+
+              {/* 表/裏切替: 裏面ありのときのみ */}
+              {hasBackImage && (
+                <View style={styles.sideToggleOverlay}>
+                  <Pressable
+                    style={[
+                      styles.sideToggleSeg,
+                      imageSide === 'front' && styles.sideToggleSegActive,
+                    ]}
+                    onPress={() => setImageSide('front')}
+                  >
+                    <Text
+                      style={[
+                        styles.sideToggleSegText,
+                        imageSide === 'front' && styles.sideToggleSegTextActive,
+                      ]}
+                    >
+                      表面
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.sideToggleSeg,
+                      imageSide === 'back' && styles.sideToggleSegActive,
+                    ]}
+                    onPress={() => setImageSide('back')}
+                  >
+                    <Text
+                      style={[
+                        styles.sideToggleSegText,
+                        imageSide === 'back' && styles.sideToggleSegTextActive,
+                      ]}
+                    >
+                      裏面
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {/* TrustBadge: 画像上の即時スキャン用 (小サイズ overlay)、メインの Trust 表示は下部共通エリア */}
+              <View style={styles.trustOverlay}>
+                <TrustBadge level={trustLevel} size="sm" />
+              </View>
+
+              {/* 差額: bottom-left overlay（即時スキャン用）*/}
+              <View style={[styles.diffOverlay, { backgroundColor: diff.bgColor }]}>
+                <Text style={[styles.diffOverlayText, { color: diff.textColor }]}>
+                  {diff.text}
+                </Text>
+              </View>
+
+              {/* ♡ いいね: bottom-right overlay (自分の出品では非表示) */}
+              {!isOwn && currentUserId != null && (
+                <LikeButton
+                  isLiked={isLiked}
+                  onToggle={handleToggleLike}
+                  size="medium"
+                  disabled={likeToggling}
+                  style={styles.likeOverlay}
+                />
+              )}
+            </View>
+
+            {isNonActive && (
+              <View
+                style={[
+                  styles.statusBanner,
+                  card.status === 'reserved'
+                    ? styles.statusBannerAmber
+                    : styles.statusBannerGray,
+                ]}
+              >
+                <Text style={styles.statusBannerText}>
+                  {card.status === 'traded'
+                    ? 'この出品は交換済みです'
+                    : card.status === 'inactive'
+                    ? 'この出品は現在出品停止中です'
+                    : 'この出品は現在取引進行中です'}
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.body}>
+              {/* タイトル情報 (グッズ名 / グループ / メンバー · シリーズ) */}
+              {card.group_name != null && (
+                <Text style={styles.groupName}>{card.group_name}</Text>
+              )}
+              <Text style={styles.cardName}>{card.name}</Text>
+              {memberSeries !== '' && (
+                <Text style={styles.memberSeries}>{memberSeries}</Text>
+              )}
+
+              {isLiked && !isOwn && (
+                <Text style={styles.wantSavedNote}>✓ いいね済みの商品です</Text>
+              )}
+
+              {/* 交換条件 (発送方法 + 差額対応) */}
+              <Text style={styles.sectionLabel}>交換条件</Text>
+              <View style={styles.conditionsRow}>
+                {card.allows_mail && (
+                  <Tag
+                    text="郵送で交換可"
+                    bgColor={colors.tagNeutralBg}
+                    textColor={colors.tagNeutralText}
+                  />
+                )}
+                {card.allows_handoff && (
+                  <Tag
+                    text="手渡しで交換可"
+                    bgColor={colors.tagNeutralBg}
+                    textColor={colors.tagNeutralText}
+                  />
+                )}
+                <Tag
+                  text={diff.text}
+                  bgColor={diff.bgColor}
+                  textColor={diff.textColor}
+                />
+              </View>
+
+              {/* 出品物の説明 (折りたたみ) */}
+              {hasDescription && (
+                <View style={styles.descSection}>
+                  <Pressable
+                    style={styles.descToggle}
+                    onPress={() => setDescExpanded((v) => !v)}
+                  >
+                    <Text style={styles.descToggleText}>
+                      {descExpanded ? '▲ 説明を閉じる' : '▼ 説明を見る'}
+                    </Text>
+                  </Pressable>
+                  {descExpanded && (
+                    <Text style={styles.descText}>{card.description}</Text>
+                  )}
+                </View>
+              )}
+            </View>
+          </>
+        ) : (
+          // ─ 求タブ: 相手が求めているもの ─
+          <View style={styles.body}>
+            {/* 求条件のメインカード (求 hero) */}
+            <View style={styles.wantHeroCard}>
+              <Text style={styles.wantHeroBadge}>求</Text>
+              <Text style={styles.wantHeroSubtitle}>
+                この出品者が求めているもの
+              </Text>
+              <Text style={styles.wantHeroBody}>
+                {card.want_description != null &&
+                card.want_description.trim() !== ''
+                  ? card.want_description
+                  : '相手の求める内容は未設定です'}
+              </Text>
+            </View>
+
+            {/* 参考: 出品ジャンル (既存データから推測できる文脈情報) */}
+            {(card.group_name != null ||
+              card.member_name != null ||
+              card.series != null) && (
+              <>
+                <Text style={styles.sectionLabel}>参考: 出品ジャンル</Text>
+                <View style={styles.wantGenreBox}>
+                  {card.group_name != null && (
+                    <View style={styles.wantGenreRow}>
+                      <Text style={styles.wantGenreLabel}>グループ</Text>
+                      <Text style={styles.wantGenreValue}>
+                        {card.group_name}
+                      </Text>
+                    </View>
+                  )}
+                  {card.member_name != null && (
+                    <View style={styles.wantGenreRow}>
+                      <Text style={styles.wantGenreLabel}>メンバー</Text>
+                      <Text style={styles.wantGenreValue}>
+                        {card.member_name}
+                      </Text>
+                    </View>
+                  )}
+                  {card.series != null && (
+                    <View style={styles.wantGenreRow}>
+                      <Text style={styles.wantGenreLabel}>シリーズ</Text>
+                      <Text style={styles.wantGenreValue}>{card.series}</Text>
+                    </View>
+                  )}
+                </View>
+              </>
+            )}
+
+            {/* 交換条件 (求タブにも表示: 提案時に必要な条件として参照) */}
+            <Text style={styles.sectionLabel}>交換条件</Text>
+            <View style={styles.conditionsRow}>
+              {card.allows_mail && (
+                <Tag
+                  text="郵送で交換可"
+                  bgColor={colors.tagNeutralBg}
+                  textColor={colors.tagNeutralText}
+                />
+              )}
+              {card.allows_handoff && (
+                <Tag
+                  text="手渡しで交換可"
+                  bgColor={colors.tagNeutralBg}
+                  textColor={colors.tagNeutralText}
+                />
+              )}
+              <Tag
+                text={diff.text}
+                bgColor={diff.bgColor}
+                textColor={diff.textColor}
+              />
+            </View>
           </View>
         )}
 
+        {/* ③ 出品者 / Trust (タブ外、共通エリア) */}
         <View style={styles.body}>
-          {card.group_name != null && (
-            <Text style={styles.groupName}>{card.group_name}</Text>
-          )}
-          <Text style={styles.cardName}>{card.name}</Text>
-          {memberSeries !== '' && (
-            <Text style={styles.memberSeries}>{memberSeries}</Text>
-          )}
-
-          {/* ② Want ─────────────────────────────── */}
-          <Text style={styles.sectionLabel}>何を求めているか</Text>
-          <View style={styles.wantBox}>
-            <Text style={styles.wantLabel}>求めているカード</Text>
-            <Text style={styles.wantValue}>
-              {card.want_description ?? '未設定'}
-            </Text>
-          </View>
-          {isLiked && !isOwn && (
-            <Text style={styles.wantSavedNote}>✓ いいね済みの商品です</Text>
-          )}
-
-          {/* ③ Conditions ───────────────────────── */}
-          <Text style={styles.sectionLabel}>交換条件</Text>
-          <View style={styles.conditionsRow}>
-            {card.allows_mail && (
-              <Tag text="郵送で交換可" bgColor={colors.tagNeutralBg} textColor={colors.tagNeutralText} />
-            )}
-            {card.allows_handoff && (
-              <Tag text="手渡しで交換可" bgColor={colors.tagNeutralBg} textColor={colors.tagNeutralText} />
-            )}
-            <Tag text={diff.text} bgColor={diff.bgColor} textColor={diff.textColor} />
-          </View>
-
-          {/* ④ Trust ────────────────────────────── */}
-          {/* ★ 3.5a 機能 H: ホームから Trust 削除した分、出品詳細で全項目を直接表示 (tap 不要) */}
           <Text style={styles.sectionLabel}>出品者</Text>
 
           {owner != null ? (
@@ -494,13 +653,17 @@ export default function ListingDetailScreen() {
               <View style={styles.sellerTopRow}>
                 <View style={styles.avatar}>
                   <Text style={styles.avatarText}>
-                    {(owner.handle || owner.display_name || '?').slice(0, 1).toUpperCase()}
+                    {(owner.handle || owner.display_name || '?')
+                      .slice(0, 1)
+                      .toUpperCase()}
                   </Text>
                 </View>
 
                 <View style={styles.sellerMeta}>
                   <Text style={styles.sellerHandle}>
-                    {owner.handle ? `@${owner.handle}` : (owner.display_name ?? '出品者')}
+                    {owner.handle
+                      ? `@${owner.handle}`
+                      : owner.display_name ?? '出品者'}
                   </Text>
                   <View style={styles.sellerBadgeRow}>
                     <TrustBadge level={trustLevel} size="sm" />
@@ -510,12 +673,15 @@ export default function ListingDetailScreen() {
                 <Text style={styles.detailLink}>Trust詳細 ›</Text>
               </View>
 
-              {/* Trust 6 項目を default 表示 (成立件数 / 発送遵守率 / 返信中央値 / 差額平均 / 差額偏り / トラブル件数) */}
+              {/* Trust 6 項目 default 表示 */}
               <View style={styles.trustRowsWrap}>
                 {getTrustRows(owner).map((row, i, arr) => (
                   <View
                     key={row.label}
-                    style={[styles.trustRow, i < arr.length - 1 && styles.trustRowBorder]}
+                    style={[
+                      styles.trustRow,
+                      i < arr.length - 1 && styles.trustRowBorder,
+                    ]}
                   >
                     <Text style={styles.trustLabel}>{row.label}</Text>
                     <Text style={styles.trustValue}>{row.value}</Text>
@@ -534,28 +700,9 @@ export default function ListingDetailScreen() {
               </Text>
             </View>
           )}
-
-          {/* 補足: カード説明（折りたたみ） */}
-          {hasDescription && (
-            <View style={styles.descSection}>
-              <Pressable
-                style={styles.descToggle}
-                onPress={() => setDescExpanded((v) => !v)}
-              >
-                <Text style={styles.descToggleText}>
-                  {descExpanded ? '▲ 説明を閉じる' : '▼ 説明を見る'}
-                </Text>
-              </Pressable>
-              {descExpanded && (
-                <Text style={styles.descText}>{card.description}</Text>
-              )}
-            </View>
-          )}
-
-          {/* 旧「♡ いいね」画面下部ボタンは 3.5a で削除、写真右下 overlay の LikeButton に統合 */}
         </View>
 
-        {/* ⑤ CTA ──────────────────────────────── */}
+        {/* ④ CTA (タブ外、画面下部) */}
         {!isOwn && (
           <View style={styles.ctaContainer}>
             {/* A. 押していい理由（1つだけ） */}
@@ -565,9 +712,7 @@ export default function ListingDetailScreen() {
               </Text>
             )}
             {/* B. 不安除去の一文 */}
-            <Text style={styles.ctaReassurance}>
-              承認されるまで確定しません
-            </Text>
+            <Text style={styles.ctaReassurance}>承認されるまで確定しません</Text>
             <PrimaryCTA
               label={cta.label}
               onPress={handlePropose}
@@ -787,30 +932,103 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
 
-  // ── ② want ───────────────────────────────
-  wantBox: {
+  // ── タブバー (譲 / 求) ────────────────────
+  tabBar: {
+    flexDirection: 'row',
+    marginHorizontal: spacing.base,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.backgroundMuted,
+    borderRadius: radius.lg,
+    padding: 4,
+  },
+  tabSegment: {
+    flex: 1,
+    height: 38,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabSegmentActive: {
     backgroundColor: colors.backgroundCard,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
   },
-  wantLabel: {
-    fontSize: 10,
-    color: colors.textSecondary,
-    fontWeight: fontWeight.medium,
-  },
-  wantValue: {
+  tabSegmentText: {
     fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-    marginTop: spacing.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
+    letterSpacing: 2,
   },
+  tabSegmentTextActive: {
+    color: colors.primary,
+    fontWeight: fontWeight.extrabold,
+  },
+
+  // ── 譲タブ: いいね済 note (画像と本文タイトルの後に置く) ─
   wantSavedNote: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.medium,
     color: colors.textSecondary,
     marginTop: spacing.xs,
+  },
+
+  // ── 求タブ: 求条件のメインカード (hero) ─────
+  // 画像枠は無理に作らず、テキストベースの hero card で「求」意図を明示。
+  wantHeroCard: {
+    backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginTop: spacing.sm,
+    marginBottom: spacing.base,
+  },
+  wantHeroBadge: {
+    fontSize: fontSize['2xl'],
+    fontWeight: fontWeight.extrabold,
+    color: colors.primary,
+    letterSpacing: -0.5,
+    marginBottom: 2,
+  },
+  wantHeroSubtitle: {
+    fontSize: 10,
+    fontWeight: fontWeight.extrabold,
+    color: colors.textSecondary,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+  },
+  wantHeroBody: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    lineHeight: 22,
+  },
+
+  // ── 求タブ: 出品ジャンル (参考表示) ─────────
+  wantGenreBox: {
+    backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+  },
+  wantGenreRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.xs + 2,
+  },
+  wantGenreLabel: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+  },
+  wantGenreValue: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
 
   // ── ③ conditions ─────────────────────────

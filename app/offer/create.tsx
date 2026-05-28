@@ -17,7 +17,13 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
-import { createOffer, fetchCard, fetchMyWantedCards, fetchUserCards } from '@/lib/supabase' // ★ updated
+import {
+  MAX_PROPOSER_CARDS_PER_OFFER,
+  createOffer,
+  fetchCard,
+  fetchMyWantedCards,
+  fetchUserCards,
+} from '@/lib/supabase'
 import { Card, WantedCard, WantMatchScore } from '@/lib/types'
 import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { useAuthContext } from '@/providers/AuthProvider'
@@ -88,31 +94,40 @@ function getMatchReasonLabel(score: WantMatchScore): string | null {
 type HintLevel = 'strong' | 'medium' | 'weak'
 
 // ★ updated: 相手視点（自分のカードが相手のwantに刺さるか）
+// β1 複数枚提案対応: 選択中の myCards 全体で最良 score の組み合わせを表示。
 function getHint(
-  myCard: Card | null,
+  myCards: Card[],
   targetWants: WantedCard[],
 ): { level: HintLevel; text: string } | null {
-  if (myCard == null) return null
+  if (myCards.length === 0) return null
   if (targetWants.length === 0) return null
 
-  let bestWant = targetWants[0] // ★ updated: bestMatchに対応するwantを追跡
-  const bestMatch = targetWants.reduce<WantMatchScore>((acc, want) => {
-    const s = scoreWantMatchV2(myCard, want) // ★ updated: myCard × 相手want
-    if (s === 'strong') { bestWant = want; return 'strong' }
-    if (s === 'medium' && acc !== 'strong') { bestWant = want; return 'medium' }
-    if (s === 'weak' && acc === 'none') { bestWant = want; return 'weak' }
-    return acc
-  }, 'none')
+  let bestWant: WantedCard = targetWants[0]
+  let bestMatch: WantMatchScore = 'none'
 
-  if (bestMatch === 'strong') {
-    return { level: 'strong', text: '💡 相手の求と一致しています' }
+  for (const myCard of myCards) {
+    for (const want of targetWants) {
+      const s = scoreWantMatchV2(myCard, want)
+      if (s === 'strong') {
+        bestWant = want
+        return { level: 'strong', text: '💡 相手の求と一致しています' }
+      }
+      // strong は上で早期 return 済のため、ここでは medium / weak のみ考慮
+      if (s === 'medium' && bestMatch !== 'medium') {
+        bestWant = want
+        bestMatch = 'medium'
+      } else if (s === 'weak' && bestMatch === 'none') {
+        bestWant = want
+        bestMatch = 'weak'
+      }
+    }
   }
 
   if (bestMatch === 'medium') {
     return { level: 'medium', text: '💡 相手の求に近いカードです' }
   }
 
-  // ★ updated: weak / none — bestWantのgroup_name + member_nameを具体表示
+  // weak / none — bestWant の group_name + member_name を具体表示
   const parts = [bestWant.group_name, bestWant.member_name]
     .filter((v): v is string => v != null && v !== '')
     .join(' ')
@@ -130,7 +145,8 @@ export default function OfferCreateScreen() {
 
   const [targetCard, setTargetCard] = useState<Card | null>(null)
   const [myCards, setMyCards] = useState<Card[]>([])
-  const [selectedMyCardId, setSelectedMyCardId] = useState<string | null>(null)
+  // β1 複数枚提案: 1〜5 枚選択可、順序は selectedMyCardIds で保持。
+  const [selectedMyCardIds, setSelectedMyCardIds] = useState<string[]>([])
 
   const [showDiff, setShowDiff] = useState(false)
   const [adjustmentAmount, setAdjustmentAmount] = useState('')
@@ -163,10 +179,16 @@ export default function OfferCreateScreen() {
     return myCardId ?? null
   }, [myCardId])
 
-  const selectedMyCard = useMemo(() => {
-    if (selectedMyCardId == null) return null
-    return myCards.find((c) => c.id === selectedMyCardId) ?? null
-  }, [myCards, selectedMyCardId])
+  // selectedMyCardIds に沿った Card 配列 (順序保持)
+  const selectedMyCards = useMemo(() => {
+    const map = new Map(myCards.map((c) => [c.id, c]))
+    const result: Card[] = []
+    for (const id of selectedMyCardIds) {
+      const found = map.get(id)
+      if (found != null) result.push(found)
+    }
+    return result
+  }, [myCards, selectedMyCardIds])
 
   const isOwnTarget = useMemo(() => {
     if (targetCard == null || userId == null) return false
@@ -178,10 +200,27 @@ export default function OfferCreateScreen() {
   const canSend =
     !isOwnTarget &&
     targetIsActive &&
-    selectedMyCard != null &&
+    selectedMyCards.length > 0 &&
     chkTerms &&
     (!showDiff || chkDiff) &&
     !submitting
+
+  // 単一カード tap → 選択/解除 toggle、5 枚到達済で追加しようとしたら Alert。
+  const toggleMyCardSelection = (cardId: string) => {
+    setSelectedMyCardIds((prev) => {
+      if (prev.includes(cardId)) {
+        return prev.filter((id) => id !== cardId)
+      }
+      if (prev.length >= MAX_PROPOSER_CARDS_PER_OFFER) {
+        Alert.alert(
+          '選択枚数の上限です',
+          `最大${MAX_PROPOSER_CARDS_PER_OFFER}枚まで選択できます`
+        )
+        return prev
+      }
+      return [...prev, cardId]
+    })
+  }
 
   useEffect(() => {
     let mounted = true
@@ -280,16 +319,18 @@ export default function OfferCreateScreen() {
         setTargetWants(fetchedTargetWants) // ★ updated
 
         if (displayedMine.length > 0) {
-          setSelectedMyCardId((prev) => {
-            if (prev != null && displayedMine.some((c) => c.id === prev)) return prev
+          setSelectedMyCardIds((prev) => {
+            // 既存の選択 (再フォーカス等) で displayedMine 内に残っているものは維持
+            const validPrev = prev.filter((id) => displayedMine.some((c) => c.id === id))
+            if (validPrev.length > 0) return validPrev
             // ①レーンから myCardId が渡された場合、アクティブ一覧内にあれば優先選択
             if (resolvedMyCardId != null && displayedMine.some((c) => c.id === resolvedMyCardId)) {
-              return resolvedMyCardId
+              return [resolvedMyCardId]
             }
-            return displayedMine[0].id
+            return [displayedMine[0].id]
           })
         } else {
-          setSelectedMyCardId(null)
+          setSelectedMyCardIds([])
         }
       } catch (error) {
         console.error('[OfferCreateScreen][load]', error)
@@ -318,7 +359,17 @@ export default function OfferCreateScreen() {
       Alert.alert('エラー', 'この出品は現在交換提案できません')
       return
     }
-    if (selectedMyCard == null) return
+    if (selectedMyCards.length === 0) {
+      Alert.alert('エラー', '交換に出すカードを1枚以上選んでください')
+      return
+    }
+    if (selectedMyCards.length > MAX_PROPOSER_CARDS_PER_OFFER) {
+      Alert.alert(
+        'エラー',
+        `交換に出すカードは最大${MAX_PROPOSER_CARDS_PER_OFFER}枚までです`
+      )
+      return
+    }
 
     const rawAmount =
       showDiff && adjustmentAmount.trim().length > 0
@@ -357,7 +408,7 @@ export default function OfferCreateScreen() {
       await createOffer({
         proposerId: userId,
         receiverId: targetCard.owner_user_id,
-        proposerCardId: selectedMyCard.id,
+        proposerCardIds: selectedMyCards.map((c) => c.id),
         receiverCardId: targetCard.id,
         adjustmentAmount: parsedAdjustment,
         // TODO: adjustmentPayer（UI実装済み。createOffer API拡張後に接続）
@@ -432,13 +483,15 @@ export default function OfferCreateScreen() {
   }
 
   // ── Main ─────────────────────────────────
-  const otherCards = myCards.filter((c) => c.id !== selectedMyCardId)
   const owner = targetCard.owner ?? null
   const wantDesc = targetCard.want_description
 
   // ★ added: CTA直上ラベル文言（none のとき null）
   const matchReasonLabel = getMatchReasonLabel(bestMatchScore)
-  const hint = getHint(selectedMyCard ?? null, targetWants) // ★ updated
+  const hint = getHint(selectedMyCards, targetWants)
+  const selectedCount = selectedMyCards.length
+  const primarySelected = selectedMyCards[0] ?? null
+  const extraSelectedCount = Math.max(selectedCount - 1, 0)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -541,7 +594,7 @@ export default function OfferCreateScreen() {
             </View>
           </View>
 
-          {/* Right: my card picker */}
+          {/* Right: my card picker (β1 複数枚対応: 1〜5 枚 toggle) */}
           <View style={styles.myPickerCol}>
             <Text style={styles.myColLabel}>あなたが出すカード</Text>
 
@@ -555,78 +608,59 @@ export default function OfferCreateScreen() {
               </View>
             ) : (
               <>
-                {/* 確定行 + "選択中" ラベル */}
-                {selectedMyCard != null && (
-                  <>
-                    <Text style={styles.selectedLabel}>選択中</Text>
-                    <View style={styles.confirmedCard}>
-                      {selectedMyCard.image_url != null ? (
+                <Text style={styles.selectedLabel}>
+                  選択中：{selectedCount}枚（最大{MAX_PROPOSER_CARDS_PER_OFFER}）
+                </Text>
+
+                {myCards.map((card) => {
+                  const isSelected = selectedMyCardIds.includes(card.id)
+                  return (
+                    <Pressable
+                      key={card.id}
+                      style={[
+                        styles.pickerItem,
+                        isSelected && styles.pickerItemSelected,
+                      ]}
+                      onPress={() => toggleMyCardSelection(card.id)}
+                    >
+                      {card.image_url != null ? (
                         <Image
-                          source={{ uri: selectedMyCard.image_url }}
-                          style={styles.confirmedImage}
+                          source={{ uri: card.image_url }}
+                          style={styles.pickerThumb}
                         />
                       ) : (
-                        <View style={[styles.confirmedImage, styles.imagePlaceholder]}>
+                        <View style={[styles.pickerThumb, styles.imagePlaceholder]}>
                           <Ionicons
                             name="image-outline"
-                            size={18}
+                            size={12}
                             color={colors.textTertiary}
                           />
                         </View>
                       )}
-                      <View style={styles.confirmedMeta}>
-                        <Text style={styles.confirmedName} numberOfLines={2}>
-                          {selectedMyCard.name}
+                      <View style={styles.pickerMeta}>
+                        <Text
+                          style={[
+                            styles.pickerName,
+                            isSelected && styles.pickerNameSelected,
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {card.name}
                         </Text>
-                        {isNearWant(selectedMyCard, wantDesc) && (
+                        {isNearWant(card, wantDesc) && (
                           <View style={styles.nearWantBadge}>
                             <Text style={styles.nearWantBadgeText}>求に近い</Text>
                           </View>
                         )}
                       </View>
-                      <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
-                    </View>
-                  </>
-                )}
-
-                {/* 変更リスト */}
-                {myCards.length > 1 && (
-                  <>
-                    <Text style={styles.changeLabel}>変更する</Text>
-                    {otherCards.map((card) => (
-                      <Pressable
-                        key={card.id}
-                        style={styles.pickerItem}
-                        onPress={() => setSelectedMyCardId(card.id)}
-                      >
-                        {card.image_url != null ? (
-                          <Image
-                            source={{ uri: card.image_url }}
-                            style={styles.pickerThumb}
-                          />
-                        ) : (
-                          <View style={[styles.pickerThumb, styles.imagePlaceholder]}>
-                            <Ionicons
-                              name="image-outline"
-                              size={12}
-                              color={colors.textTertiary}
-                            />
-                          </View>
-                        )}
-                        <View style={styles.pickerMeta}>
-                          <Text style={styles.pickerName} numberOfLines={2}>
-                            {card.name}
-                          </Text>
-                          {isNearWant(card, wantDesc) && (
-                            <View style={styles.nearWantBadge}>
-                              <Text style={styles.nearWantBadgeText}>求に近い</Text>
-                            </View>
-                          )}
-                        </View>
-                      </Pressable>
-                    ))}
-                  </>
-                )}
+                      <Ionicons
+                        name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={18}
+                        color={isSelected ? colors.primary : colors.border}
+                      />
+                    </Pressable>
+                  )
+                })}
               </>
             )}
           </View>
@@ -787,13 +821,13 @@ export default function OfferCreateScreen() {
 
         {/* CTA area */}
         <View style={styles.ctaWrap}>
-        {/* 交換内容サマリ */}
-        {selectedMyCard != null && (
+        {/* 交換内容サマリ (β1 複数枚: 先頭 1 枚 + 残数バッジ) */}
+        {primarySelected != null && (
           <View style={styles.summaryRow}>
             <View style={styles.summaryCard}>
-              {selectedMyCard.image_url != null ? (
+              {primarySelected.image_url != null ? (
                 <Image
-                  source={{ uri: selectedMyCard.image_url }}
+                  source={{ uri: primarySelected.image_url }}
                   style={styles.summaryThumb}
                 />
               ) : (
@@ -802,8 +836,13 @@ export default function OfferCreateScreen() {
                 </View>
               )}
               <Text style={styles.summaryName} numberOfLines={1}>
-                {selectedMyCard.name}
+                {primarySelected.name}
               </Text>
+              {extraSelectedCount > 0 && (
+                <View style={styles.summaryExtraBadge}>
+                  <Text style={styles.summaryExtraBadgeText}>+{extraSelectedCount}</Text>
+                </View>
+              )}
             </View>
             <Text style={styles.summaryArrow}>⇄</Text>
             <View style={styles.summaryCard}>
@@ -1167,8 +1206,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,
+  },
+  pickerItemSelected: {
+    backgroundColor: '#F5F3FF',
+    borderBottomColor: colors.primary,
+  },
+  pickerNameSelected: {
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
   },
   pickerThumb: {
     width: 28,
@@ -1353,6 +1402,18 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.primary,
     marginHorizontal: spacing.xs,
+  },
+  summaryExtraBadge: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.full,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginLeft: spacing.xs,
+  },
+  summaryExtraBadgeText: {
+    fontSize: 10,
+    fontWeight: fontWeight.bold,
+    color: colors.textInverse,
   },
 
   // ヒント表示（ctaConfirmLabel の直上）

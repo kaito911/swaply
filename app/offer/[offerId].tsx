@@ -282,10 +282,15 @@ export default function OfferDetailScreen() {
                 </>
               ) : (
                 proposerItems.map((item, idx) => (
-                  <View
-                    key={item.id ?? item.card_id ?? `proposer-${idx}`}
-                    style={idx > 0 ? styles.cardSubItem : undefined}
-                  >
+                  <View key={item.id ?? item.card_id ?? `proposer-${idx}`}>
+                    {/* 複数枚の 2 枚目以降: 区切り線で 1 枚ずつ分離 */}
+                    {isMultiProposer && idx > 0 && (
+                      <View style={styles.cardSubItemDivider} />
+                    )}
+                    {/* 複数枚の各カード上に「N枚目」インデックスを明示 */}
+                    {isMultiProposer && (
+                      <Text style={styles.cardSubItemIndex}>{idx + 1}枚目</Text>
+                    )}
                     {item.card?.image_url != null ? (
                       <Image
                         source={{ uri: item.card.image_url }}
@@ -485,9 +490,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundMuted,
     marginBottom: 6,
   },
-  // β1 複数枚提案: proposer 側カラム内で 2 枚目以降の row を間隔調整
-  cardSubItem: {
-    marginTop: spacing.sm,
+  // β1 複数枚提案: proposer 側カラム内で 2 枚目以降の row を間隔調整 + 視認性向上
+  // 1 枚提案では非表示、複数枚提案のときのみ描画される。
+  cardSubItemDivider: {
+    height: 1,
+    backgroundColor: '#ECE8FA', // 既存 section borderColor と同パレット (restrained navy)
+    marginVertical: spacing.sm,
+  },
+  cardSubItemIndex: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8A8499', // 既存 sectionLabel / dateText と同パレット (muted)
+    marginBottom: 4,
   },
   imagePlaceholder: {
     backgroundColor: colors.backgroundMuted,

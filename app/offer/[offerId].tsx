@@ -157,6 +157,7 @@ export default function OfferDetailScreen() {
   const handleCounter = useCallback(() => {
     if (offer == null || userId == null) return
     const targetCardId = offer.target_card?.id
+    // β1: counter offer は 1:1 維持。N 枚提案の場合は先頭 (offer_items の挿入順) を採用。
     const proposerCardId = offer.items?.find(
       (it) => it.card_id !== targetCardId
     )?.card_id
@@ -208,12 +209,13 @@ export default function OfferDetailScreen() {
     : offer.target_card?.owner
 
   const targetCard = offer.target_card
-  const proposerCardId = offer.items?.find(
-    (it) => it.card_id !== offer.target_card?.id
-  )?.card_id
-  const proposerCard = offer.items?.find(
-    (it) => it.card_id === proposerCardId
-  )?.card
+  // β1 複数枚提案 (1 target × 1-5 proposer):
+  // offer.items から target 以外を proposer 側 N 枚として配列で取得。
+  const proposerItems =
+    offer.items?.filter((it) => it.card_id !== offer.target_card?.id) ?? []
+  const proposerCount = proposerItems.length
+  const isMultiProposer = proposerCount > 1
+  const proposerCountSuffix = isMultiProposer ? `（${proposerCount}枚）` : ''
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -259,30 +261,51 @@ export default function OfferDetailScreen() {
           </View>
         )}
 
-        {/* 交換内容 */}
+        {/* 交換内容 — β1 複数枚提案 (1 target × N proposer) 対応 */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>交換内容</Text>
+          <Text style={styles.sectionLabel}>
+            交換内容{isMultiProposer ? `（${proposerCount}枚交換）` : ''}
+          </Text>
           <View style={styles.exchangeRow}>
+            {/* proposer 側 (N 枚): isReceived = 受信側視点で「受け取る」、提案側視点で「出す」 */}
             <View style={styles.cardCol}>
               <Text style={styles.cardColLabel}>
                 {isReceived ? 'あなたが受け取る' : 'あなたが出す'}
+                {proposerCountSuffix}
               </Text>
-              {proposerCard?.image_url != null ? (
-                <Image
-                  source={{ uri: proposerCard.image_url }}
-                  style={styles.cardImage}
-                  resizeMode="contain"
-                />
+              {proposerItems.length === 0 ? (
+                <>
+                  <View style={[styles.cardImage, styles.imagePlaceholder]} />
+                  <Text style={styles.cardName} numberOfLines={2}>
+                    カード情報なし
+                  </Text>
+                </>
               ) : (
-                <View style={[styles.cardImage, styles.imagePlaceholder]} />
+                proposerItems.map((item, idx) => (
+                  <View
+                    key={item.id ?? item.card_id ?? `proposer-${idx}`}
+                    style={idx > 0 ? styles.cardSubItem : undefined}
+                  >
+                    {item.card?.image_url != null ? (
+                      <Image
+                        source={{ uri: item.card.image_url }}
+                        style={styles.cardImage}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <View style={[styles.cardImage, styles.imagePlaceholder]} />
+                    )}
+                    <Text style={styles.cardName} numberOfLines={2}>
+                      {item.card?.name ?? 'カード情報なし'}
+                    </Text>
+                  </View>
+                ))
               )}
-              <Text style={styles.cardName} numberOfLines={2}>
-                {proposerCard?.name ?? 'カード情報なし'}
-              </Text>
             </View>
 
             <Text style={styles.arrow}>⇄</Text>
 
+            {/* target 側 (常に 1 枚、β1 仕様) */}
             <View style={styles.cardCol}>
               <Text style={styles.cardColLabel}>
                 {isReceived ? 'あなたが出す' : 'あなたが受け取る'}
@@ -461,6 +484,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.backgroundMuted,
     marginBottom: 6,
+  },
+  // β1 複数枚提案: proposer 側カラム内で 2 枚目以降の row を間隔調整
+  cardSubItem: {
+    marginTop: spacing.sm,
   },
   imagePlaceholder: {
     backgroundColor: colors.backgroundMuted,

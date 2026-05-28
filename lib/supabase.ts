@@ -471,15 +471,41 @@ export async function createCard(params: {
 // Offer creation
 // ─────────────────────────────────────────
 
+// β1 複数枚提案: 1 receiver card に対して N proposer cards (1-5 枚) を提案できる。
+// accept_offer_atomic_v3 RPC は array_agg + competing offers cancel で N 枚対応済 (Dashboard 上で確認済)。
+// M target × N proposer (相手側複数) は未対応 (offers.target_card_id が単一列のため)。
+export const MAX_PROPOSER_CARDS_PER_OFFER = 5
+
 export async function createOffer(params: {
   proposerId: string
   receiverId: string
-  proposerCardId: string
+  proposerCardIds: string[]
   receiverCardId: string
   adjustmentAmount: number | null
   message: string | null
   parentOfferId?: string | null
 }): Promise<Offer> {
+  // ── 入力検証 (複数枚) ──
+  if (params.proposerId === params.receiverId) {
+    throw new Error('自分の出品には提案できません')
+  }
+
+  if (params.proposerCardIds.length === 0) {
+    throw new Error('交換に出すカードを1枚以上選んでください')
+  }
+
+  // 重複排除 (UI の二重 tap や呼び出し側の重複を黙って吸収)
+  const dedupedProposerCardIds = Array.from(new Set(params.proposerCardIds))
+
+  if (dedupedProposerCardIds.length > MAX_PROPOSER_CARDS_PER_OFFER) {
+    throw new Error(`交換に出すカードは最大${MAX_PROPOSER_CARDS_PER_OFFER}枚までです`)
+  }
+
+  if (dedupedProposerCardIds.includes(params.receiverCardId)) {
+    throw new Error('相手のカードと同じカードは選べません')
+  }
+
+  // ── 相手カード検証 (1 枚) ──
   const { data: currentTargetCard, error: targetCardError } = await supabase
     .from('cards')
     .select('id, owner_user_id, status')
@@ -498,28 +524,30 @@ export async function createOffer(params: {
     throw new Error('相手カードの所有者情報が不正です')
   }
 
-  const { data: currentProposerCard, error: proposerCardError } = await supabase
+  // ── 自分カード検証 (N 枚一括) ──
+  const { data: proposerCardRows, error: proposerCardsError } = await supabase
     .from('cards')
     .select('id, owner_user_id, status')
-    .eq('id', params.proposerCardId)
-    .single()
+    .in('id', dedupedProposerCardIds)
 
-  if (proposerCardError) {
-    throw proposerCardError
+  if (proposerCardsError) {
+    throw proposerCardsError
   }
 
-  if (!currentProposerCard || currentProposerCard.status !== 'active') {
-    throw new Error('選択したあなたのカードは現在提案に使えません')
+  if (proposerCardRows == null || proposerCardRows.length !== dedupedProposerCardIds.length) {
+    throw new Error('選択したカードの一部が見つかりません')
   }
 
-  if (currentProposerCard.owner_user_id !== params.proposerId) {
-    throw new Error('自分が所有していないカードは提案に使えません')
+  for (const row of proposerCardRows) {
+    if (row.status !== 'active') {
+      throw new Error('選択したあなたのカードは現在提案に使えません')
+    }
+    if (row.owner_user_id !== params.proposerId) {
+      throw new Error('自分が所有していないカードは提案に使えません')
+    }
   }
 
-  if (params.proposerId === params.receiverId) {
-    throw new Error('自分の出品には提案できません')
-  }
-
+  // ── offers INSERT ──
   const { data: offer, error: offerError } = await supabase
     .from('offers')
     .insert({
@@ -537,16 +565,17 @@ export async function createOffer(params: {
     throw offerError
   }
 
-  const { error: itemsError } = await supabase.from('offer_items').insert([
-    {
-      offer_id: offer.id,
-      card_id: params.proposerCardId,
-    },
-    {
-      offer_id: offer.id,
-      card_id: params.receiverCardId,
-    },
-  ])
+  // ── offer_items INSERT (receiver 1 + proposer N) ──
+  // accept_offer_atomic_v3 は target_card_id + offer_items 全件を atomic に処理するため、
+  // 順序自体は機能に影響しないが、receiver を先頭に置く規約とする (リスト先頭が target).
+  const offerItemsPayload = [
+    { offer_id: offer.id, card_id: params.receiverCardId },
+    ...dedupedProposerCardIds.map((id) => ({ offer_id: offer.id, card_id: id })),
+  ]
+
+  const { error: itemsError } = await supabase
+    .from('offer_items')
+    .insert(offerItemsPayload)
 
   if (itemsError) {
     console.error('[createOffer][offer_items insert failed]', itemsError)
@@ -1452,10 +1481,11 @@ export async function createCounterOffer(params: {
   }
 
   // 新オファーを parent_offer_id 付きで作成
+  // counter offer は 1:1 を維持 — proposerCardId を単要素配列にラップ
   return createOffer({
     proposerId: params.proposerId,
     receiverId: params.receiverId,
-    proposerCardId: params.proposerCardId,
+    proposerCardIds: [params.proposerCardId],
     receiverCardId: params.receiverCardId,
     adjustmentAmount: params.adjustmentAmount,
     message: params.message,

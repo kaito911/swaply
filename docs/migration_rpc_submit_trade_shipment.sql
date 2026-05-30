@@ -61,8 +61,8 @@
 -- 取得日: YYYY-MM-DD (未取得)
 -- 取得者: (未取得)
 
-CREATE OR REPLACE FUNCTION public.open_trade_dispute(p_trade_id uuid, p_user_id uuid, p_dispute_reason text, p_detail_text text DEFAULT NULL::text)
- RETURNS trade_disputes
+CREATE OR REPLACE FUNCTION public.submit_trade_shipment(p_trade_id uuid, p_tracking_number text, p_carrier text DEFAULT NULL::text)
+ RETURNS trades
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -70,22 +70,14 @@ AS $function$
 declare
   v_actor_id uuid := auth.uid();
   v_trade public.trades%rowtype;
-  v_dispute public.trade_disputes%rowtype;
+  v_my_shipment public.shipments%rowtype;
 begin
   if v_actor_id is null then
     raise exception 'AUTH_REQUIRED';
   end if;
 
-  if p_user_id is null then
-    raise exception 'AUTH_REQUIRED';
-  end if;
-
-  if p_user_id <> v_actor_id then
-    raise exception 'AUTH_MISMATCH';
-  end if;
-
-  if p_dispute_reason is null or btrim(p_dispute_reason) = '' then
-    raise exception 'DISPUTE_REASON_REQUIRED';
+  if p_tracking_number is null or btrim(p_tracking_number) = '' then
+    raise exception 'TRACKING_NUMBER_REQUIRED';
   end if;
 
   select *
@@ -98,45 +90,48 @@ begin
     raise exception 'TRADE_NOT_FOUND';
   end if;
 
-  if v_actor_id not in (v_trade.proposer_user_id, v_trade.receiver_user_id) then
-    raise exception 'NOT_AUTHORIZED';
+  if v_actor_id <> v_trade.proposer_user_id and v_actor_id <> v_trade.receiver_user_id then
+    raise exception 'NOT_TRADE_PARTICIPANT';
   end if;
 
-  if v_trade.status in ('completed', 'cancelled') then
-    raise exception 'TRADE_NOT_DISPUTABLE';
+  if v_trade.status not in ('pending', 'in_transit') then
+    raise exception 'TRADE_NOT_SHIPPABLE';
   end if;
 
-  if exists (
-    select 1
-    from public.trade_disputes d
-    where d.trade_id = p_trade_id
-      and d.status in ('open', 'under_review')
-  ) then
-    raise exception 'DISPUTE_ALREADY_OPEN';
+  if now() > v_trade.ship_deadline_at then
+    raise exception 'SHIP_DEADLINE_EXPIRED';
   end if;
 
-  insert into public.trade_disputes (
-    trade_id,
-    opened_by_user_id,
-    dispute_reason,
-    detail_text,
-    status
-  )
-  values (
-    p_trade_id,
-    v_actor_id,
-    btrim(p_dispute_reason),
-    nullif(btrim(coalesce(p_detail_text, '')), ''),
-    'open'
-  )
-  returning *
-  into v_dispute;
+  select *
+  into v_my_shipment
+  from public.shipments
+  where trade_id = p_trade_id
+    and user_id = v_actor_id
+  for update;
+
+  if not found then
+    raise exception 'SHIPMENT_ROW_NOT_FOUND';
+  end if;
+
+  if v_my_shipment.status in ('shipped', 'received') then
+    raise exception 'ALREADY_SHIPPED';
+  end if;
+
+  update public.shipments
+  set
+    status = 'shipped',
+    tracking_number = btrim(p_tracking_number),
+    carrier = nullif(btrim(coalesce(p_carrier, '')), ''),
+    shipped_at = now()
+  where id = v_my_shipment.id
+  returning * into v_my_shipment;
 
   update public.trades
   set
-    status = 'disputed',
+    status = 'in_transit',
     updated_at = now()
-  where id = p_trade_id;
+  where id = p_trade_id
+  returning * into v_trade;
 
   insert into public.trade_events (
     trade_id,
@@ -147,15 +142,15 @@ begin
   values (
     p_trade_id,
     v_actor_id,
-    'dispute_opened',
+    'shipment_registered',
     jsonb_build_object(
-      'dispute_id', v_dispute.id,
-      'reason', v_dispute.dispute_reason,
-      'opened_at', v_dispute.created_at
+      'tracking_number', v_my_shipment.tracking_number,
+      'carrier', v_my_shipment.carrier,
+      'shipped_at', v_my_shipment.shipped_at
     )
   );
 
-  return v_dispute;
+  return v_trade;
 end;
 $function$
 

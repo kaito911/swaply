@@ -92,7 +92,7 @@ export default function ListingNewConditionScreen() {
     }
   })
 
-  // 求カード (必須・セット 1 つ分)
+  // 求カード (β1 拡張: 必須 → 任意化。未入力でも出品可、入力時は出品詳細「求」タブに反映)
   const [want, setWant] = useState('')
   // 調整金 (任意・折りたたみ)
   const [showDiff, setShowDiff] = useState(false)
@@ -100,7 +100,8 @@ export default function ListingNewConditionScreen() {
 
   const work = getWorkById(params.workId)
 
-  const canProceed = want.trim().length > 0
+  // 任意化: want の入力有無に関わらず確認画面へ進める
+  const canProceed = true
 
   const handleDiffChange = (v: string) => {
     const digits = v.replace(/[^0-9]/g, '')
@@ -151,7 +152,8 @@ export default function ListingNewConditionScreen() {
           <View style={styles.setSummary}>
             <Text style={styles.summaryLabel}>出品内容</Text>
             <Text style={styles.summaryWork}>
-              {work?.display_name_ja ?? '(作品未指定)'}
+              {/* master 未登録の自由入力 workId は raw text を表示 */}
+              {work?.display_name_ja ?? params.workId ?? '(作品未指定)'}
             </Text>
             <Text style={styles.summaryDetail}>
               {characters.length > 0
@@ -165,16 +167,16 @@ export default function ListingNewConditionScreen() {
             )}
           </View>
 
-          {/* ── 求(ほしいアイテム)必須 ── */}
+          {/* ── 求(ほしいアイテム)任意 ── */}
           <Text style={styles.sectionLabel}>
-            求(ほしいアイテム)<Text style={styles.required}> *</Text>
+            求(ほしいアイテム)<Text style={styles.optional}>（任意）</Text>
           </Text>
           <Text style={styles.sectionHint}>
-            このセットと交換したいカード/アイテムを記入してください。
+            未入力でも出品できますが、求めているものを書くと交換につながりやすくなります。
           </Text>
           <TextInput
             style={[styles.input, styles.inputMulti]}
-            placeholder="例: 鬼滅・甘露寺のアクスタ"
+            placeholder="例: 〇〇の未所持トレカ、同シリーズの△△、異種交換も検討します"
             value={want}
             onChangeText={setWant}
             multiline
@@ -272,6 +274,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   required: { color: colors.error },
+  optional: {
+    fontSize: 12,
+    fontWeight: fontWeight.medium,
+    color: colors.textTertiary,
+  },
   sectionHint: {
     fontSize: 12,
     color: colors.textSecondary,

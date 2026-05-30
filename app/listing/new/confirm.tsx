@@ -101,7 +101,9 @@ function buildSetName(e: EnrichedListing): string {
   const typeNames = e.itemTypes.map(itemTypeDisplay)
 
   const parts: string[] = []
-  if (work != null) parts.push(work.display_name_ja)
+  // master 未登録の自由入力 workId は raw text を直接表示 (ハイブリッドマスタ fallback)
+  const workDisplayName = work?.display_name_ja ?? e.workId
+  if (workDisplayName !== '') parts.push(workDisplayName)
 
   if (charNames.length > 0) {
     parts.push(
@@ -335,7 +337,7 @@ export default function ListingNewConfirmScreen() {
           </View>
 
           <View style={styles.cardBody}>
-            <Row label="作品" value={work?.display_name_ja ?? '(未指定)'} />
+            <Row label="作品" value={work?.display_name_ja ?? enriched.workId ?? '(未指定)'} />
             <Row
               label="キャラクター"
               value={

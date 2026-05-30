@@ -63,7 +63,7 @@ function getCtaConfig(
   // 固定 + ship_deadline_at 72h + shipments 必須生成のため)。
   // allows_mail=false の出品 (= 手渡しのみ) は通常提案 CTA を無効化し、誤認を防ぐ。
   if (!card.allows_mail) {
-    return { label: '現在、この出品は通常の郵送提案に対応していません', disabled: true }
+    return { label: '郵送提案には対応していません', disabled: true }
   }
   return { label: '交換を提案する', disabled: false }
 }

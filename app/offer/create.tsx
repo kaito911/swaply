@@ -880,7 +880,7 @@ export default function OfferCreateScreen() {
             が trade_mode='mail' 固定 + ship_deadline_at 72h + shipments 必須生成のため)。
             手渡し・会場交換は今後の専用導線で対応予定。 */}
         <Text style={styles.shippingExpectationNote}>
-          ※ β1 では、通常の交換提案は郵送交換として進行します。{'\n'}
+          ※ 現在、通常の交換提案は郵送交換として進行します。{'\n'}
           成立後、発送先情報の共有と発送手続きが必要です。
         </Text>
 

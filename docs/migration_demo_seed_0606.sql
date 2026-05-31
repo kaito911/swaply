@@ -19,7 +19,7 @@
 --     上記 profiles / cards / venues の ON DELETE CASCADE で連動削除される想定
 --
 -- 投入内容:
---   - profiles UPSERT 6 名 (seed_idx 0〜5、既存 auth.users から取得)
+--   - profiles UPSERT 6 名 (seed_idx 0〜5、既存 auth.users から取得、Pioneer 列無しのため通常 Trust のみ)
 --   - venues INSERT 4 件 (TREASURE 6/6当日 open / KP / ACEs / J&K)
 --   - venue_checkins INSERT 24 件 (6 users × 4 venues cross join)
 --   - cards INSERT 25 件 (active 17 / reserved 6 / traded 2)
@@ -64,12 +64,13 @@ BEGIN
 END $$;
 
 -- ─────────────────────────────────────────
--- Step 2: profiles UPSERT (Trust 分布 + Pioneer #001)
+-- Step 2: profiles UPSERT (Trust 分布)
 --   Trust 計算式 (lib/types.ts computeTrustBadge):
 --     gold_blue : trade_count >= 50 AND ship_rate >= 97 AND last_active_at 60日以内
 --     blue      : trade_count >= 10 AND ship_rate >= 95 AND trouble_count = 0
 --     trial_blue: trade_count >= 1
 --     green     : trade_count = 0
+--   注: profiles に is_pioneer 等の列が無いため、Pioneer バッジは今回のデモでは見送り
 -- ─────────────────────────────────────────
 
 -- 既存 profiles を上書き (auth.users と 1:1 のため UPDATE FROM が基本)
@@ -77,7 +78,7 @@ UPDATE public.profiles p
 SET
   handle = 'demo_0606_' || lpad((d.seed_idx + 1)::text, 3, '0'),
   display_name = CASE d.seed_idx
-    WHEN 0 THEN '夜空🌙'         -- gold_blue + Pioneer #001
+    WHEN 0 THEN '夜空🌙'         -- gold_blue
     WHEN 1 THEN 'ハル💎'         -- blue
     WHEN 2 THEN 'みお☁️'         -- blue
     WHEN 3 THEN 'りこ🤍'         -- trial_blue
@@ -118,11 +119,7 @@ SET
     WHEN 4 THEN 100
     ELSE NULL
   END,
-  last_active_at = NOW() - ((d.seed_idx || ' hours')::interval),
-  is_pioneer = (d.seed_idx = 0),
-  pioneer_number = CASE WHEN d.seed_idx = 0 THEN 1 ELSE NULL END,
-  pioneer_joined_at = CASE WHEN d.seed_idx = 0 THEN NOW() - INTERVAL '30 days' ELSE NULL END,
-  pioneer_status = CASE WHEN d.seed_idx = 0 THEN 'active' ELSE 'pending' END,
+  last_active_at = NOW() - ((d.seed_idx::text || ' hours')::interval),
   updated_at = NOW()
 FROM _seed_demo_0606_users d
 WHERE p.id = d.id;
@@ -131,7 +128,6 @@ WHERE p.id = d.id;
 INSERT INTO public.profiles (
   id, handle, display_name, mode, trade_count, ship_rate, reply_median_hours,
   trouble_count, adjustment_avg, last_active_at,
-  is_pioneer, pioneer_number, pioneer_joined_at, pioneer_status,
   created_at, updated_at
 )
 SELECT
@@ -151,11 +147,7 @@ SELECT
   0,
   CASE d.seed_idx WHEN 0 THEN 250 WHEN 1 THEN 300 WHEN 2 THEN 200
        WHEN 3 THEN 150 WHEN 4 THEN 100 ELSE NULL END,
-  NOW() - ((d.seed_idx || ' hours')::interval),
-  (d.seed_idx = 0),
-  CASE WHEN d.seed_idx = 0 THEN 1 ELSE NULL END,
-  CASE WHEN d.seed_idx = 0 THEN NOW() - INTERVAL '30 days' ELSE NULL END,
-  CASE WHEN d.seed_idx = 0 THEN 'active' ELSE 'pending' END,
+  NOW() - ((d.seed_idx::text || ' hours')::interval),
   NOW(),
   NOW()
 FROM _seed_demo_0606_users d
@@ -231,7 +223,7 @@ INSERT INTO public.venue_checkins (venue_id, user_id, created_at)
 SELECT
   v.id,
   u.id,
-  NOW() - ((u.seed_idx + v.venue_idx) || ' hours')::interval
+  NOW() - (((u.seed_idx + v.venue_idx)::text || ' hours')::interval)
 FROM _seed_demo_0606_users u
 CROSS JOIN _seed_demo_0606_venues v;
 
@@ -239,7 +231,7 @@ CROSS JOIN _seed_demo_0606_venues v;
 -- Step 5: cards 25 件 INSERT (active 17 / reserved 6 / traded 2)
 --   - 各 user 3〜5 枚配布
 --   - card_idx 1-25 → owner 配分:
---       user 0 (Pioneer): 1-5     (5 枚)
+--       user 0 (gold_blue): 1-5   (5 枚)
 --       user 1 (blue)   : 6-9     (4 枚)
 --       user 2 (blue)   : 10-13   (4 枚)
 --       user 3 (trial)  : 14-17   (4 枚)
@@ -269,7 +261,7 @@ SELECT
   NOW() - (v.hours_ago || ' hours')::interval,
   NOW() - (v.hours_ago || ' hours')::interval
 FROM (VALUES
-  -- ─ user 0 (Pioneer #001、gold_blue): cards 1-5 ─
+  -- ─ user 0 (gold_blue): cards 1-5 ─
   -- card 1: TREASURE トレカ (reserved、pending trade target)
   (0, 'TREASURE 2026 TOUR Aver. トレカ',
       'https://picsum.photos/seed/treasure_card_a1/400/560',
@@ -805,10 +797,5 @@ ORDER BY kind;
 --   adjustment_avg = NULL,
 --   adjustment_bias = NULL,
 --   last_active_at = NULL,
---   is_pioneer = false,
---   pioneer_number = NULL,
---   pioneer_joined_at = NULL,
---   pioneer_status = 'pending',
---   pioneer_forfeited_reason = NULL,
 --   updated_at = NOW()
 -- WHERE handle LIKE 'demo_0606_%';

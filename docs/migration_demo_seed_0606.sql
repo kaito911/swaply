@@ -74,7 +74,7 @@ END $$;
 --     5. offer_items     (offer_id 子)
 --     6. offers
 --     7. venue_supply_posts (venue_id / user_id 子)
---     8. venue_holds        (venue_id / user_id 子)
+--     8. venue_holds        (venue_id / proposer_id / receiver_id 子)
 --     9. venue_checkins     (venue_id / user_id 子)
 --    10. cards           (owner_user_id 子)
 --    11. venues
@@ -114,9 +114,10 @@ WHERE proposer_user_id IN (SELECT id FROM _seed_demo_0606_users);
 DELETE FROM public.venue_supply_posts
 WHERE user_id IN (SELECT id FROM _seed_demo_0606_users);
 
--- 8. venue_holds
+-- 8. venue_holds (列は user_id ではなく proposer_id / receiver_id)
 DELETE FROM public.venue_holds
-WHERE user_id IN (SELECT id FROM _seed_demo_0606_users);
+WHERE proposer_id IN (SELECT id FROM _seed_demo_0606_users)
+   OR receiver_id IN (SELECT id FROM _seed_demo_0606_users);
 
 -- 9. venue_checkins
 DELETE FROM public.venue_checkins
@@ -838,9 +839,10 @@ ORDER BY kind;
 -- DELETE FROM public.venue_supply_posts
 -- WHERE user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
 --
--- -- 8. venue_holds
+-- -- 8. venue_holds (列は proposer_id / receiver_id)
 -- DELETE FROM public.venue_holds
--- WHERE user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
+-- WHERE proposer_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%')
+--    OR receiver_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
 --
 -- -- 9. venue_checkins
 -- DELETE FROM public.venue_checkins

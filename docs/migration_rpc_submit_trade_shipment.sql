@@ -61,7 +61,18 @@
 -- 取得日: YYYY-MM-DD (未取得)
 -- 取得者: (未取得)
 
-CREATE OR REPLACE FUNCTION public.submit_trade_shipment(p_trade_id uuid, p_tracking_number text, p_carrier text DEFAULT NULL::text)
+-- β1 拡張 (2026-05-31): p_shipping_method 必須化 + postal 以外で tracking_number 必須
+-- 適用前提:
+--   1. shipments テーブルに shipping_method text 列が追加済
+--      (ALTER TABLE shipments ADD COLUMN shipping_method text + CHECK 制約)
+--   2. CHECK 制約: shipping_method IS NULL OR IN ('postal','click_post','letter_pack','yamato','other')
+--   3. shipments.tracking_number は NULL 許容 (既存仕様、変更なし)
+CREATE OR REPLACE FUNCTION public.submit_trade_shipment(
+  p_trade_id        uuid,
+  p_tracking_number text,
+  p_carrier         text DEFAULT NULL::text,
+  p_shipping_method text DEFAULT NULL::text
+)
  RETURNS trades
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -71,14 +82,30 @@ declare
   v_actor_id uuid := auth.uid();
   v_trade public.trades%rowtype;
   v_my_shipment public.shipments%rowtype;
+  v_tracking_required boolean;
+  v_tracking_clean text;
 begin
   if v_actor_id is null then
     raise exception 'AUTH_REQUIRED';
   end if;
 
-  if p_tracking_number is null or btrim(p_tracking_number) = '' then
+  -- 配送方法は必須 (β1)
+  if p_shipping_method is null or btrim(p_shipping_method) = '' then
+    raise exception 'SHIPPING_METHOD_REQUIRED';
+  end if;
+
+  if p_shipping_method not in ('postal', 'click_post', 'letter_pack', 'yamato', 'other') then
+    raise exception 'INVALID_SHIPPING_METHOD';
+  end if;
+
+  -- postal (普通郵便・ミニレター) は追跡番号なしを許容、それ以外は必須
+  v_tracking_required := p_shipping_method <> 'postal';
+
+  if v_tracking_required and (p_tracking_number is null or btrim(p_tracking_number) = '') then
     raise exception 'TRACKING_NUMBER_REQUIRED';
   end if;
+
+  v_tracking_clean := nullif(btrim(coalesce(p_tracking_number, '')), '');
 
   select *
   into v_trade
@@ -119,10 +146,11 @@ begin
 
   update public.shipments
   set
-    status = 'shipped',
-    tracking_number = btrim(p_tracking_number),
-    carrier = nullif(btrim(coalesce(p_carrier, '')), ''),
-    shipped_at = now()
+    status          = 'shipped',
+    shipping_method = p_shipping_method,
+    tracking_number = v_tracking_clean,
+    carrier         = nullif(btrim(coalesce(p_carrier, '')), ''),
+    shipped_at      = now()
   where id = v_my_shipment.id
   returning * into v_my_shipment;
 
@@ -144,9 +172,10 @@ begin
     v_actor_id,
     'shipment_registered',
     jsonb_build_object(
+      'shipping_method', v_my_shipment.shipping_method,
       'tracking_number', v_my_shipment.tracking_number,
-      'carrier', v_my_shipment.carrier,
-      'shipped_at', v_my_shipment.shipped_at
+      'carrier',         v_my_shipment.carrier,
+      'shipped_at',      v_my_shipment.shipped_at
     )
   );
 

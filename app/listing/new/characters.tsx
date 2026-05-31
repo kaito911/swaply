@@ -83,7 +83,7 @@ export default function ListingNewCharactersScreen() {
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
-      <ScreenHeader title="出品" subtitle="キャラ 3/5" />
+      <ScreenHeader title="出品" subtitle="キャラ 3/6" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}

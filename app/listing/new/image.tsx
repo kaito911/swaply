@@ -116,7 +116,7 @@ export default function ListingNewImageScreen() {
 
   return (
     <SafeAreaView style={styles.wrap} edges={['top', 'bottom']}>
-      <ScreenHeader title="出品" subtitle="写真 1/5" onBack={handleCancel} />
+      <ScreenHeader title="出品" subtitle="写真 1/6" onBack={handleCancel} />
       {/* Slot tabs */}
       <View style={styles.tabRow}>
         <Pressable

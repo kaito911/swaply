@@ -47,6 +47,10 @@ type EnrichedListing = {
   characters: string[]
   itemTypes: string[]
   want_description: string
+  // 3.5c Phase 1: 求の構造化 (全 optional、空配列でも DB 投入)
+  want_works: string[]
+  want_characters: string[]
+  want_item_types: string[]
   allows_adjustment: boolean
   adjustment_max: number
 }
@@ -71,6 +75,10 @@ type CardInsertRow = {
   allows_handoff: false
   allows_adjustment: boolean
   adjustment_max: number | null
+  // 3.5c Phase 1: 求の構造化 (DB は NOT NULL DEFAULT '{}')
+  want_works: string[]
+  want_characters: string[]
+  want_item_types: string[]
   // legacy K-POP 列は NULL (新規出品では使わない、Phase 1.5 K-POP 統一まで保全)
   group_name: null
   member_name: null
@@ -88,6 +96,10 @@ function characterDisplay(id: string): string {
 
 function itemTypeDisplay(id: string): string {
   return getItemTypeById(id)?.display_name_ja ?? id
+}
+
+function workDisplay(id: string): string {
+  return getWorkById(id)?.display_name_ja ?? id
 }
 
 /**
@@ -146,6 +158,10 @@ function toInsertRow(
     allows_handoff: false,
     allows_adjustment: e.allows_adjustment,
     adjustment_max: e.allows_adjustment ? e.adjustment_max : null,
+    // 求の構造化 (空配列でも明示投入)
+    want_works: e.want_works,
+    want_characters: e.want_characters,
+    want_item_types: e.want_item_types,
     // legacy NULL
     group_name: null,
     member_name: null,
@@ -309,6 +325,9 @@ export default function ListingNewConfirmScreen() {
 
   const charNames = enriched.characters.map(characterDisplay)
   const typeNames = enriched.itemTypes.map(itemTypeDisplay)
+  const wantWorkNames = enriched.want_works.map(workDisplay)
+  const wantCharNames = enriched.want_characters.map(characterDisplay)
+  const wantTypeNames = enriched.want_item_types.map(itemTypeDisplay)
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
@@ -351,7 +370,19 @@ export default function ListingNewConfirmScreen() {
               }
             />
             <Row
-              label="求めるカード"
+              label="求める作品"
+              value={wantWorkNames.length > 0 ? wantWorkNames.join('、') : '—'}
+            />
+            <Row
+              label="求めるキャラ"
+              value={wantCharNames.length > 0 ? wantCharNames.join('、') : '—'}
+            />
+            <Row
+              label="求めるグッズ"
+              value={wantTypeNames.length > 0 ? wantTypeNames.join(' / ') : '—'}
+            />
+            <Row
+              label="求の詳細"
               value={enriched.want_description || '—'}
             />
             <Row

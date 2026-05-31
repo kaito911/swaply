@@ -64,6 +64,77 @@ BEGIN
 END $$;
 
 -- ─────────────────────────────────────────
+-- Step 1.5: 既存 demo データの一括クリーンアップ (冪等性)
+--   FK 依存順 (子 → 親) で DELETE する。CASCADE 設定に頼らず明示的に消す。
+--   順序:
+--     1. shipments       (trade_id 子)
+--     2. trade_items     (trade_id 子)
+--     3. trade_events    (trade_id 子)
+--     4. trades          (offer_id 子)
+--     5. offer_items     (offer_id 子)
+--     6. offers
+--     7. venue_supply_posts (venue_id / user_id 子)
+--     8. venue_holds        (venue_id / user_id 子)
+--     9. venue_checkins     (venue_id / user_id 子)
+--    10. cards           (owner_user_id 子)
+--    11. venues
+--    12. profiles はここでは DELETE せず Step 2 で UPDATE / INSERT する
+--        (auth.users と 1:1 で残し、handle/display_name 等の値のみ書き換える)
+-- ─────────────────────────────────────────
+
+-- 1. shipments
+DELETE FROM public.shipments
+WHERE user_id IN (SELECT id FROM _seed_demo_0606_users);
+
+-- 2. trade_items
+DELETE FROM public.trade_items
+WHERE owner_user_id IN (SELECT id FROM _seed_demo_0606_users);
+
+-- 3. trade_events
+DELETE FROM public.trade_events
+WHERE actor_user_id IN (SELECT id FROM _seed_demo_0606_users);
+
+-- 4. trades (proposer / receiver どちらか一方でも demo user なら対象)
+DELETE FROM public.trades
+WHERE proposer_user_id IN (SELECT id FROM _seed_demo_0606_users)
+   OR receiver_user_id IN (SELECT id FROM _seed_demo_0606_users);
+
+-- 5. offer_items (demo user の offer 経由で抽出)
+DELETE FROM public.offer_items
+WHERE offer_id IN (
+  SELECT id FROM public.offers
+  WHERE proposer_user_id IN (SELECT id FROM _seed_demo_0606_users)
+);
+
+-- 6. offers
+DELETE FROM public.offers
+WHERE proposer_user_id IN (SELECT id FROM _seed_demo_0606_users);
+
+-- 7. venue_supply_posts
+DELETE FROM public.venue_supply_posts
+WHERE user_id IN (SELECT id FROM _seed_demo_0606_users);
+
+-- 8. venue_holds
+DELETE FROM public.venue_holds
+WHERE user_id IN (SELECT id FROM _seed_demo_0606_users);
+
+-- 9. venue_checkins
+DELETE FROM public.venue_checkins
+WHERE user_id IN (SELECT id FROM _seed_demo_0606_users);
+
+-- 10. cards (description マーカーで識別)
+DELETE FROM public.cards
+WHERE description LIKE '[SEED_0606]%';
+
+-- 11. venues (4 タイトル固定マッチ)
+DELETE FROM public.venues WHERE title IN (
+  'TREASURE LIVE TOUR 2026 in TOKYO',
+  'King & Prince Concert Tour 2026',
+  'ACEs Summer Special 2026',
+  'J&K Live Goods Festival 2026'
+);
+
+-- ─────────────────────────────────────────
 -- Step 2: profiles UPSERT (Trust 分布)
 --   Trust 計算式 (lib/types.ts computeTrustBadge):
 --     gold_blue : trade_count >= 50 AND ship_rate >= 97 AND last_active_at 60日以内
@@ -161,13 +232,7 @@ WHERE NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = d.id);
 --   - Venue 4 (J&K Festival) : CURRENT_DATE + 6 / status='upcoming'
 -- ─────────────────────────────────────────
 
--- 冪等性: 既存の demo venues を削除 (本 seed を 2 回以上実行可能に)
-DELETE FROM public.venues WHERE title IN (
-  'TREASURE LIVE TOUR 2026 in TOKYO',
-  'King & Prince Concert Tour 2026',
-  'ACEs Summer Special 2026',
-  'J&K Live Goods Festival 2026'
-);
+-- 冪等性に伴う既存 demo venues の DELETE は Step 1.5 で実施済
 
 INSERT INTO public.venues (title, venue_name, event_date, starts_at, ends_at, status) VALUES
   ('TREASURE LIVE TOUR 2026 in TOKYO',
@@ -214,10 +279,7 @@ WHERE title IN (
 --   UNIQUE(venue_id, user_id) 制約があるため、cross join で重複なし
 -- ─────────────────────────────────────────
 
--- 冪等性: 既存 demo checkins を削除
-DELETE FROM public.venue_checkins vc
-USING _seed_demo_0606_users u, _seed_demo_0606_venues v
-WHERE vc.user_id = u.id AND vc.venue_id = v.id;
+-- 冪等性に伴う既存 demo checkins の DELETE は Step 1.5 で実施済
 
 INSERT INTO public.venue_checkins (venue_id, user_id, created_at)
 SELECT
@@ -242,8 +304,7 @@ CROSS JOIN _seed_demo_0606_venues v;
 --   - 画像: https://picsum.photos/seed/{slug}/400/560
 -- ─────────────────────────────────────────
 
--- 冪等性: 既存 demo cards を削除
-DELETE FROM public.cards WHERE description LIKE '[SEED_0606]%';
+-- 冪等性に伴う既存 demo cards の DELETE は Step 1.5 で実施済
 
 INSERT INTO public.cards (
   owner_user_id, name, image_url, description, want_description,
@@ -468,9 +529,7 @@ JOIN _seed_demo_0606_venues v ON v.venue_idx = post.venue_idx;
 --   seed では直接 INSERT する (デモ用のため atomic 性は不要)
 -- ─────────────────────────────────────────
 
--- 冪等性: 既存 demo offers を削除 (= seed user の作った offers を全消し)
-DELETE FROM public.offers
-WHERE proposer_user_id IN (SELECT id FROM _seed_demo_0606_users);
+-- 冪等性に伴う既存 demo offers の DELETE は Step 1.5 で実施済
 
 -- offers INSERT (CTE で id を返して後段の offer_items 用)
 DROP TABLE IF EXISTS _seed_demo_0606_offers;
@@ -744,36 +803,53 @@ ORDER BY kind;
 -- ROLLBACK (デモ終了後に実行する場合は以下をコメント解除して順次実行)
 -- ═══════════════════════════════════════════════════════════════
 --
--- 順序: 下位 (子) から削除。FK CASCADE で連鎖削除されるが、明示的に消す方が安全。
+-- FK 依存順 (子 → 親) で DELETE する。Step 1.5 と同じ順序。
+-- profiles は 12 番目だが auth.users との整合性のため UPDATE 方式に統一。
 --
--- -- (1) shipments / trade_items / trades (demo profile に紐づくもの)
+-- -- 1. shipments
 -- DELETE FROM public.shipments
 -- WHERE user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
 --
+-- -- 2. trade_items
 -- DELETE FROM public.trade_items
 -- WHERE owner_user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
 --
--- DELETE FROM public.trades
--- WHERE proposer_user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
+-- -- 3. trade_events
+-- DELETE FROM public.trade_events
+-- WHERE actor_user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
 --
--- -- (2) offer_items / offers
+-- -- 4. trades
+-- DELETE FROM public.trades
+-- WHERE proposer_user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%')
+--    OR receiver_user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
+--
+-- -- 5. offer_items
 -- DELETE FROM public.offer_items
 -- WHERE offer_id IN (
 --   SELECT id FROM public.offers
 --   WHERE proposer_user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%')
 -- );
 --
+-- -- 6. offers
 -- DELETE FROM public.offers
 -- WHERE proposer_user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
 --
--- -- (3) venue_supply_posts / venue_checkins (CASCADE される venues 経由でも消えるが明示)
+-- -- 7. venue_supply_posts
 -- DELETE FROM public.venue_supply_posts
 -- WHERE user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
 --
+-- -- 8. venue_holds
+-- DELETE FROM public.venue_holds
+-- WHERE user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
+--
+-- -- 9. venue_checkins
 -- DELETE FROM public.venue_checkins
 -- WHERE user_id IN (SELECT id FROM public.profiles WHERE handle LIKE 'demo_0606_%');
 --
--- -- (4) venues (demo 4 件)
+-- -- 10. cards (demo マーカー)
+-- DELETE FROM public.cards WHERE description LIKE '[SEED_0606]%';
+--
+-- -- 11. venues (demo 4 件)
 -- DELETE FROM public.venues WHERE title IN (
 --   'TREASURE LIVE TOUR 2026 in TOKYO',
 --   'King & Prince Concert Tour 2026',
@@ -781,10 +857,7 @@ ORDER BY kind;
 --   'J&K Live Goods Festival 2026'
 -- );
 --
--- -- (5) cards (demo マーカー)
--- DELETE FROM public.cards WHERE description LIKE '[SEED_0606]%';
---
--- -- (6) profiles の demo 値をリセット (auth.users は触らない、profile レコードは残す)
+-- -- 12. profiles の demo 値をリセット (auth.users は触らない、profile レコードは残す)
 -- --     注: profiles を完全 DELETE すると auth.users と整合性を失う可能性
 -- --     handle / display_name のみ NULL/初期値に戻す方針推奨
 -- UPDATE public.profiles SET

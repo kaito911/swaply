@@ -10,6 +10,11 @@ import {
   fetchMyWantedCards,
   supabase,
 } from '@/lib/supabase'
+import {
+  getCharacterById,
+  getItemTypeById,
+  getWorkById,
+} from '@/lib/master'
 import { Card, computeTrustBadge, Profile, TrustBadgeLevel, WantedCard, WantMatchScore } from '@/lib/types'
 import { isWantMatchV2, scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { Image } from 'expo-image'
@@ -582,17 +587,70 @@ export default function ListingDetailScreen() {
         ) : (
           // ─ 求タブ: 相手が求めているもの ─
           <View style={styles.body}>
-            {/* 求条件のメインカード (求 hero) */}
+            {/* 求条件のメインカード (求 hero) — 構造化された want_* を chip 表示 + 詳細テキスト */}
             <View style={styles.wantHeroCard}>
               <Text style={styles.wantHeroBadge}>求</Text>
               <Text style={styles.wantHeroSubtitle}>
                 この出品者が求めているもの
               </Text>
+
+              {/* 求める作品 */}
+              {card.want_works != null && card.want_works.length > 0 && (
+                <View style={styles.wantChipBlock}>
+                  <Text style={styles.wantChipBlockLabel}>求める作品</Text>
+                  <View style={styles.wantChipsRow}>
+                    {card.want_works.map((id) => (
+                      <View key={`work-${id}`} style={styles.wantChip}>
+                        <Text style={styles.wantChipText}>
+                          {getWorkById(id)?.display_name_ja ?? id}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* 求めるキャラ */}
+              {card.want_characters != null &&
+                card.want_characters.length > 0 && (
+                  <View style={styles.wantChipBlock}>
+                    <Text style={styles.wantChipBlockLabel}>求めるキャラ</Text>
+                    <View style={styles.wantChipsRow}>
+                      {card.want_characters.map((id) => (
+                        <View key={`char-${id}`} style={styles.wantChip}>
+                          <Text style={styles.wantChipText}>
+                            {getCharacterById(id)?.display_name_ja ?? id}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+              {/* 求めるグッズ種類 */}
+              {card.want_item_types != null &&
+                card.want_item_types.length > 0 && (
+                  <View style={styles.wantChipBlock}>
+                    <Text style={styles.wantChipBlockLabel}>求めるグッズ種類</Text>
+                    <View style={styles.wantChipsRow}>
+                      {card.want_item_types.map((id) => (
+                        <View key={`type-${id}`} style={styles.wantChip}>
+                          <Text style={styles.wantChipText}>
+                            {getItemTypeById(id)?.display_name_ja ?? id}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+              {/* 詳細・コメント (want_description 既存) */}
+              <Text style={styles.wantHeroBlockLabel}>詳細・コメント</Text>
               <Text style={styles.wantHeroBody}>
                 {card.want_description != null &&
                 card.want_description.trim() !== ''
                   ? card.want_description
-                  : '相手の求める内容は未設定です'}
+                  : '—'}
               </Text>
             </View>
 
@@ -977,6 +1035,44 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
     lineHeight: 22,
+  },
+
+  // ── 求タブ: 構造化 chip ────────────────────
+  wantChipBlock: {
+    marginTop: spacing.sm,
+  },
+  wantChipBlockLabel: {
+    fontSize: 10,
+    fontWeight: fontWeight.extrabold,
+    color: colors.textSecondary,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  wantChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  wantChip: {
+    backgroundColor: colors.tagAccentBg,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  wantChipText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: colors.tagAccentText,
+  },
+  wantHeroBlockLabel: {
+    fontSize: 10,
+    fontWeight: fontWeight.extrabold,
+    color: colors.textSecondary,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginTop: spacing.sm,
+    marginBottom: 6,
   },
 
   // ── ③ conditions ─────────────────────────

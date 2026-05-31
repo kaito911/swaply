@@ -38,6 +38,9 @@ import { SafeAreaView } from 'react-native-safe-area-context'
  *
  * characters / itemTypes には master ID と raw text が混在し得る (ハイブリッドマスタ)。
  * 表示時は master cache lookup → 未ヒットなら raw text を直接表示。
+ *
+ * 3.5c Phase 1: 求の構造化 (want_works / want_characters / want_item_types) を追加。
+ * 全 optional、空配列でも DB 投入する (NOT NULL DEFAULT '{}' に揃える)。
  */
 export type EnrichedListing = {
   workId: string
@@ -45,6 +48,9 @@ export type EnrichedListing = {
   characters: string[]
   itemTypes: string[]
   want_description: string
+  want_works: string[]
+  want_characters: string[]
+  want_item_types: string[]
   allows_adjustment: boolean
   adjustment_max: number
 }
@@ -74,6 +80,9 @@ export default function ListingNewConditionScreen() {
     category: string
     charactersJson: string
     itemTypesJson: string
+    wantWorksJson?: string
+    wantCharactersJson?: string
+    wantItemTypesJson?: string
   }>()
 
   // 受信データを lazy parse (param は同期取得、setter 不要)
@@ -87,6 +96,34 @@ export default function ListingNewConditionScreen() {
   const [itemTypes] = useState<string[]>(() => {
     try {
       return JSON.parse(params.itemTypesJson) as string[]
+    } catch {
+      return []
+    }
+  })
+  // 求の構造化データ (任意、未指定なら空配列)
+  const [wantWorks] = useState<string[]>(() => {
+    try {
+      return params.wantWorksJson != null
+        ? (JSON.parse(params.wantWorksJson) as string[])
+        : []
+    } catch {
+      return []
+    }
+  })
+  const [wantCharacters] = useState<string[]>(() => {
+    try {
+      return params.wantCharactersJson != null
+        ? (JSON.parse(params.wantCharactersJson) as string[])
+        : []
+    } catch {
+      return []
+    }
+  })
+  const [wantItemTypes] = useState<string[]>(() => {
+    try {
+      return params.wantItemTypesJson != null
+        ? (JSON.parse(params.wantItemTypesJson) as string[])
+        : []
     } catch {
       return []
     }
@@ -122,6 +159,9 @@ export default function ListingNewConditionScreen() {
       characters,
       itemTypes,
       want_description: want.trim(),
+      want_works: wantWorks,
+      want_characters: wantCharacters,
+      want_item_types: wantItemTypes,
       allows_adjustment: showDiff,
       adjustment_max: parsedDiffAmt,
     }
@@ -137,7 +177,7 @@ export default function ListingNewConditionScreen() {
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
-      <ScreenHeader title="出品" subtitle="条件 5/5" />
+      <ScreenHeader title="出品" subtitle="条件 6/6" />
       <KeyboardAvoidingView
         style={styles.kav}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -167,16 +207,17 @@ export default function ListingNewConditionScreen() {
             )}
           </View>
 
-          {/* ── 求(ほしいアイテム)任意 ── */}
+          {/* ── 求の詳細・コメント(任意) ── */}
+          {/* 3.5c Phase 1: 構造化された want_* は前ステップで入力済。ここはフリーテキスト補足。 */}
           <Text style={styles.sectionLabel}>
-            求(ほしいアイテム)<Text style={styles.optional}>（任意）</Text>
+            求の詳細・コメント<Text style={styles.optional}>（任意）</Text>
           </Text>
           <Text style={styles.sectionHint}>
-            未入力でも出品できますが、求めているものを書くと交換につながりやすくなります。
+            前のステップで選んだ「求」に補足したいことを自由に書けます。
           </Text>
           <TextInput
             style={[styles.input, styles.inputMulti]}
-            placeholder="例: 〇〇の未所持トレカ、同シリーズの△△、異種交換も検討します"
+            placeholder="例: 美品希望、未所持優先、異種交換も相談OK"
             value={want}
             onChangeText={setWant}
             multiline

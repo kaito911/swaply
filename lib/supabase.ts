@@ -438,25 +438,34 @@ export async function createCard(params: {
   memberName: string | null
   wantDescription: string | null
   description: string | null
+  // 3.5c Phase 1: 求の構造化 (全 optional、未指定時は DB DEFAULT '{}' に任せる)
+  wantCharacters?: string[]
+  wantItemTypes?: string[]
+  wantWorks?: string[]
 }): Promise<Card> {
+  const insertRow: Record<string, unknown> = {
+    owner_user_id: params.ownerUserId,
+    name: params.name,
+    series: params.series,
+    member_name: params.memberName,
+    group_name: null,
+    image_url: params.imageUrl,
+    description: params.description,
+    status: 'active',
+    condition: null,
+    want_description: params.wantDescription,
+    allows_adjustment: false,
+    adjustment_max: null,
+    allows_mail: true,
+    allows_handoff: true,
+  }
+  if (params.wantCharacters != null) insertRow.want_characters = params.wantCharacters
+  if (params.wantItemTypes != null) insertRow.want_item_types = params.wantItemTypes
+  if (params.wantWorks != null) insertRow.want_works = params.wantWorks
+
   const { data, error } = await supabase
     .from('cards')
-    .insert({
-      owner_user_id: params.ownerUserId,
-      name: params.name,
-      series: params.series,
-      member_name: params.memberName,
-      group_name: null,
-      image_url: params.imageUrl,
-      description: params.description,
-      status: 'active',
-      condition: null,
-      want_description: params.wantDescription,
-      allows_adjustment: false,
-      adjustment_max: null,
-      allows_mail: true,
-      allows_handoff: true,
-    })
+    .insert(insertRow)
     .select()
     .single()
 

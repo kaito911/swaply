@@ -147,7 +147,7 @@ export default function ListingNewWorkScreen() {
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
-      <ScreenHeader title="出品" subtitle="作品 2/5" />
+      <ScreenHeader title="出品" subtitle="作品 2/6" />
       <KeyboardAvoidingView
         style={styles.kav}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

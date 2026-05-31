@@ -70,7 +70,7 @@ export default function ListingNewItemsScreen() {
     if (!canNext) return
     const allItemTypeIds = [...itemTypes.map((t) => t.id), ...freeTexts]
     router.push({
-      pathname: '/listing/new/condition' as never,
+      pathname: '/listing/new/want' as never,
       params: {
         imageUri: params.imageUri ?? '',
         imageBackUri: params.imageBackUri ?? '',
@@ -84,7 +84,7 @@ export default function ListingNewItemsScreen() {
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
-      <ScreenHeader title="出品" subtitle="アイテム 4/5" />
+      <ScreenHeader title="出品" subtitle="アイテム 4/6" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}

@@ -431,7 +431,6 @@ export default function VenueHomeScreen() {
                     value={myCardInput}
                     onChangeText={setMyCardInput}
                     autoCorrect={false}
-                    autoFocus
                   />
                 </View>
 

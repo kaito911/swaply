@@ -182,11 +182,6 @@ export default function ListingNewImageScreen() {
         </Pressable>
       </View>
 
-      {/* β1 補足: 現物写真推奨 (必須化せず、警告色も使わず、控えめに) */}
-      <Text style={styles.photoNote}>
-        状態が分かる現物写真があると、交換相手が判断しやすくなります。
-      </Text>
-
       {/* Next CTA */}
       <View style={styles.ctaWrap}>
         <PrimaryCTA
@@ -293,14 +288,5 @@ const styles = StyleSheet.create({
   ctaWrap: {
     paddingHorizontal: spacing.base,
     paddingBottom: spacing.base,
-  },
-  // β1 補足: 現物写真推奨の控えめな note
-  photoNote: {
-    fontSize: 12,
-    color: colors.textTertiary,
-    textAlign: 'center',
-    lineHeight: 17,
-    marginHorizontal: spacing.base,
-    marginBottom: spacing.sm,
   },
 })

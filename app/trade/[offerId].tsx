@@ -818,24 +818,24 @@ export default function TradeDetailScreen() {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>交換内容</Text>
 
-          <Text style={styles.sectionSubTitle}>あなたが出すカード</Text>
+          <Text style={styles.sectionSubTitle}>あなたが出すグッズ</Text>
           {myCards.length > 0 ? (
             myCards.map((item) => (
               <CardItemRow key={item.offerItemId} item={item} roleLabel="あなた" />
             ))
           ) : (
-            <Text style={styles.emptyInlineText}>あなた側のカードが見つかりません。</Text>
+            <Text style={styles.emptyInlineText}>あなた側のグッズが見つかりません。</Text>
           )}
 
           <View style={styles.divider} />
 
-          <Text style={styles.sectionSubTitle}>相手が出すカード</Text>
+          <Text style={styles.sectionSubTitle}>相手が出すグッズ</Text>
           {counterpartCards.length > 0 ? (
             counterpartCards.map((item) => (
               <CardItemRow key={item.offerItemId} item={item} roleLabel="相手" />
             ))
           ) : (
-            <Text style={styles.emptyInlineText}>相手側のカードが見つかりません。</Text>
+            <Text style={styles.emptyInlineText}>相手側のグッズが見つかりません。</Text>
           )}
         </View>
 

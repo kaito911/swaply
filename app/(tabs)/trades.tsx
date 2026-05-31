@@ -451,18 +451,18 @@ export default function ProposeScreen() {
 
               <View style={styles.tradeRow}>
                 <View style={styles.tradeCardBox}>
-                  <Text style={styles.tradeLabel}>あなたが出すカード</Text>
+                  <Text style={styles.tradeLabel}>あなたが出すグッズ</Text>
                   <Text style={styles.tradeValue}>
-                    {isReceived ? receiverCardNames : proposerCardNames}
+                    {(isReceived ? receiverCardNames : proposerCardNames).join('\n')}
                   </Text>
                 </View>
 
                 <Text style={styles.tradeArrow}>⇄</Text>
 
                 <View style={styles.tradeCardBox}>
-                  <Text style={styles.tradeLabel}>あなたが受け取るカード</Text>
+                  <Text style={styles.tradeLabel}>あなたが受け取るグッズ</Text>
                   <Text style={styles.tradeValue}>
-                    {isReceived ? proposerCardNames : receiverCardNames}
+                    {(isReceived ? proposerCardNames : receiverCardNames).join('\n')}
                   </Text>
                 </View>
               </View>
@@ -675,29 +675,27 @@ function getProposerCardId(offer: Offer): string | undefined {
   return offer.items?.find((item) => item.card_id !== targetCardId)?.card_id
 }
 
-function getProposerCardNames(offer: Offer): string {
+function getProposerCardNames(offer: Offer): string[] {
   const targetCardId = offer.target_card?.id
 
   const proposerItems =
     offer.items?.filter((item) => item.card_id !== targetCardId) ?? []
 
   if (proposerItems.length === 0) {
-    return 'カード情報なし'
+    return ['グッズ情報なし']
   }
 
-  return proposerItems
-    .map((item) => item.card?.name || 'カード情報なし')
-    .join(' / ')
+  return proposerItems.map((item) => item.card?.name || 'グッズ情報なし')
 }
 
-function getReceiverCardNames(offer: Offer): string {
+function getReceiverCardNames(offer: Offer): string[] {
   const targetName = offer.target_card?.name
 
   if (targetName && targetName.trim().length > 0) {
-    return targetName
+    return [targetName]
   }
 
-  return 'カード情報なし'
+  return ['グッズ情報なし']
 }
 
 function formatDate(value: string): string {

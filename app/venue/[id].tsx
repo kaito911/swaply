@@ -424,14 +424,13 @@ export default function VenueHomeScreen() {
                 </View>
 
                 <View style={styles.fieldBlock}>
-                  <Text style={styles.fieldLabel}>あなたが出すカード *</Text>
+                  <Text style={styles.fieldLabel}>あなたが出すグッズ *</Text>
                   <TextInput
                     style={styles.input}
                     placeholder="例：ハルト A ver."
                     value={myCardInput}
                     onChangeText={setMyCardInput}
                     autoCorrect={false}
-                    autoFocus
                   />
                 </View>
 

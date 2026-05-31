@@ -6,6 +6,7 @@ import {
     fetchTradeDetailByOffer,
     openTradeDispute,
     submitTradeShipment,
+    type ShippingMethod,
 } from '@/lib/supabase'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
@@ -60,10 +61,29 @@ type ShipmentRow = {
   status?: ShipmentStatus
   tracking_number?: string | null
   carrier?: string | null
+  shipping_method?: ShippingMethod | null
   shipped_at?: string | null
   received_at?: string | null
   created_at?: string | null
   updated_at?: string | null
+}
+
+// β1 配送方法 5 択。postal は追跡番号なし、それ以外は追跡番号入力推奨。
+const SHIPPING_METHOD_OPTIONS: readonly {
+  value: ShippingMethod
+  label: string
+  hasTracking: boolean
+}[] = [
+  { value: 'postal',      label: '普通郵便・ミニレター', hasTracking: false },
+  { value: 'click_post',  label: 'クリックポスト',       hasTracking: true  },
+  { value: 'letter_pack', label: 'レターパック',         hasTracking: true  },
+  { value: 'yamato',      label: 'ヤマト宅急便',         hasTracking: true  },
+  { value: 'other',       label: 'その他',               hasTracking: true  },
+]
+
+function getShippingMethodLabel(method: ShippingMethod | null | undefined): string {
+  if (method == null) return '未指定'
+  return SHIPPING_METHOD_OPTIONS.find((o) => o.value === method)?.label ?? '未指定'
 }
 
 type ProfileRow = {
@@ -301,6 +321,9 @@ function ShipmentBox({
       <Text style={styles.sectionSubTitle}>{title}</Text>
       <Text style={styles.shipmentText}>状態: {getShipmentLabel(shipment.status)}</Text>
       <Text style={styles.shipmentText}>
+        配送方法: {getShippingMethodLabel(shipment.shipping_method)}
+      </Text>
+      <Text style={styles.shipmentText}>
         追跡番号: {shipment.tracking_number || '未登録'}
       </Text>
       <Text style={styles.shipmentText}>配送会社: {shipment.carrier || '未登録'}</Text>
@@ -334,6 +357,8 @@ export default function TradeDetailScreen() {
   const [detail, setDetail] = useState<TradeDetail | null>(null)
   const [trackingNumber, setTrackingNumber] = useState('')
   const [carrier, setCarrier] = useState('')
+  // β1 配送方法選択。null = 未選択 (提出前バリデーションで弾く)
+  const [shippingMethod, setShippingMethod] = useState<ShippingMethod | null>(null)
   const [disputeReason, setDisputeReason] = useState('')
   const [disputeDetail, setDisputeDetail] = useState('')
 
@@ -348,6 +373,7 @@ export default function TradeDetailScreen() {
     setDetail(payload as TradeDetail)
     setTrackingNumber(payload?.myShipment?.tracking_number || '')
     setCarrier(payload?.myShipment?.carrier || '')
+    setShippingMethod(payload?.myShipment?.shipping_method ?? null)
   }, [offerId])
 
   const initialLoad = useCallback(async () => {
@@ -427,7 +453,16 @@ export default function TradeDetailScreen() {
       Alert.alert('エラー', '取引IDが取得できません。')
       return
     }
-    if (!trackingNumber.trim()) {
+    // β1: 配送方法は必須
+    if (shippingMethod == null) {
+      Alert.alert('入力エラー', '配送方法を選択してください。')
+      return
+    }
+    // β1: postal (普通郵便・ミニレター) 以外は追跡番号必須
+    const requiresTracking =
+      SHIPPING_METHOD_OPTIONS.find((o) => o.value === shippingMethod)?.hasTracking ?? true
+    const trimmedTracking = trackingNumber.trim()
+    if (requiresTracking && trimmedTracking === '') {
       Alert.alert('入力エラー', '追跡番号を入力してください。')
       return
     }
@@ -435,7 +470,8 @@ export default function TradeDetailScreen() {
       setSubmittingShipment(true)
       await submitTradeShipment({
         tradeId: trade.id,
-        trackingNumber: trackingNumber.trim(),
+        shippingMethod,
+        trackingNumber: trimmedTracking !== '' ? trimmedTracking : null,
         carrier: carrier.trim() || null,
       })
       Alert.alert('発送通知完了', '発送状況を更新しました。')
@@ -446,7 +482,7 @@ export default function TradeDetailScreen() {
     } finally {
       setSubmittingShipment(false)
     }
-  }, [carrier, loadTrade, trackingNumber, trade?.id])
+  }, [carrier, loadTrade, shippingMethod, trackingNumber, trade?.id])
 
   const handleConfirmReceipt = useCallback(async () => {
     if (!trade?.id) {
@@ -668,55 +704,97 @@ export default function TradeDetailScreen() {
         )}
 
         {/* [3] Primary Action ── 今やること */}
-        {uiState === 'waiting_my_ship' && (
-          <View style={styles.actionCard}>
-            <Text style={styles.actionTitle}>発送を通知する</Text>
-            <Text style={styles.noticeText}>
-              追跡番号は必須です。発送後に登録してください。
-            </Text>
-
-            <Text style={styles.inputLabel}>追跡番号</Text>
-            <TextInput
-              value={trackingNumber}
-              onChangeText={setTrackingNumber}
-              placeholder="追跡番号を入力"
-              placeholderTextColor="#9A94AA"
-              style={styles.input}
-              autoCapitalize="none"
-            />
-
-            <Text style={styles.inputLabel}>配送会社（任意）</Text>
-            <TextInput
-              value={carrier}
-              onChangeText={setCarrier}
-              placeholder="ヤマト / 日本郵便 など"
-              placeholderTextColor="#9A94AA"
-              style={styles.input}
-            />
-
-            <Pressable
-              style={[styles.primaryButton, submittingShipment && styles.disabledButton]}
-              onPress={handleSubmitShipment}
-              disabled={submittingShipment}
-            >
-              <Text style={styles.primaryButtonText}>
-                {submittingShipment ? '送信中...' : '発送を通知する'}
+        {uiState === 'waiting_my_ship' && (() => {
+          // 選択中の配送方法に応じて追跡番号入力欄の表示を出し分け
+          const requiresTracking =
+            shippingMethod == null
+              ? true
+              : (SHIPPING_METHOD_OPTIONS.find((o) => o.value === shippingMethod)
+                  ?.hasTracking ?? true)
+          return (
+            <View style={styles.actionCard}>
+              <Text style={styles.actionTitle}>発送を通知する</Text>
+              <Text style={styles.noticeText}>
+                配送方法を選んで発送後に登録してください。
+                普通郵便・ミニレター以外は追跡番号を入力してください。
               </Text>
-            </Pressable>
 
-            {canCancelTrade && (
+              {/* 配送方法 5 択 (β1) — pill row */}
+              <Text style={styles.inputLabel}>配送方法</Text>
+              <View style={styles.shippingMethodRow}>
+                {SHIPPING_METHOD_OPTIONS.map((opt) => {
+                  const isSelected = shippingMethod === opt.value
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => setShippingMethod(opt.value)}
+                      style={({ pressed }) => [
+                        styles.shippingMethodBtn,
+                        isSelected && styles.shippingMethodBtnSelected,
+                        pressed && styles.shippingMethodBtnPressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.shippingMethodBtnLabel,
+                          isSelected && styles.shippingMethodBtnLabelSelected,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  )
+                })}
+              </View>
+
+              {/* 追跡番号 — postal 選択時は非表示、それ以外で表示 (推奨入力) */}
+              {requiresTracking && (
+                <>
+                  <Text style={styles.inputLabel}>追跡番号</Text>
+                  <TextInput
+                    value={trackingNumber}
+                    onChangeText={setTrackingNumber}
+                    placeholder="追跡番号を入力"
+                    placeholderTextColor="#9A94AA"
+                    style={styles.input}
+                    autoCapitalize="none"
+                  />
+                </>
+              )}
+
+              <Text style={styles.inputLabel}>配送会社（任意）</Text>
+              <TextInput
+                value={carrier}
+                onChangeText={setCarrier}
+                placeholder="ヤマト / 日本郵便 など"
+                placeholderTextColor="#9A94AA"
+                style={styles.input}
+              />
+
               <Pressable
-                style={styles.cancelLink}
-                onPress={handleCancelTrade}
-                disabled={cancellingTrade}
+                style={[styles.primaryButton, submittingShipment && styles.disabledButton]}
+                onPress={handleSubmitShipment}
+                disabled={submittingShipment}
               >
-                <Text style={styles.cancelLinkText}>
-                  {cancellingTrade ? '処理中...' : '取引をキャンセルする'}
+                <Text style={styles.primaryButtonText}>
+                  {submittingShipment ? '送信中...' : '発送を通知する'}
                 </Text>
               </Pressable>
-            )}
-          </View>
-        )}
+
+              {canCancelTrade && (
+                <Pressable
+                  style={styles.cancelLink}
+                  onPress={handleCancelTrade}
+                  disabled={cancellingTrade}
+                >
+                  <Text style={styles.cancelLinkText}>
+                    {cancellingTrade ? '処理中...' : '取引をキャンセルする'}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )
+        })()}
 
         {uiState === 'waiting_my_receipt' && (
           <View style={styles.actionCard}>
@@ -1277,6 +1355,37 @@ const styles = StyleSheet.create({
     minHeight: 104,
     height: 104,
     paddingTop: 14,
+  },
+  // β1 配送方法 5 択 pill row (postal 選択時のみ追跡番号欄を出し分け)
+  shippingMethodRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  shippingMethodBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E4E4E7',
+    backgroundColor: '#FFFFFF',
+  },
+  shippingMethodBtnSelected: {
+    borderColor: '#6D5EF5',
+    backgroundColor: '#EEF2FF',
+  },
+  shippingMethodBtnPressed: {
+    opacity: 0.7,
+  },
+  shippingMethodBtnLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#52525B',
+  },
+  shippingMethodBtnLabelSelected: {
+    color: '#6D5EF5',
+    fontWeight: '700',
   },
   noticeText: {
     fontSize: 13,

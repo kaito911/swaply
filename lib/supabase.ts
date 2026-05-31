@@ -721,15 +721,32 @@ export async function fetchTradeDetailByOffer(offerId: string): Promise<any> {
   return data
 }
 
+// 配送方法 (β1):
+//   - postal      = 普通郵便・ミニレター (追跡番号なし)
+//   - click_post  = クリックポスト (追跡あり)
+//   - letter_pack = レターパックライト / プラス (追跡あり)
+//   - yamato      = ヤマト宅急便 (追跡あり)
+//   - other       = その他
+// shipments.shipping_method の CHECK 制約と同期。匿名配送 (Phase 1.5+) は anonymous_mail
+// を将来 ALTER で追加する想定 (β1 では非対応)。
+export type ShippingMethod =
+  | 'postal'
+  | 'click_post'
+  | 'letter_pack'
+  | 'yamato'
+  | 'other'
+
 export async function submitTradeShipment(params: {
   tradeId: string
-  trackingNumber: string
+  shippingMethod: ShippingMethod
+  trackingNumber: string | null
   carrier: string | null
 }): Promise<void> {
   const { error } = await supabase.rpc('submit_trade_shipment', {
     p_trade_id: params.tradeId,
     p_tracking_number: params.trackingNumber,
     p_carrier: params.carrier,
+    p_shipping_method: params.shippingMethod,
   })
 
   if (error) {

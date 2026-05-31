@@ -119,7 +119,7 @@ SET
     WHEN 4 THEN 100
     ELSE NULL
   END,
-  last_active_at = NOW() - ((d.seed_idx::text || ' hours')::interval),
+  last_active_at = NOW() - make_interval(hours => d.seed_idx::int),
   updated_at = NOW()
 FROM _seed_demo_0606_users d
 WHERE p.id = d.id;
@@ -147,7 +147,7 @@ SELECT
   0,
   CASE d.seed_idx WHEN 0 THEN 250 WHEN 1 THEN 300 WHEN 2 THEN 200
        WHEN 3 THEN 150 WHEN 4 THEN 100 ELSE NULL END,
-  NOW() - ((d.seed_idx::text || ' hours')::interval),
+  NOW() - make_interval(hours => d.seed_idx::int),
   NOW(),
   NOW()
 FROM _seed_demo_0606_users d
@@ -223,7 +223,7 @@ INSERT INTO public.venue_checkins (venue_id, user_id, created_at)
 SELECT
   v.id,
   u.id,
-  NOW() - (((u.seed_idx + v.venue_idx)::text || ' hours')::interval)
+  NOW() - make_interval(hours => (u.seed_idx + v.venue_idx)::int)
 FROM _seed_demo_0606_users u
 CROSS JOIN _seed_demo_0606_venues v;
 
@@ -258,8 +258,8 @@ SELECT
   v.status, v.cond, true, v.handoff, v.adj, v.adj_max,
   'idol', v.work_id, ARRAY[]::text[], v.item_types,
   NULL, NULL, NULL,
-  NOW() - (v.hours_ago || ' hours')::interval,
-  NOW() - (v.hours_ago || ' hours')::interval
+  NOW() - make_interval(hours => v.hours_ago),
+  NOW() - make_interval(hours => v.hours_ago)
 FROM (VALUES
   -- ─ user 0 (gold_blue): cards 1-5 ─
   -- card 1: TREASURE トレカ (reserved、pending trade target)
@@ -445,7 +445,7 @@ SELECT
   (SELECT id FROM _seed_demo_0606_users WHERE seed_idx = post.user_idx),
   post.card_name, post.group_name, post.want_card, 'active',
   v.event_date + INTERVAL '23 hours 59 minutes',
-  NOW() - (post.hours_ago || ' hours')::interval
+  NOW() - make_interval(hours => post.hours_ago)
 FROM (VALUES
   -- Venue 1 (TREASURE) のサプライ
   (1, 0, 'TREASURE Photo Card Bver. (会場限定)', 'TREASURE', '同会場限定の別バージョンのフォトカード', 2),
@@ -487,8 +487,8 @@ WITH inserted_offers AS (
     (SELECT id FROM _seed_demo_0606_users WHERE seed_idx = o.proposer_idx),
     (SELECT id FROM _seed_demo_0606_cards WHERE card_idx = o.target_card_idx),
     o.status, o.message, o.adj,
-    NOW() - (o.hours_ago || ' hours')::interval,
-    NOW() - (o.hours_ago || ' hours')::interval
+    NOW() - make_interval(hours => o.hours_ago),
+    NOW() - make_interval(hours => o.hours_ago)
   FROM (VALUES
     -- Offer 1: user 5 → user 0 (card 2)、pending、card 22 を提案
     (1, 5, 2,  'pending',   '同 Tour の Hver. トレカと交換していただけませんか？', 0, 3),
@@ -525,7 +525,7 @@ INSERT INTO public.offer_items (offer_id, card_id, created_at)
 SELECT
   o.id,
   (SELECT id FROM _seed_demo_0606_cards WHERE card_idx = oi.card_idx),
-  NOW() - (oi.hours_ago || ' hours')::interval
+  NOW() - make_interval(hours => oi.hours_ago)
 FROM (VALUES
   -- Offer 1: target=card 2 (user 0) + proposer=card 22 (user 5)
   (1, 2,  3), (1, 22, 3),
@@ -573,11 +573,11 @@ WITH inserted_trades AS (
     (SELECT id FROM _seed_demo_0606_users WHERE seed_idx = t.receiver_idx),
     'mail',
     t.status,
-    NOW() + INTERVAL '72 hours' - ((t.created_hours_ago || ' hours')::interval),
+    NOW() + INTERVAL '72 hours' - make_interval(hours => t.created_hours_ago),
     t.adj,
-    CASE WHEN t.status = 'completed' THEN NOW() - ((t.created_hours_ago - 24) || ' hours')::interval ELSE NULL END,
-    NOW() - (t.created_hours_ago || ' hours')::interval,
-    NOW() - (t.created_hours_ago || ' hours')::interval
+    CASE WHEN t.status = 'completed' THEN NOW() - make_interval(hours => t.created_hours_ago - 24) ELSE NULL END,
+    NOW() - make_interval(hours => t.created_hours_ago),
+    NOW() - make_interval(hours => t.created_hours_ago)
   FROM (VALUES
     -- Trade 1 (pending): offer 5 = user 1 ⇄ user 0
     (1, 5, 1, 0, 'pending',    500, 18),
@@ -639,11 +639,11 @@ SELECT
   s.tracking_number,
   s.carrier,
   CASE WHEN s.shipped_hours_ago IS NOT NULL
-    THEN NOW() - (s.shipped_hours_ago || ' hours')::interval ELSE NULL END,
+    THEN NOW() - make_interval(hours => s.shipped_hours_ago) ELSE NULL END,
   CASE WHEN s.received_hours_ago IS NOT NULL
-    THEN NOW() - (s.received_hours_ago || ' hours')::interval ELSE NULL END,
-  NOW() - (s.created_hours_ago || ' hours')::interval,
-  NOW() - (s.created_hours_ago || ' hours')::interval
+    THEN NOW() - make_interval(hours => s.received_hours_ago) ELSE NULL END,
+  NOW() - make_interval(hours => s.created_hours_ago),
+  NOW() - make_interval(hours => s.created_hours_ago)
 FROM (VALUES
   -- Trade 1 (pending): 両者 pending、shipping_method=NULL
   (1, 'proposer', 'pending'::text, NULL::text, NULL::text, NULL::text, NULL::int, NULL::int, 18),

@@ -57,8 +57,15 @@ function getCtaConfig(
     case 'reserved': return { label: '取引進行中', disabled: true }
     case 'traded':   return { label: '交換済み',   disabled: true }
     case 'inactive': return { label: '出品停止中', disabled: true }
-    default:         return { label: '交換を提案する', disabled: false }
   }
+  // status === 'active' に到達。
+  // β1: 通常の交換提案フローは郵送交換のみ対応 (accept_offer_atomic_v3 が trade_mode='mail'
+  // 固定 + ship_deadline_at 72h + shipments 必須生成のため)。
+  // allows_mail=false の出品 (= 手渡しのみ) は通常提案 CTA を無効化し、誤認を防ぐ。
+  if (!card.allows_mail) {
+    return { label: '郵送提案には対応していません', disabled: true }
+  }
+  return { label: '交換を提案する', disabled: false }
 }
 
 // ④ Trust: ホーム削除分の補完として全項目を直接表示 (3.5a 機能 H 戦略)
@@ -546,6 +553,14 @@ export default function ListingDetailScreen() {
                 />
               </View>
 
+              {/* β1 期待値補正: 手渡し可表示が「通常の交換提案フローで手渡しできる」と
+                  誤認されないよう注記。手渡し / 会場交換は専用導線で今後対応予定。 */}
+              {card.allows_handoff && (
+                <Text style={styles.beta1ExchangeNote}>
+                  ※ 現在、通常の交換提案は郵送交換のみ対応です。手渡し・会場交換は今後の専用導線で対応予定です。
+                </Text>
+              )}
+
               {/* 出品物の説明 (折りたたみ) */}
               {hasDescription && (
                 <View style={styles.descSection}>
@@ -969,6 +984,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.xs,
+  },
+  // β1 期待値補正: 譲タブ「交換条件」直下の注記 (allows_handoff=true のときのみ表示)
+  beta1ExchangeNote: {
+    fontSize: 11,
+    color: colors.textTertiary,
+    marginTop: spacing.xs,
+    lineHeight: 16,
   },
   tag: {
     borderRadius: radius.full,

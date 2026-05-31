@@ -876,6 +876,14 @@ export default function OfferCreateScreen() {
           </Text>
         )}
 
+        {/* β1 期待値補正: 通常の交換提案フローは郵送交換のみ対応 (accept_offer_atomic_v3
+            が trade_mode='mail' 固定 + ship_deadline_at 72h + shipments 必須生成のため)。
+            手渡し・会場交換は今後の専用導線で対応予定。 */}
+        <Text style={styles.shippingExpectationNote}>
+          ※ 現在、通常の交換提案は郵送交換として進行します。{'\n'}
+          成立後、発送先情報の共有と発送手続きが必要です。
+        </Text>
+
         <PrimaryCTA
           label="提案を送る"
           onPress={handleConfirmAndSubmit}
@@ -1440,6 +1448,14 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: spacing.xs,
+  },
+  // β1 期待値補正: 郵送交換のみ対応であることを CTA 直前に明示
+  shippingExpectationNote: {
+    fontSize: 11,
+    color: colors.textTertiary,
+    textAlign: 'center',
+    lineHeight: 16,
+    marginBottom: spacing.sm,
   },
 
   // Shared

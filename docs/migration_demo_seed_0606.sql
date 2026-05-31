@@ -546,7 +546,7 @@ WITH inserted_offers AS (
   SELECT
     (SELECT id FROM _seed_demo_0606_users WHERE seed_idx = o.proposer_idx),
     (SELECT id FROM _seed_demo_0606_cards WHERE card_idx = o.target_card_idx),
-    o.status, o.message, o.adj,
+    o.status::offer_status, o.message, o.adj,
     NOW() - make_interval(hours => o.hours_ago),
     NOW() - make_interval(hours => o.hours_ago)
   FROM (VALUES
@@ -631,8 +631,8 @@ WITH inserted_trades AS (
     o.id,
     (SELECT id FROM _seed_demo_0606_users WHERE seed_idx = t.proposer_idx),
     (SELECT id FROM _seed_demo_0606_users WHERE seed_idx = t.receiver_idx),
-    'mail',
-    t.status,
+    'mail'::trade_mode,
+    t.status::trade_status,
     NOW() + INTERVAL '72 hours' - make_interval(hours => t.created_hours_ago),
     t.adj,
     CASE WHEN t.status = 'completed' THEN NOW() - make_interval(hours => t.created_hours_ago - 24) ELSE NULL END,
@@ -694,7 +694,7 @@ SELECT
     WHEN 'proposer' THEN t.proposer_user_id
     WHEN 'receiver' THEN t.receiver_user_id
   END,
-  s.shipment_status,
+  s.shipment_status::shipment_status,
   s.shipping_method,
   s.tracking_number,
   s.carrier,

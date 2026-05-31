@@ -18,7 +18,7 @@ import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
 import { getItemTypeSuggestions, recordListingKeyword } from '@/lib/master'
-import type { MasterCategory, MasterItemType } from '@/lib/types'
+import type { MasterItemType } from '@/lib/types'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useState } from 'react'
 import {
@@ -43,10 +43,10 @@ export default function ListingNewItemsScreen() {
   const [itemTypes, setItemTypes] = useState<MasterItemType[]>([])
   const [freeTexts, setFreeTexts] = useState<string[]>([])
 
-  const fetchSuggestions = (input: string) =>
-    getItemTypeSuggestions(input, {
-      categoryHint: params.category as MasterCategory,
-    })
+  // β1 拡張: category_hint フィルタを外し、全 master_item_types から候補表示。
+  // 推し活グッズは作品カテゴリに関係なく交換対象 (アニメ作品でもトレカ、サンリオでもカード系、
+  // K-POP でもアクスタ・缶バッジ等)。autocomplete の検索入力で自然に絞り込まれる前提。
+  const fetchSuggestions = (input: string) => getItemTypeSuggestions(input)
 
   const handleFreeText = (text: string) => {
     const trimmed = text.trim()

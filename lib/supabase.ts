@@ -806,6 +806,64 @@ export async function openTradeDispute(params: {
 }
 
 // ─────────────────────────────────────────
+// 通報 (reports)
+// Phase 0 PR-B: 出品・ユーザーに対する通報を保存。
+// 運営は service_role 経由で reports を確認 (β1 では DB 直接、管理画面は Phase 2+)。
+// ─────────────────────────────────────────
+
+export type ReportTargetType = 'card' | 'user'
+
+/**
+ * 通報を作成する。
+ *
+ * 制約 (migration_reports.sql の CHECK と整合):
+ *   - reason: 1-100 文字
+ *   - detail: 省略可、最大 2000 文字
+ *   - target_type: 'card' | 'user'
+ *
+ * RLS:
+ *   - INSERT は auth.uid() = reporter_id のみ許可
+ *   - 未ログインの場合は呼び出し前に session を確認すること
+ */
+export async function createReport(params: {
+  targetType: ReportTargetType
+  targetId: string
+  reason: string
+  detail?: string | null
+}): Promise<void> {
+  const { data: authData, error: authError } = await supabase.auth.getUser()
+  if (authError) {
+    throw authError
+  }
+  const reporterId = authData.user?.id
+  if (reporterId == null) {
+    throw new Error('AUTH_REQUIRED')
+  }
+
+  const trimmedReason = params.reason.trim()
+  if (trimmedReason === '') {
+    throw new Error('REASON_REQUIRED')
+  }
+
+  const cleanedDetail =
+    params.detail != null && params.detail.trim() !== ''
+      ? params.detail.trim()
+      : null
+
+  const { error } = await supabase.from('reports').insert({
+    reporter_id: reporterId,
+    target_type: params.targetType,
+    target_id: params.targetId,
+    reason: trimmedReason,
+    detail: cleanedDetail,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+// ─────────────────────────────────────────
 // 成立ログ（accept率分析用）
 // 開発・分析用。ユーザー向け機能ではない。
 // RLS により認証済みユーザーが関与する offer のみ取得される。

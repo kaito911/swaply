@@ -111,6 +111,7 @@ begin
   --   維持する列 (相手側履歴の整合性と Trust 指標のため):
   --     - trade_count / ship_rate / reply_median_hours / trouble_count
   --     - adjustment_avg / adjustment_bias
+  --     - mode (NOT NULL DEFAULT 'oshi'::text、個人情報ではないため維持)
   --     - is_pioneer / pioneer_number / pioneer_joined_at /
   --       pioneer_status / pioneer_forfeited_reason (Pioneer 列、Q-B 案 X)
   -- ─────────────────────────────────────────
@@ -124,7 +125,6 @@ begin
         postal_code    = null,
         address_line1  = null,
         address_line2  = null,
-        mode           = null,
         last_active_at = null,
         updated_at     = now()
     where id = v_user_id;

@@ -191,6 +191,10 @@ function RootNavigator() {
             headerShadowVisible: false,
           }}
         />
+        <Stack.Screen
+          name="legal"
+          options={{ headerShown: false }}
+        />
       </Stack>
     </>
   )

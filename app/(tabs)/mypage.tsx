@@ -20,6 +20,8 @@ import {
   TrustBadgeLevel,
 } from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { SUPPORT_MAILTO, LEGAL_MAILTO } from '@/constants/contact'
+import { BetaBadge } from '@/components/BetaBadge'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useMemo, useState } from 'react'
@@ -27,6 +29,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -96,6 +99,23 @@ export default function MyPageScreen() {
       }).finally(() => setDataLoading(false))
     }, [userId, refreshBadge])
   )
+
+  const openMailto = async (url: string) => {
+    try {
+      const supported = await Linking.canOpenURL(url)
+      if (!supported) {
+        Alert.alert(
+          'メーラーが開けません',
+          'メールアプリが見つかりませんでした。端末のメール設定をご確認ください。',
+        )
+        return
+      }
+      await Linking.openURL(url)
+    } catch (err) {
+      console.error('[MyPage][openMailto]', err)
+      Alert.alert('エラー', 'メーラーの起動に失敗しました。')
+    }
+  }
 
   const handleLogout = () => {
     Alert.alert('ログアウトしますか？', '', [
@@ -347,6 +367,9 @@ export default function MyPageScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* ── β版表示 (Apple 審査向け期待値補正) ── */}
+        <BetaBadge />
+
         {/* ── ヒーロー ── */}
         <View style={styles.hero}>
           <View style={styles.heroInner}>
@@ -446,7 +469,7 @@ export default function MyPageScreen() {
           </View>
         )}
 
-        {/* 設定リンク群 */}
+        {/* 設定リンク群 (アカウント関連) */}
         <View style={styles.settingsSection}>
           {([
             { label: 'プロフィール編集', path: '/profile-edit' },
@@ -463,6 +486,38 @@ export default function MyPageScreen() {
               <Ionicons name="chevron-forward" size={16} color={colors.primary} />
             </Pressable>
           ))}
+        </View>
+
+        {/* 法務・サポートリンク群 (App Store 審査必須項目) */}
+        <View style={styles.settingsSection}>
+          <Pressable
+            style={[styles.settingRow, styles.rowBorder]}
+            onPress={() => router.push('/legal/terms' as never)}
+          >
+            <Text style={styles.settingLabel}>利用規約</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+          </Pressable>
+          <Pressable
+            style={[styles.settingRow, styles.rowBorder]}
+            onPress={() => router.push('/legal/privacy' as never)}
+          >
+            <Text style={styles.settingLabel}>プライバシーポリシー</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+          </Pressable>
+          <Pressable
+            style={[styles.settingRow, styles.rowBorder]}
+            onPress={() => openMailto(SUPPORT_MAILTO)}
+          >
+            <Text style={styles.settingLabel}>お問い合わせ</Text>
+            <Ionicons name="open-outline" size={16} color={colors.primary} />
+          </Pressable>
+          <Pressable
+            style={styles.settingRow}
+            onPress={() => openMailto(LEGAL_MAILTO)}
+          >
+            <Text style={styles.settingLabel}>権利侵害の申立</Text>
+            <Ionicons name="open-outline" size={16} color={colors.primary} />
+          </Pressable>
         </View>
 
         <Pressable

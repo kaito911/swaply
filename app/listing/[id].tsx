@@ -737,6 +737,27 @@ export default function ListingDetailScreen() {
           )}
         </View>
 
+        {/* ④' 通報リンク (自分の出品では非表示) */}
+        {!isOwn && (
+          <View style={styles.reportLinkSection}>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/report' as never,
+                  params: {
+                    targetType: 'card',
+                    targetId: card.id,
+                    targetLabel: card.name ?? '',
+                  } as never,
+                })
+              }
+              hitSlop={6}
+            >
+              <Text style={styles.reportLinkText}>気になる内容を通報する</Text>
+            </Pressable>
+          </View>
+        )}
+
         {/* ④ CTA (タブ外、画面下部) */}
         {!isOwn && (
           <View style={styles.ctaContainer}>
@@ -1204,6 +1225,18 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 22,
     marginTop: spacing.xs,
+  },
+
+  // ── ④' 通報リンク (出品者セクションと CTA の間、控えめ表示) ──
+  reportLinkSection: {
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  reportLinkText: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    textDecorationLine: 'underline',
   },
 
   // ── ⑤ cta ────────────────────────────────

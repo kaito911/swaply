@@ -195,6 +195,13 @@ function RootNavigator() {
           name="legal"
           options={{ headerShown: false }}
         />
+        <Stack.Screen
+          name="report"
+          options={{
+            headerShown: false,
+            presentation: 'modal',
+          }}
+        />
       </Stack>
     </>
   )

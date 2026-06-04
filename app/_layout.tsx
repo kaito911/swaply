@@ -202,6 +202,13 @@ function RootNavigator() {
             presentation: 'modal',
           }}
         />
+        <Stack.Screen
+          name="account-delete"
+          options={{
+            headerShown: false,
+            presentation: 'modal',
+          }}
+        />
       </Stack>
     </>
   )

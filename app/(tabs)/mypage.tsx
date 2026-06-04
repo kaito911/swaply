@@ -531,6 +531,15 @@ export default function MyPageScreen() {
             <Text style={styles.logoutText}>ログアウト</Text>
           )}
         </Pressable>
+
+        {/* アカウント削除 (Phase 0 PR-D、tertiary 小リンク、ログアウトの下) */}
+        <Pressable
+          style={styles.deleteAccountRow}
+          onPress={() => router.push('/account-delete' as never)}
+          hitSlop={6}
+        >
+          <Text style={styles.deleteAccountText}>アカウントを削除</Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   )
@@ -908,5 +917,16 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  // アカウント削除リンク (Phase 0 PR-D、控えめ tertiary、誤押し防止)
+  deleteAccountRow: {
+    marginTop: spacing.lg,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  deleteAccountText: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    textDecorationLine: 'underline',
   },
 })

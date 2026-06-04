@@ -1001,6 +1001,78 @@ export async function fetchMyBlockedUserIds(): Promise<string[]> {
   return (data ?? []).map((row) => row.blocked_user_id as string)
 }
 
+// ─────────────────────────────────────────
+// アカウント削除 (Phase 0 PR-D)
+//
+// アプリ内から自分のアカウントを削除する。
+//   - profiles は物理削除せず匿名化保持 (相手側履歴の整合性のため)
+//   - active trade (pending/accepted/in_transit/partially_received) があれば削除拒否
+//   - Edge Function `delete-account` が RPC `delete_my_account` を呼び、最後に auth.users を削除
+// ─────────────────────────────────────────
+
+/**
+ * 進行中の取引数を取得する (削除可否判定用)。
+ *
+ * 進行中とみなす status: pending / accepted / in_transit / partially_received
+ *
+ * 未ログイン時は 0 を返す (Edge Function 側で再判定するため defensive)。
+ */
+export async function fetchActiveTradeCount(): Promise<number> {
+  const { data: authData } = await supabase.auth.getUser()
+  const userId = authData.user?.id
+  if (userId == null) return 0
+
+  const { count, error } = await supabase
+    .from('trades')
+    .select('id', { count: 'exact', head: true })
+    .or(`proposer_user_id.eq.${userId},receiver_user_id.eq.${userId}`)
+    .in('status', ['pending', 'accepted', 'in_transit', 'partially_received'])
+
+  if (error != null) {
+    console.error('[fetchActiveTradeCount]', error)
+    return 0
+  }
+  return count ?? 0
+}
+
+/**
+ * アカウント削除 Edge Function を呼び出す。
+ *
+ * 成功時: Edge Function が auth.users を削除済。呼び出し側で signOut + login 画面遷移。
+ *
+ * エラー throw 文字列 (画面側で switch):
+ *   - 'AUTH_REQUIRED'        : 未認証 (session 切れ等)
+ *   - 'ACTIVE_TRADE_EXISTS'  : 進行中取引あり、削除不可
+ *   - 'AUTH_DELETE_FAILED'   : RPC は完了 (匿名化済) だが auth 削除失敗、再実行可能
+ *   - その他                 : 想定外、再試行を促す
+ */
+export async function deleteMyAccount(): Promise<void> {
+  const { data, error } = await supabase.functions.invoke<
+    | { ok: true }
+    | { error: string; count?: number; message?: string }
+  >('delete-account', {
+    method: 'POST',
+  })
+
+  if (error != null) {
+    // FunctionsHttpError 等。invoke のエラーは body が data に入ってくる場合があるため両方確認
+    const body =
+      data != null && typeof data === 'object' && 'error' in data
+        ? data
+        : null
+    if (body != null && typeof body.error === 'string') {
+      throw new Error(body.error)
+    }
+    console.error('[deleteMyAccount] invoke error', error)
+    throw new Error('INTERNAL_ERROR')
+  }
+
+  if (data != null && typeof data === 'object' && 'error' in data) {
+    throw new Error(data.error)
+  }
+
+  // data === { ok: true } → 削除成功
+}
 
 // ─────────────────────────────────────────
 // 成立ログ（accept率分析用）

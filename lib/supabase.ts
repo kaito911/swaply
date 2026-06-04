@@ -1013,7 +1013,9 @@ export async function fetchMyBlockedUserIds(): Promise<string[]> {
 /**
  * 進行中の取引数を取得する (削除可否判定用)。
  *
- * 進行中とみなす status: pending / accepted / in_transit / partially_received
+ * 進行中とみなす trades.status: pending / in_transit / partially_received
+ *   (trade_status enum に 'accepted' は存在しない。'accepted' は offers.status 側の値で、
+ *    accept_offer_atomic_v3 RPC が trades を生成する時点で trades.status='pending' から開始する。)
  *
  * 未ログイン時は 0 を返す (Edge Function 側で再判定するため defensive)。
  */
@@ -1026,7 +1028,7 @@ export async function fetchActiveTradeCount(): Promise<number> {
     .from('trades')
     .select('id', { count: 'exact', head: true })
     .or(`proposer_user_id.eq.${userId},receiver_user_id.eq.${userId}`)
-    .in('status', ['pending', 'accepted', 'in_transit', 'partially_received'])
+    .in('status', ['pending', 'in_transit', 'partially_received'])
 
   if (error != null) {
     console.error('[fetchActiveTradeCount]', error)

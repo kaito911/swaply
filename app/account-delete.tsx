@@ -96,8 +96,8 @@ export default function AccountDeleteScreen() {
                 ],
               )
             } catch (err) {
-              console.error('[account-delete] error', err)
               const code = err instanceof Error ? err.message : 'INTERNAL_ERROR'
+              console.error('[account-delete] error', { code, err })
               let title = '削除に失敗しました'
               let message =
                 '時間をおいてもう一度お試しください。問題が続く場合はお問い合わせください。'

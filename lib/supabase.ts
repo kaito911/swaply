@@ -35,11 +35,20 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 // Home screen
 // ─────────────────────────────────────────
 
-export async function fetchNewCards(limit = 20): Promise<Card[]> {
-  const { data, error } = await supabase
+export async function fetchNewCards(
+  limit = 20,
+  excludeOwnerIds: string[] = [],
+): Promise<Card[]> {
+  let query = supabase
     .from('cards')
     .select('*, owner:profiles(*)')
     .eq('status', 'active')
+
+  if (excludeOwnerIds.length > 0) {
+    query = query.not('owner_user_id', 'in', `(${excludeOwnerIds.join(',')})`)
+  }
+
+  const { data, error } = await query
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -114,7 +123,8 @@ function sortEasyCards(cards: Card[], myWants: WantedCard[]): Card[] {
 // myWants は呼び出し元（home.tsx）で取得して渡す。データ取得責務の分離のため。
 export async function fetchEasyCards(
   userId?: string,
-  myWants: WantedCard[] = []
+  myWants: WantedCard[] = [],
+  excludeOwnerIds: string[] = [],
 ): Promise<Card[]> {
   // 多めに取得してクライアントサイドでスコアソート後に20件に絞る
   let query = supabase
@@ -125,6 +135,9 @@ export async function fetchEasyCards(
 
   if (userId != null) {
     query = query.neq('owner_user_id', userId)
+  }
+  if (excludeOwnerIds.length > 0) {
+    query = query.not('owner_user_id', 'in', `(${excludeOwnerIds.join(',')})`)
   }
 
   const { data, error } = await query
@@ -141,13 +154,20 @@ export async function fetchEasyCards(
 
 export async function fetchRecommendedCards(
   userId: string,
-  limit = 20
+  limit = 20,
+  excludeOwnerIds: string[] = [],
 ): Promise<Card[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('cards')
     .select('*, owner:profiles(*)')
     .eq('status', 'active')
     .neq('owner_user_id', userId)
+
+  if (excludeOwnerIds.length > 0) {
+    query = query.not('owner_user_id', 'in', `(${excludeOwnerIds.join(',')})`)
+  }
+
+  const { data, error } = await query
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -294,6 +314,7 @@ export type WantedCardWithOwner = WantedCard & { owner: Profile }
 export async function searchWantedCards(params: {
   query: string
   excludeUserId?: string | null
+  excludeOwnerIds?: string[]
   limit?: number
 }): Promise<WantedCardWithOwner[]> {
   const q = params.query.trim()
@@ -309,6 +330,11 @@ export async function searchWantedCards(params: {
 
   if (params.excludeUserId != null && params.excludeUserId !== '') {
     query = query.neq('user_id', params.excludeUserId)
+  }
+  const excludeOwnerIds = params.excludeOwnerIds ?? []
+  if (excludeOwnerIds.length > 0) {
+    // wanted_cards テーブルは user_id 列 (owner_user_id ではない)
+    query = query.not('user_id', 'in', `(${excludeOwnerIds.join(',')})`)
   }
 
   const { data, error } = await query
@@ -343,11 +369,16 @@ export async function searchDirectMatch(params: {
   userOffers: string
   userWants: string
   excludeUserId?: string | null
+  excludeOwnerIds?: string[]
   limit?: number
 }): Promise<DirectMatchResult[]> {
   const userOffers = params.userOffers.trim()
   const userWants = params.userWants.trim()
   if (userOffers === '' || userWants === '') return []
+
+  const excludeOwnerIds = params.excludeOwnerIds ?? []
+  const excludeFilter =
+    excludeOwnerIds.length > 0 ? `(${excludeOwnerIds.join(',')})` : null
 
   // Step 1: cards (相手が持っている、検索者が欲しい商品名) を取得
   let cardsQuery = supabase
@@ -360,6 +391,9 @@ export async function searchDirectMatch(params: {
 
   if (params.excludeUserId != null && params.excludeUserId !== '') {
     cardsQuery = cardsQuery.neq('owner_user_id', params.excludeUserId)
+  }
+  if (excludeFilter != null) {
+    cardsQuery = cardsQuery.not('owner_user_id', 'in', excludeFilter)
   }
 
   const { data: cardsData, error: cardsError } = await cardsQuery
@@ -864,6 +898,111 @@ export async function createReport(params: {
 }
 
 // ─────────────────────────────────────────
+// ユーザーブロック (user_blocks)
+// Phase 0 PR-C: 「自分がブロックした相手」を保存する単方向リスト。
+// β1 では home / search / listing 一覧から相手の出品を除外する目的で使用。
+// 既存 trade / offer / shipment への影響はなし (進行中取引は引き続き表示)。
+// ─────────────────────────────────────────
+
+/**
+ * ユーザーをブロックする。
+ *
+ * 制約 (migration_user_blocks.sql):
+ *   - blocker_id != blocked_user_id (自分自身は禁止)
+ *   - UNIQUE (blocker_id, blocked_user_id) で重複ブロック回避
+ *
+ * 冪等性: UNIQUE 制約により、既存ブロックは重複作成されず 23505 エラー → 本関数では
+ *   それを「既にブロック済」として無視する。
+ *
+ * RLS:
+ *   - INSERT は auth.uid() = blocker_id のみ許可
+ *   - 未ログインの場合は AUTH_REQUIRED を throw
+ */
+export async function addUserBlock(blockedUserId: string): Promise<void> {
+  const { data: authData, error: authError } = await supabase.auth.getUser()
+  if (authError) {
+    throw authError
+  }
+  const blockerId = authData.user?.id
+  if (blockerId == null) {
+    throw new Error('AUTH_REQUIRED')
+  }
+  if (blockerId === blockedUserId) {
+    throw new Error('CANNOT_BLOCK_SELF')
+  }
+
+  const { error } = await supabase.from('user_blocks').insert({
+    blocker_id: blockerId,
+    blocked_user_id: blockedUserId,
+  })
+
+  if (error != null) {
+    // 23505 (duplicate key) は「既にブロック済」として冪等扱い、上層では no-op
+    if (error.code === '23505') {
+      return
+    }
+    throw error
+  }
+}
+
+/**
+ * ユーザーのブロックを解除する。
+ *
+ * 解除は DELETE で実施 (UPDATE 不要、RLS でも UPDATE 拒否)。
+ * 該当行がなければ no-op (DELETE は 0 行でも成功扱い)。
+ */
+export async function removeUserBlock(blockedUserId: string): Promise<void> {
+  const { data: authData, error: authError } = await supabase.auth.getUser()
+  if (authError) {
+    throw authError
+  }
+  const blockerId = authData.user?.id
+  if (blockerId == null) {
+    throw new Error('AUTH_REQUIRED')
+  }
+
+  const { error } = await supabase
+    .from('user_blocks')
+    .delete()
+    .eq('blocker_id', blockerId)
+    .eq('blocked_user_id', blockedUserId)
+
+  if (error != null) {
+    throw error
+  }
+}
+
+/**
+ * 自分がブロックしたユーザー ID の一覧を取得する。
+ *
+ * 用途:
+ *   - home / search / listing 一覧で blocked_user の出品を除外
+ *   - 結果は string[] (UUID 配列)、空配列ならフィルタ不要
+ *
+ * 未ログイン時は空配列を返す (エラーにせず、defensive に動作)。
+ */
+export async function fetchMyBlockedUserIds(): Promise<string[]> {
+  const { data: authData } = await supabase.auth.getUser()
+  const userId = authData.user?.id
+  if (userId == null) {
+    return []
+  }
+
+  const { data, error } = await supabase
+    .from('user_blocks')
+    .select('blocked_user_id')
+    .eq('blocker_id', userId)
+
+  if (error != null) {
+    console.error('[fetchMyBlockedUserIds]', error)
+    return []
+  }
+
+  return (data ?? []).map((row) => row.blocked_user_id as string)
+}
+
+
+// ─────────────────────────────────────────
 // 成立ログ（accept率分析用）
 // 開発・分析用。ユーザー向け機能ではない。
 // RLS により認証済みユーザーが関与する offer のみ取得される。
@@ -1188,11 +1327,15 @@ export async function searchCards(params: {
   characterIds?: string[]
   itemTypeIds?: string[]
   limit?: number
+  excludeOwnerIds?: string[]
 }): Promise<Card[]> {
   const limit = params.limit ?? 30
   const characterIds = params.characterIds ?? []
   const itemTypeIds = params.itemTypeIds ?? []
   const query = (params.query ?? '').trim()
+  const excludeOwnerIds = params.excludeOwnerIds ?? []
+  const excludeFilter =
+    excludeOwnerIds.length > 0 ? `(${excludeOwnerIds.join(',')})` : null
 
   // 経路 3: 全部空
   if (characterIds.length === 0 && itemTypeIds.length === 0 && query === '') {
@@ -1208,6 +1351,7 @@ export async function searchCards(params: {
 
     if (characterIds.length > 0) q = q.overlaps('characters', characterIds)
     if (itemTypeIds.length > 0) q = q.overlaps('item_types', itemTypeIds)
+    if (excludeFilter != null) q = q.not('owner_user_id', 'in', excludeFilter)
 
     const { data, error } = await q
       .order('created_at', { ascending: false })
@@ -1230,12 +1374,14 @@ export async function searchCards(params: {
   const queries: PromiseLike<QueryResult>[] = []
 
   if (matchedCharIds.length > 0) {
+    let q = supabase
+      .from('cards')
+      .select('*, owner:profiles(*)')
+      .eq('status', 'active')
+      .overlaps('characters', matchedCharIds)
+    if (excludeFilter != null) q = q.not('owner_user_id', 'in', excludeFilter)
     queries.push(
-      supabase
-        .from('cards')
-        .select('*, owner:profiles(*)')
-        .eq('status', 'active')
-        .overlaps('characters', matchedCharIds)
+      q
         .order('created_at', { ascending: false })
         .limit(limit)
         .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
@@ -1243,30 +1389,36 @@ export async function searchCards(params: {
   }
 
   if (matchedItemTypeIds.length > 0) {
+    let q = supabase
+      .from('cards')
+      .select('*, owner:profiles(*)')
+      .eq('status', 'active')
+      .overlaps('item_types', matchedItemTypeIds)
+    if (excludeFilter != null) q = q.not('owner_user_id', 'in', excludeFilter)
     queries.push(
-      supabase
-        .from('cards')
-        .select('*, owner:profiles(*)')
-        .eq('status', 'active')
-        .overlaps('item_types', matchedItemTypeIds)
+      q
         .order('created_at', { ascending: false })
         .limit(limit)
         .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
     )
   }
 
-  queries.push(
-    supabase
+  {
+    let q = supabase
       .from('cards')
       .select('*, owner:profiles(*)')
       .eq('status', 'active')
       .or(
         `name.ilike.%${query}%,group_name.ilike.%${query}%,member_name.ilike.%${query}%,series.ilike.%${query}%`,
       )
-      .order('created_at', { ascending: false })
-      .limit(limit)
-      .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
-  )
+    if (excludeFilter != null) q = q.not('owner_user_id', 'in', excludeFilter)
+    queries.push(
+      q
+        .order('created_at', { ascending: false })
+        .limit(limit)
+        .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
+    )
+  }
 
   const results = await Promise.all(queries)
 
@@ -1401,7 +1553,8 @@ export async function searchCardsByMember(
   memberCanonical: string,
   group?: string,
   series?: string,
-  limit = 30
+  limit = 30,
+  excludeOwnerIds: string[] = [],
 ): Promise<Card[]> {
   const member = ALL_MEMBERS.find((m) => m.canonical === memberCanonical)
   if (member == null) return []
@@ -1417,6 +1570,9 @@ export async function searchCardsByMember(
   }
   if (series != null && series.trim() !== '') {
     query = query.ilike('series', series)
+  }
+  if (excludeOwnerIds.length > 0) {
+    query = query.not('owner_user_id', 'in', `(${excludeOwnerIds.join(',')})`)
   }
 
   const { data, error } = await query

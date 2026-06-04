@@ -4,10 +4,13 @@ import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { TrustBadge } from '@/components/TrustBadge'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
+  addUserBlock,
   addWantedCard,
   archiveWantedCard,
   fetchCard,
+  fetchMyBlockedUserIds,
   fetchMyWantedCards,
+  removeUserBlock,
   supabase,
 } from '@/lib/supabase'
 import {
@@ -161,6 +164,9 @@ export default function ListingDetailScreen() {
   const [imageSide, setImageSide] = useState<'front' | 'back'>('front')
   // 譲 / 求 タブ: 初期表示は譲 (まず相手が何を出しているかを見せる)
   const [activeTab, setActiveTab] = useState<ListingDetailTab>('offer')
+  // Phase 0 PR-C: 出品者のブロック状態 (画面 mount 時に取得、トグル時に optimistic 更新)
+  const [isBlocked, setIsBlocked] = useState(false)
+  const [blockToggling, setBlockToggling] = useState(false)
 
   const load = useCallback(async () => {
     if (!listingId) {
@@ -188,8 +194,12 @@ export default function ListingDetailScreen() {
       setCard(fetched)
 
       if (uid != null) {
-        const wants = await fetchMyWantedCards(uid)
+        const [wants, blockedIds] = await Promise.all([
+          fetchMyWantedCards(uid),
+          fetchMyBlockedUserIds(),
+        ])
         setMyWants(wants)
+        setIsBlocked(blockedIds.includes(fetched.owner_user_id))
 
         const best = wants.reduce<WantMatchScore>((acc, want) => {
           const s = scoreWantMatchV2(fetched, want)
@@ -297,6 +307,83 @@ export default function ListingDetailScreen() {
       pathname: '/offer/create',
       params: { cardId: card.id },
     } as never)
+  }
+
+  // Phase 0 PR-C: ブロック / 解除トグル
+  // 進行中の取引には影響しない (既存 trade / offer / shipment テーブルは touch しない)。
+  // β1 は「今後の表示・接触を減らす」目的で、home / search / listing 一覧から除外する用途のみ。
+  const handleBlockToggle = () => {
+    if (card == null || blockToggling) return
+    const ownerId = card.owner_user_id
+    if (ownerId === currentUserId) return // safety guard
+
+    if (isBlocked) {
+      // 解除フロー
+      Alert.alert(
+        'ブロックを解除しますか?',
+        '今後このユーザーの出品が再び表示されるようになります。',
+        [
+          { text: 'キャンセル', style: 'cancel' },
+          {
+            text: '解除する',
+            style: 'default',
+            onPress: async () => {
+              try {
+                setBlockToggling(true)
+                await removeUserBlock(ownerId)
+                setIsBlocked(false)
+                Alert.alert('ブロックを解除しました')
+              } catch (err) {
+                console.error('[listing/[id]][removeUserBlock]', err)
+                const message =
+                  err instanceof Error && err.message === 'AUTH_REQUIRED'
+                    ? 'ログインが必要です。再ログインしてからお試しください。'
+                    : 'ブロック解除に失敗しました。時間をおいてもう一度お試しください。'
+                Alert.alert('エラー', message)
+              } finally {
+                setBlockToggling(false)
+              }
+            },
+          },
+        ],
+      )
+      return
+    }
+
+    // ブロックフロー
+    Alert.alert(
+      'このユーザーをブロックしますか?',
+      'このユーザーの出品を今後表示しにくくします。進行中の交換がある場合は、必要な確認を続けてください。',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: 'ブロックする',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setBlockToggling(true)
+              await addUserBlock(ownerId)
+              setIsBlocked(true)
+              Alert.alert(
+                'ブロックしました',
+                'このユーザーの出品は今後表示しにくくなります。',
+              )
+            } catch (err) {
+              console.error('[listing/[id]][addUserBlock]', err)
+              const message =
+                err instanceof Error && err.message === 'AUTH_REQUIRED'
+                  ? 'ログインが必要です。再ログインしてからお試しください。'
+                  : err instanceof Error && err.message === 'CANNOT_BLOCK_SELF'
+                  ? '自分自身をブロックすることはできません。'
+                  : 'ブロックに失敗しました。時間をおいてもう一度お試しください。'
+              Alert.alert('エラー', message)
+            } finally {
+              setBlockToggling(false)
+            }
+          },
+        },
+      ],
+    )
   }
 
   // ★ 3.5a 機能 H + LikeButton bug fix: optimistic update で構造化 card の fuzzy match 漏れに対応
@@ -754,6 +841,28 @@ export default function ListingDetailScreen() {
               hitSlop={6}
             >
               <Text style={styles.reportLinkText}>気になる内容を通報する</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* ④'' ブロックリンク (自分の出品では非表示、controlled テキストリンク) */}
+        {!isOwn && (
+          <View style={styles.blockLinkSection}>
+            <Pressable
+              onPress={handleBlockToggle}
+              disabled={blockToggling}
+              hitSlop={6}
+            >
+              <Text
+                style={[
+                  styles.blockLinkText,
+                  blockToggling && styles.blockLinkTextDisabled,
+                ]}
+              >
+                {isBlocked
+                  ? 'このユーザーのブロックを解除する'
+                  : 'このユーザーをブロックする'}
+              </Text>
             </Pressable>
           </View>
         )}
@@ -1237,6 +1346,21 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textTertiary,
     textDecorationLine: 'underline',
+  },
+
+  // ── ④'' ブロックリンク (出品者セクションと CTA の間、controlled テキストリンク) ──
+  blockLinkSection: {
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  blockLinkText: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    textDecorationLine: 'underline',
+  },
+  blockLinkTextDisabled: {
+    opacity: 0.5,
   },
 
   // ── ⑤ cta ────────────────────────────────

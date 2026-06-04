@@ -27,6 +27,7 @@ import {
   addWantedCard,
   archiveWantedCard,
   fetchEasyCards,
+  fetchMyBlockedUserIds,
   fetchMyWantedCards,
   fetchNewCards,
   fetchRecommendedCards,
@@ -89,15 +90,21 @@ export default function HomeScreen() {
           }
         }
 
-        // wants を先に取得してから fetchEasyCards に渡す（状態管理と取得責務の分離）
-        const wants = user != null ? await fetchMyWantedCards(user.id) : []
+        // wants + blocked user ids を先に取得してから各 fetch に渡す
+        // (状態管理と取得責務の分離、ブロック相手は home から除外する Phase 0 PR-C)
+        const [wants, blockedUserIds] = await Promise.all([
+          user != null ? fetchMyWantedCards(user.id) : Promise.resolve([]),
+          user != null ? fetchMyBlockedUserIds() : Promise.resolve([]),
+        ])
         if (isActive) setMyWants(wants)
 
         // TODO: 推薦RPC実装後に差し替え (Lane 2: 現行は自分以外のアクティブカードによる近似)
         const [rec, easy, newest] = await Promise.all([
-          user != null ? fetchRecommendedCards(user.id) : fetchNewCards(),
-          fetchEasyCards(user?.id, wants),
-          fetchNewCards(),
+          user != null
+            ? fetchRecommendedCards(user.id, 20, blockedUserIds)
+            : fetchNewCards(20, blockedUserIds),
+          fetchEasyCards(user?.id, wants, blockedUserIds),
+          fetchNewCards(20, blockedUserIds),
         ])
 
         if (!isActive) return

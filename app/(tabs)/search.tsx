@@ -14,6 +14,7 @@ import { MemberMaster } from '@/constants/members'
 import { isMasterCacheReady } from '@/lib/master'
 import { scoreSearchMatch, type SearchMatchScore } from '@/lib/matcher'
 import {
+  fetchMyBlockedUserIds,
   getGroupsForMember,
   getMemberSuggestions,
   getSeriesOptions,
@@ -54,6 +55,23 @@ export default function SearchScreen() {
   const [mode, setMode] = useState<SearchMode>('offer')
   // 内側 (offer モードのみ): 既存 Phase 0.5b の 2 タブ
   const [tab, setTab] = useState<SearchTab>('text')
+
+  // Phase 0 PR-C: ブロック相手の出品を検索結果から除外
+  // 画面マウント時に 1 回取得、各 Pane に props で渡す
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>([])
+  useEffect(() => {
+    if (user == null) {
+      setBlockedUserIds([])
+      return
+    }
+    let cancelled = false
+    void fetchMyBlockedUserIds().then((ids) => {
+      if (!cancelled) setBlockedUserIds(ids)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [user])
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -110,19 +128,35 @@ export default function SearchScreen() {
           </View>
           {/* 両方マウントで state 保持 */}
           <View style={[styles.tabPane, tab !== 'member' && styles.tabPaneHidden]}>
-            <MemberSearchPane currentUserId={user?.id ?? null} />
+            <MemberSearchPane
+              currentUserId={user?.id ?? null}
+              blockedUserIds={blockedUserIds}
+            />
           </View>
           <View style={[styles.tabPane, tab !== 'text' && styles.tabPaneHidden]}>
-            <TextSearchPane currentUserId={user?.id ?? null} />
+            <TextSearchPane
+              currentUserId={user?.id ?? null}
+              blockedUserIds={blockedUserIds}
+            />
           </View>
         </>
       )}
 
       {/* 求 (want) モード: wanted_cards を検索 */}
-      {mode === 'want' && <WantedSearchPane currentUserId={user?.id ?? null} />}
+      {mode === 'want' && (
+        <WantedSearchPane
+          currentUserId={user?.id ?? null}
+          blockedUserIds={blockedUserIds}
+        />
+      )}
 
       {/* 直接交換 (direct) モード: 譲 + 求 並列入力で完全マッチング */}
-      {mode === 'direct' && <DirectMatchPane currentUserId={user?.id ?? null} />}
+      {mode === 'direct' && (
+        <DirectMatchPane
+          currentUserId={user?.id ?? null}
+          blockedUserIds={blockedUserIds}
+        />
+      )}
     </SafeAreaView>
   )
 }
@@ -131,7 +165,13 @@ export default function SearchScreen() {
 // メンバー検索ペイン (3 段検索)
 // ─────────────────────────────────────────
 
-function MemberSearchPane({ currentUserId }: { currentUserId: string | null }) {
+function MemberSearchPane({
+  currentUserId,
+  blockedUserIds,
+}: {
+  currentUserId: string | null
+  blockedUserIds: string[]
+}) {
   // 第 1 段: メンバー
   const [memberInput, setMemberInput] = useState('')
   const [suggestions, setSuggestions] = useState<readonly MemberMaster[]>([])
@@ -229,7 +269,9 @@ function MemberSearchPane({ currentUserId }: { currentUserId: string | null }) {
       const cards = await searchCardsByMember(
         selected.canonical,
         selectedGroup ?? undefined,
-        seriesArg
+        seriesArg,
+        30,
+        blockedUserIds,
       )
       setResults(cards)
       setSearched(true)
@@ -239,7 +281,7 @@ function MemberSearchPane({ currentUserId }: { currentUserId: string | null }) {
     return () => {
       if (searchTimer.current != null) clearTimeout(searchTimer.current)
     }
-  }, [selected, groupOptions.length, selectedGroup, selectedSeries, seriesCustom])
+  }, [selected, groupOptions.length, selectedGroup, selectedSeries, seriesCustom, blockedUserIds])
 
   // ── render helpers ─────────────────────────
 
@@ -440,7 +482,13 @@ function getEmptyHint(args: {
   return '見つかりませんでした'
 }
 
-function TextSearchPane({ currentUserId }: { currentUserId: string | null }) {
+function TextSearchPane({
+  currentUserId,
+  blockedUserIds,
+}: {
+  currentUserId: string | null
+  blockedUserIds: string[]
+}) {
   const [input, setInput] = useState('')
   const [selectedChars, setSelectedChars] = useState<MasterCharacter[]>([])
   const [selectedItems, setSelectedItems] = useState<MasterItemType[]>([])
@@ -492,6 +540,7 @@ function TextSearchPane({ currentUserId }: { currentUserId: string | null }) {
       const cards = await searchCards({
         characterIds: selectedCharIds,
         itemTypeIds: selectedItemTypeIds,
+        excludeOwnerIds: blockedUserIds,
       })
       if (cancelled) return
       setResults(sortByScore(cards, selectedCharIds, selectedItemTypeIds))
@@ -502,7 +551,7 @@ function TextSearchPane({ currentUserId }: { currentUserId: string | null }) {
     return () => {
       cancelled = true
     }
-  }, [hasChips, selectedCharIds, selectedItemTypeIds])
+  }, [hasChips, selectedCharIds, selectedItemTypeIds, blockedUserIds])
 
   // 入力テキスト変化 effect (debounce 400ms、チップ 0 時のみ走る)
   useEffect(() => {
@@ -517,7 +566,10 @@ function TextSearchPane({ currentUserId }: { currentUserId: string | null }) {
 
     debounceTimer.current = setTimeout(async () => {
       setLoading(true)
-      const cards = await searchCards({ query: trimmedInput })
+      const cards = await searchCards({
+        query: trimmedInput,
+        excludeOwnerIds: blockedUserIds,
+      })
       setResults(cards) // text fallback は created_at DESC のまま
       setSearched(true)
       setLoading(false)
@@ -526,7 +578,7 @@ function TextSearchPane({ currentUserId }: { currentUserId: string | null }) {
     return () => {
       if (debounceTimer.current != null) clearTimeout(debounceTimer.current)
     }
-  }, [trimmedInput, hasChips])
+  }, [trimmedInput, hasChips, blockedUserIds])
 
   // フリーテキスト確定シグナル (R9/R20)。
   // 入力ベースの effect で既にライブ検索が走っているので追加処理なし、将来 user_keyword_history 記録等の拡張点。
@@ -661,7 +713,13 @@ function ResultArea({
 // wanted_cards を検索者の譲商品名で fuzzy 検索、所有者を表示
 // ─────────────────────────────────────────
 
-function WantedSearchPane({ currentUserId }: { currentUserId: string | null }) {
+function WantedSearchPane({
+  currentUserId,
+  blockedUserIds,
+}: {
+  currentUserId: string | null
+  blockedUserIds: string[]
+}) {
   const [input, setInput] = useState('')
   const [results, setResults] = useState<WantedCardWithOwner[]>([])
   const [loading, setLoading] = useState(false)
@@ -682,6 +740,7 @@ function WantedSearchPane({ currentUserId }: { currentUserId: string | null }) {
       const data = await searchWantedCards({
         query: trimmed,
         excludeUserId: currentUserId,
+        excludeOwnerIds: blockedUserIds,
       })
       setResults(data)
       setSearched(true)
@@ -690,7 +749,7 @@ function WantedSearchPane({ currentUserId }: { currentUserId: string | null }) {
     return () => {
       if (debounceTimer.current != null) clearTimeout(debounceTimer.current)
     }
-  }, [trimmed, currentUserId])
+  }, [trimmed, currentUserId, blockedUserIds])
 
   const handleUserPress = (userId: string) => {
     router.push({ pathname: '/trust/[id]', params: { id: userId } } as never)
@@ -777,7 +836,13 @@ function WantedSearchPane({ currentUserId }: { currentUserId: string | null }) {
 // 譲 (自分が出す) + 求 (自分が欲しい) 並列入力 → 完全マッチング相手を表示
 // ─────────────────────────────────────────
 
-function DirectMatchPane({ currentUserId }: { currentUserId: string | null }) {
+function DirectMatchPane({
+  currentUserId,
+  blockedUserIds,
+}: {
+  currentUserId: string | null
+  blockedUserIds: string[]
+}) {
   const [offerInput, setOfferInput] = useState('')
   const [wantInput, setWantInput] = useState('')
   const [results, setResults] = useState<DirectMatchResult[]>([])
@@ -795,6 +860,7 @@ function DirectMatchPane({ currentUserId }: { currentUserId: string | null }) {
       userOffers: offerTrim,
       userWants: wantTrim,
       excludeUserId: currentUserId,
+      excludeOwnerIds: blockedUserIds,
     })
     setResults(data)
     setSearched(true)

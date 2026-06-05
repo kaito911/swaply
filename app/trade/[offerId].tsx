@@ -200,14 +200,18 @@ function getUIState(
   trade: TradeRow,
   canSubmitShipment: boolean,
   canConfirmReceipt: boolean,
-  myShipmentStatus: ShipmentStatus | undefined,
+  counterpartShipmentStatus: ShipmentStatus | undefined,
 ): UIState {
   if (trade.status === 'completed') return 'completed'
   if (trade.status === 'cancelled') return 'cancelled'
   if (trade.status === 'disputed') return 'disputed'
   if (canConfirmReceipt) return 'waiting_my_receipt'
   if (canSubmitShipment) return 'waiting_my_ship'
-  if (myShipmentStatus === 'received') return 'waiting_their_receipt'
+  // shipments.user_id = 発送者という DB 設計のため:
+  //   counterpartShipmentStatus === 'received' = 「相手発送 shipment が received とマークされた」
+  //                                            = 「私自身がもう受取確認済」
+  //   → 私は確認済、相手はまだ未確認 → 相手の受取確認待ち
+  if (counterpartShipmentStatus === 'received') return 'waiting_their_receipt'
   return 'waiting_their_ship'
 }
 
@@ -428,11 +432,15 @@ export default function TradeDetailScreen() {
     myShipmentStatus !== 'received' &&
     myShipmentStatus !== 'cancelled'
 
+  // canConfirmReceipt は「相手発送済 + 私が未確認」を判定する。
+  // counterpartShipmentStatus === 'shipped' = 相手発送 shipment が received になっていない
+  //   = 私がまだ受取確認を実行していない (実行すると counterpart shipment が 'received' に遷移する)
+  // ※ かつての `myShipmentStatus !== 'received'` 条件はデッドロックの原因だったため削除
+  //    (相手が先に受取確認すると my=received になり、本来確認すべき自分側で button が押せなくなっていた)
   const canConfirmReceipt =
     !!trade &&
     (trade.status === 'in_transit' || trade.status === 'partially_received') &&
-    counterpartShipmentStatus === 'shipped' &&
-    myShipmentStatus !== 'received'
+    counterpartShipmentStatus === 'shipped'
 
   const canCancelTrade =
     !!trade &&
@@ -603,7 +611,7 @@ export default function TradeDetailScreen() {
 
   // ── UIState 導出 ──────────────────────────
 
-  const uiState = getUIState(trade, canSubmitShipment, canConfirmReceipt, myShipmentStatus)
+  const uiState = getUIState(trade, canSubmitShipment, canConfirmReceipt, counterpartShipmentStatus)
   const uiConfig = UI_STATE_CONFIG[uiState]
   const stepIndex = uiConfig.stepIndex
   const showProgress = stepIndex >= 0

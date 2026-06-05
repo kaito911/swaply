@@ -432,15 +432,20 @@ export default function TradeDetailScreen() {
     myShipmentStatus !== 'received' &&
     myShipmentStatus !== 'cancelled'
 
-  // canConfirmReceipt は「相手発送済 + 私が未確認」を判定する。
-  // counterpartShipmentStatus === 'shipped' = 相手発送 shipment が received になっていない
-  //   = 私がまだ受取確認を実行していない (実行すると counterpart shipment が 'received' に遷移する)
-  // ※ かつての `myShipmentStatus !== 'received'` 条件はデッドロックの原因だったため削除
+  // canConfirmReceipt は「相手発送済 + 私が未確認 + 私も発送済」を判定する。
+  //   counterpartShipmentStatus === 'shipped' = 相手発送 shipment が received になっていない
+  //     = 私がまだ受取確認を実行していない (実行すると counterpart shipment が 'received' に遷移)
+  //   myShipmentStatus が 'shipped'/'received' = 私自身が発送済
+  //     (同時発送ルール + デッドロック防止、2026-06-06 本番デッドロック対応で追加。
+  //      自分未発送で confirm すると trade='partially_received' に遷移し、
+  //      submit_trade_shipment が TRADE_NOT_SHIPPABLE で拒否されて永遠に発送不可になる。)
+  // ※ かつての `myShipmentStatus !== 'received'` 条件はデッドロックの原因だったため削除済
   //    (相手が先に受取確認すると my=received になり、本来確認すべき自分側で button が押せなくなっていた)
   const canConfirmReceipt =
     !!trade &&
     (trade.status === 'in_transit' || trade.status === 'partially_received') &&
-    counterpartShipmentStatus === 'shipped'
+    counterpartShipmentStatus === 'shipped' &&
+    (myShipmentStatus === 'shipped' || myShipmentStatus === 'received')
 
   const canCancelTrade =
     !!trade &&

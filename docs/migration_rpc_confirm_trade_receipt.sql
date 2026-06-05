@@ -126,6 +126,17 @@ begin
     raise exception 'COUNTERPART_NOT_SHIPPED_YET';
   end if;
 
+  -- 7.5. 自分が未発送なら受取確認不可 (同時発送ルール + デッドロック防止)
+  --      submit_trade_shipment は trade.status='partially_received' を許容しないため、
+  --      自分未発送のまま相手の受取確認を完了すると、自分が永遠に発送不可になる
+  --      (trade が partially_received のまま固まり、submit_trade_shipment が TRADE_NOT_SHIPPABLE で
+  --       拒否されるデッドロック)。
+  --      したがって「自分が発送済 (shipped) または受領済 (received) であること」を確認の前提とする。
+  --      本チェックは 2026-06-06 の本番デッドロック (trade 7e7ae686...) を踏まえて追加。
+  if v_my_shipment.status not in ('shipped', 'received') then
+    raise exception 'MY_SHIPMENT_NOT_SHIPPED_YET';
+  end if;
+
   -- 8. 既に受取済みならそのまま返す（冪等性）
   if v_counterpart_shipment.status = 'received' then
     return v_trade;

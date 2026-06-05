@@ -533,6 +533,15 @@ export async function createOffer(params: {
     throw new Error('自分の出品には提案できません')
   }
 
+  // Phase 0 追加防御 (2026-06-05): 自分がブロックした相手への自己誤提案を防ぐ。
+  // user_blocks RLS は blocker_id = auth.uid() のみ select 可能なため、
+  // 「B が A をブロックしているとき A から B への提案を拒否」する完全双方向化は
+  // 別途 RPC 化が必要 (Phase 1 以降検討)。本チェックは A 側で誤操作を防ぐ最小限。
+  const myBlockedIds = await fetchMyBlockedUserIds()
+  if (myBlockedIds.includes(params.receiverId)) {
+    throw new Error('ブロックしている相手には提案できません。ブロックを解除してから再度お試しください。')
+  }
+
   if (params.proposerCardIds.length === 0) {
     throw new Error('交換に出すカードを1枚以上選んでください')
   }
@@ -1013,9 +1022,11 @@ export async function fetchMyBlockedUserIds(): Promise<string[]> {
 /**
  * 進行中の取引数を取得する (削除可否判定用)。
  *
- * 進行中とみなす trades.status: pending / in_transit / partially_received
- *   (trade_status enum に 'accepted' は存在しない。'accepted' は offers.status 側の値で、
- *    accept_offer_atomic_v3 RPC が trades を生成する時点で trades.status='pending' から開始する。)
+ * 進行中とみなす trades.status: pending / in_transit / partially_received / disputed
+ *   - 'accepted' は trade_status enum に存在しない (offers.status 側の値、
+ *     accept_offer_atomic_v3 が trades 生成時に trades.status='pending' から開始)
+ *   - 'disputed' (係争中) は Phase 0 外部レビュー指摘で追加 (2026-06-05)。
+ *     係争中ユーザーが削除で逃げて相手 / 運営対応が破綻するのを防ぐ。
  *
  * 未ログイン時は 0 を返す (Edge Function 側で再判定するため defensive)。
  */
@@ -1028,7 +1039,7 @@ export async function fetchActiveTradeCount(): Promise<number> {
     .from('trades')
     .select('id', { count: 'exact', head: true })
     .or(`proposer_user_id.eq.${userId},receiver_user_id.eq.${userId}`)
-    .in('status', ['pending', 'in_transit', 'partially_received'])
+    .in('status', ['pending', 'in_transit', 'partially_received', 'disputed'])
 
   if (error != null) {
     console.error('[fetchActiveTradeCount]', error)

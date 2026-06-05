@@ -16,9 +16,11 @@
 --   - profiles は物理削除しない (UPDATE で匿名化、id は維持)
 --     → cards/offers/trades 等の FK 参照を保ち、相手側履歴整合性を確保
 --   - active trade があれば削除拒否 (kaito 指示):
---     trades.status IN ('pending', 'in_transit', 'partially_received')
+--     trades.status IN ('pending', 'in_transit', 'partially_received', 'disputed')
 --     ※ trade_status enum に 'accepted' は存在しない (offers.status 側の値、
 --        accept_offer_atomic_v3 で trades 生成時に trades.status='pending' から開始)
+--     ※ 'disputed' (係争中) は Phase 0 外部レビュー指摘で追加 (2026-06-05)。
+--        係争中ユーザーが削除で逃げて相手 / 運営対応が破綻するのを防ぐ。
 --   - SECURITY DEFINER + search_path public 固定
 --   - 全 step 冪等 (再 invoke 安全)
 --   - auth.users 削除は本 RPC では行わず、Edge Function 側で実施
@@ -48,7 +50,7 @@ begin
   select count(*) into v_active_count
   from public.trades
   where (proposer_user_id = v_user_id or receiver_user_id = v_user_id)
-    and status in ('pending', 'in_transit', 'partially_received');
+    and status in ('pending', 'in_transit', 'partially_received', 'disputed');
 
   if v_active_count > 0 then
     -- カウントをエラーメッセージに含めて Edge Function 側でパース可能に

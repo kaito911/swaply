@@ -23,7 +23,7 @@ import {
   WantMatchScore,
 } from './types'
 import { scoreWantMatchV2 } from './matcher' // ★ Step 3 commit 3: v1 → v2 切替
-import { findCharacterIdsByText, findItemTypeIdsByText } from './master' // searchCards (Phase 0.5b) 経路 2 の master fuzzy 解決
+import { findCharacterIdsByText, findItemTypeIdsByText, getWorkById } from './master' // searchCards 経路 2 の master fuzzy 解決 + 経路 1 work_id legacy fallback の aliases 取得
 import { readAsStringAsync } from 'expo-file-system/legacy'
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''
@@ -1411,42 +1411,110 @@ export async function searchCards(params: {
   query?: string
   characterIds?: string[]
   itemTypeIds?: string[]
+  workIds?: string[]
   limit?: number
   excludeOwnerIds?: string[]
 }): Promise<Card[]> {
   const limit = params.limit ?? 30
   const characterIds = params.characterIds ?? []
   const itemTypeIds = params.itemTypeIds ?? []
+  const workIds = params.workIds ?? []
   const query = (params.query ?? '').trim()
   const excludeOwnerIds = params.excludeOwnerIds ?? []
   const excludeFilter =
     excludeOwnerIds.length > 0 ? `(${excludeOwnerIds.join(',')})` : null
 
   // 経路 3: 全部空
-  if (characterIds.length === 0 && itemTypeIds.length === 0 && query === '') {
+  if (
+    characterIds.length === 0 &&
+    itemTypeIds.length === 0 &&
+    workIds.length === 0 &&
+    query === ''
+  ) {
     return []
   }
 
-  // 経路 1: チップあり → single query (AND chain)
-  if (characterIds.length > 0 || itemTypeIds.length > 0) {
-    let q = supabase
+  // 経路 1: チップあり (characters / item_types / works のいずれか) → 1〜2 query merge
+  //   Query A: master ID overlap + work_id in (...) (新規出品ヒット)
+  //   Query B: works 選択時のみ実行。group_name / series ilike で legacy 出品 fallback
+  //            (cards.work_id NULL / フリーテキスト group_name の旧出品をカバー)
+  if (characterIds.length > 0 || itemTypeIds.length > 0 || workIds.length > 0) {
+    let qA = supabase
       .from('cards')
       .select('*, owner:profiles(*)')
       .eq('status', 'active')
+    if (characterIds.length > 0) qA = qA.overlaps('characters', characterIds)
+    if (itemTypeIds.length > 0) qA = qA.overlaps('item_types', itemTypeIds)
+    if (workIds.length > 0) qA = qA.in('work_id', workIds)
+    if (excludeFilter != null) qA = qA.not('owner_user_id', 'in', excludeFilter)
 
-    if (characterIds.length > 0) q = q.overlaps('characters', characterIds)
-    if (itemTypeIds.length > 0) q = q.overlaps('item_types', itemTypeIds)
-    if (excludeFilter != null) q = q.not('owner_user_id', 'in', excludeFilter)
-
-    const { data, error } = await q
-      .order('created_at', { ascending: false })
-      .limit(limit)
-
-    if (error) {
-      console.error('[searchCards/chips]', error)
-      return []
+    // works 未選択 → 単一 query で完結 (既存挙動と完全互換)
+    if (workIds.length === 0) {
+      const { data, error } = await qA
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (error) {
+        console.error('[searchCards/chips]', error)
+        return []
+      }
+      return (data ?? []) as Card[]
     }
-    return (data ?? []) as Card[]
+
+    // works 選択あり → legacy fallback query を組み立て
+    // 各 work の display_name_ja / display_name_en / aliases を group_name / series に対する
+    // ilike 句で OR 展開する。カンマ・括弧含む値はスキップ (Supabase .or() のセパレータ衝突回避)
+    const ilikeClauses: string[] = []
+    for (const id of workIds) {
+      const work = getWorkById(id)
+      if (work == null) continue
+      const terms = [work.display_name_ja, work.display_name_en ?? '', ...work.aliases]
+      for (const term of terms) {
+        const t = term.trim()
+        if (t === '' || t.includes(',') || t.includes('(') || t.includes(')')) continue
+        ilikeClauses.push(`group_name.ilike.%${t}%`)
+        ilikeClauses.push(`series.ilike.%${t}%`)
+      }
+    }
+
+    type ChipQueryResult = { data: Card[] | null; error: unknown }
+    const queries: PromiseLike<ChipQueryResult>[] = [
+      qA
+        .order('created_at', { ascending: false })
+        .limit(limit)
+        .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
+    ]
+    if (ilikeClauses.length > 0) {
+      let qB = supabase
+        .from('cards')
+        .select('*, owner:profiles(*)')
+        .eq('status', 'active')
+      if (characterIds.length > 0) qB = qB.overlaps('characters', characterIds)
+      if (itemTypeIds.length > 0) qB = qB.overlaps('item_types', itemTypeIds)
+      qB = qB.or(ilikeClauses.join(','))
+      if (excludeFilter != null) qB = qB.not('owner_user_id', 'in', excludeFilter)
+      queries.push(
+        qB
+          .order('created_at', { ascending: false })
+          .limit(limit)
+          .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
+      )
+    }
+
+    const results = await Promise.all(queries)
+    const seen = new Set<string>()
+    const merged: Card[] = []
+    for (const result of results) {
+      if (result.error) {
+        console.error('[searchCards/chips]', result.error)
+        continue
+      }
+      for (const c of result.data ?? []) {
+        if (seen.has(c.id)) continue
+        seen.add(c.id)
+        merged.push(c)
+      }
+    }
+    return merged.slice(0, limit)
   }
 
   // 経路 2: チップ 0 + free text → 既存 3 query merge

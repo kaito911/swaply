@@ -160,8 +160,23 @@ function calcMatchScore<T extends FilterableMaster>(item: T, lowerInput: string)
  * 入力が空のときは sort_order 順で全件返す。
  */
 function filterByFuzzy<T extends FilterableMaster>(items: T[], input: string): T[] {
+  return filterByFuzzyWithScore(items, input).map((x) => x.item)
+}
+
+/**
+ * filterByFuzzy と同じ scoring ロジックで、score を保持して返す内部版。
+ * getUnifiedSearchSuggestions の type 横断 merge ソート用に分離。
+ */
+function filterByFuzzyWithScore<T extends FilterableMaster>(
+  items: T[],
+  input: string,
+): Array<{ item: T; score: number }> {
   const trimmed = input.trim()
-  if (trimmed === '') return [...items].sort((a, b) => a.sort_order - b.sort_order)
+  if (trimmed === '') {
+    return [...items]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((item) => ({ item, score: 0 }))
+  }
 
   const lower = trimmed.toLowerCase()
   return items
@@ -171,7 +186,6 @@ function filterByFuzzy<T extends FilterableMaster>(items: T[], input: string): T
       if (b.score !== a.score) return b.score - a.score
       return a.item.sort_order - b.item.sort_order
     })
-    .map((x) => x.item)
 }
 
 // ─────────────────────────────────────────
@@ -243,6 +257,83 @@ export function findCharacterIdsByText(text: string): string[] {
 /** master_item_types のうち text に fuzzy match する ID 配列を返す (sync) */
 export function findItemTypeIdsByText(text: string): string[] {
   return filterByFuzzy(cache.itemTypes, text).map((t) => t.id)
+}
+
+// ─────────────────────────────────────────
+// 統合検索サジェスト (master_works + master_characters + master_item_types)
+//
+// 検索画面 (app/(tabs)/search.tsx TextSearchPane) で type 付きの統合候補を返す。
+//
+// 設計方針:
+//   - 3 テーブルを横断 fuzzy filter (既存 calcMatchScore 流用、表記ゆれ吸収)
+//   - 各候補に SearchSuggestion type discriminator を付与、UI 側でラベル出し分け:
+//     work + category='idol'  → 「グループ」
+//     work + category!='idol' → 「作品」
+//     character + work.category='idol' → 「メンバー」
+//     character + work.category!='idol' → 「キャラ」
+//     item_type → 「グッズ種別」
+//   - 全体を score DESC で merge ソート、同 score 内は work > character > item_type
+//     (グループ/作品の検索意図が強い傾向)
+//   - 既存 getCharacterSuggestionsAcrossWorks / getItemTypeSuggestions / getWorkSuggestions
+//     は touch せず、出品 form (work.tsx / characters.tsx / items.tsx) の互換性 100%
+// ─────────────────────────────────────────
+
+export type SearchSuggestion =
+  | { type: 'work'; data: MasterWork; score: number }
+  | { type: 'character'; data: MasterCharacter; score: number }
+  | { type: 'item_type'; data: MasterItemType; score: number }
+
+const SUGGESTION_TYPE_ORDER: Record<SearchSuggestion['type'], number> = {
+  work: 0,
+  character: 1,
+  item_type: 2,
+}
+
+/**
+ * 検索画面用 統合サジェスト関数。
+ * works / characters / item_types を横断 fuzzy filter、score DESC で merge して返す。
+ * 入力が空のときは空配列 (= 候補非表示シグナル、SearchAutocomplete の minInputChars 判定とは独立)。
+ */
+export function getUnifiedSearchSuggestions(
+  input: string,
+  limit = 15,
+): SearchSuggestion[] {
+  const trimmed = input.trim()
+  if (trimmed === '') return []
+
+  const workMatches: SearchSuggestion[] = filterByFuzzyWithScore(cache.works, trimmed).map(
+    (x) => ({ type: 'work', data: x.item, score: x.score }),
+  )
+  const charMatches: SearchSuggestion[] = filterByFuzzyWithScore(
+    cache.characters,
+    trimmed,
+  ).map((x) => ({ type: 'character', data: x.item, score: x.score }))
+  const itemMatches: SearchSuggestion[] = filterByFuzzyWithScore(
+    cache.itemTypes,
+    trimmed,
+  ).map((x) => ({ type: 'item_type', data: x.item, score: x.score }))
+
+  return [...workMatches, ...charMatches, ...itemMatches]
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return SUGGESTION_TYPE_ORDER[a.type] - SUGGESTION_TYPE_ORDER[b.type]
+    })
+    .slice(0, limit)
+}
+
+/**
+ * SearchSuggestion を UI 表示用の type ラベル文字列に変換する。
+ * character は所属 work.category を参照するため getWorkById を経由する。
+ */
+export function getSearchSuggestionTypeLabel(s: SearchSuggestion): string {
+  if (s.type === 'work') {
+    return s.data.category === 'idol' ? 'グループ' : '作品'
+  }
+  if (s.type === 'character') {
+    const work = cache.worksById.get(s.data.work_id)
+    return work?.category === 'idol' ? 'メンバー' : 'キャラ'
+  }
+  return 'グッズ種別'
 }
 
 // ─────────────────────────────────────────

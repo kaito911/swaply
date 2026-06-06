@@ -222,23 +222,23 @@ export default function VenueHomeScreen() {
               <View style={styles.supplyHeader}>
                 <View>
                   <Text style={styles.supplyTitle}>当日供給板</Text>
-                  <Text style={styles.supplySub}>不要カードの短命投稿・自動失効あり</Text>
+                  <Text style={styles.supplySub}>会場でその場交換するための短命投稿・30分で自動失効</Text>
                 </View>
                 <Pressable
                   style={[styles.postButton, showPostForm && styles.postButtonActive]}
                   onPress={() => setShowPostForm((f) => !f)}
                 >
                   <Text style={styles.postButtonText}>
-                    {showPostForm ? '✕ 閉じる' : '＋ 不要カードを投稿'}
+                    {showPostForm ? '✕ 閉じる' : '＋ 会場で交換に出す'}
                   </Text>
                 </Pressable>
               </View>
 
               {showPostForm && (
                 <View style={styles.formCard}>
-                  <Text style={styles.formTitle}>不要カードを投稿する（30分で自動失効）</Text>
+                  <Text style={styles.formTitle}>会場で交換に出す（30分で自動失効）</Text>
                   <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>不要カード名 *</Text>
+                    <Text style={styles.fieldLabel}>交換に出すカード名 *</Text>
                     <TextInput
                       style={styles.input}
                       placeholder="例：ジュンギュ A ver."
@@ -286,7 +286,7 @@ export default function VenueHomeScreen() {
               ) : supplyPosts.length === 0 ? (
                 <View style={styles.emptyBox}>
                   <Text style={styles.emptyTitle}>まだ投稿がありません</Text>
-                  <Text style={styles.emptyBody}>不要カードを投稿して交換相手を探しましょう</Text>
+                  <Text style={styles.emptyBody}>会場で交換に出すカードを投稿して、相手を探しましょう</Text>
                 </View>
               ) : (
                 supplyPosts.map((post) => (

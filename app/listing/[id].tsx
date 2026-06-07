@@ -2,6 +2,7 @@
 import { LikeButton } from '@/components/LikeButton'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { TrustBadge } from '@/components/TrustBadge'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
   addUserBlock,
@@ -77,21 +78,27 @@ function getCtaConfig(
 }
 
 // ④ Trust: ホーム削除分の補完として全項目を直接表示 (3.5a 機能 H 戦略)
+// β1: ADJUSTMENT_MONEY_ENABLED=false 中は差額平均 / 差額偏り を出さない。
 function getTrustRows(owner: Profile): { label: string; value: string }[] {
-  return [
+  const rows: { label: string; value: string }[] = [
     { label: '成立件数', value: `${owner.trade_count}件` },
     { label: '発送遵守率', value: `${owner.ship_rate}%` },
     {
       label: '返信中央値',
       value: owner.reply_median_hours < 999 ? `${owner.reply_median_hours}時間` : '—',
     },
-    {
-      label: '差額平均',
-      value: owner.adjustment_avg != null ? `¥${owner.adjustment_avg}` : '—',
-    },
-    { label: '差額偏り', value: owner.adjustment_bias ?? '—' },
-    { label: 'トラブル件数', value: `${owner.trouble_count}件` },
   ]
+  if (FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED) {
+    rows.push(
+      {
+        label: '差額平均',
+        value: owner.adjustment_avg != null ? `¥${owner.adjustment_avg}` : '—',
+      },
+      { label: '差額偏り', value: owner.adjustment_bias ?? '—' },
+    )
+  }
+  rows.push({ label: 'トラブル件数', value: `${owner.trouble_count}件` })
+  return rows
 }
 
 // ⑤ CTA: 押していい理由を1つだけ返す（want一致 → 実績 → 郵送 → 差額 の優先順）
@@ -104,7 +111,10 @@ function getPushReason(
   if (bestMatchScore === 'medium') return 'あなたが求めているカードに近いです'
   if (owner != null && owner.trade_count >= 1) return '交換実績があるため、安心して提案できます'
   if (card.allows_mail) return '郵送で交換しやすい条件です'
-  if (card.allows_adjustment) return '調整金に対応しており、条件が合わせやすいです'
+  // β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金 push 理由を出さない
+  if (FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && card.allows_adjustment) {
+    return '調整金に対応しており、条件が合わせやすいです'
+  }
   return null
 }
 
@@ -569,12 +579,15 @@ export default function ListingDetailScreen() {
                 </View>
               )}
 
-              {/* 差額: bottom-left overlay（即時スキャン用）*/}
-              <View style={[styles.diffOverlay, { backgroundColor: diff.bgColor }]}>
-                <Text style={[styles.diffOverlayText, { color: diff.textColor }]}>
-                  {diff.text}
-                </Text>
-              </View>
+              {/* 差額: bottom-left overlay（即時スキャン用）
+                  β1: ADJUSTMENT_MONEY_ENABLED=false 中は非表示 */}
+              {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+                <View style={[styles.diffOverlay, { backgroundColor: diff.bgColor }]}>
+                  <Text style={[styles.diffOverlayText, { color: diff.textColor }]}>
+                    {diff.text}
+                  </Text>
+                </View>
+              )}
 
               {/* ♡ いいね: bottom-right overlay (自分の出品では非表示) */}
               {!isOwn && currentUserId != null && (
@@ -638,11 +651,14 @@ export default function ListingDetailScreen() {
                     textColor={colors.tagNeutralText}
                   />
                 )}
-                <Tag
-                  text={diff.text}
-                  bgColor={diff.bgColor}
-                  textColor={diff.textColor}
-                />
+                {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金 Tag を非表示 */}
+                {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+                  <Tag
+                    text={diff.text}
+                    bgColor={diff.bgColor}
+                    textColor={diff.textColor}
+                  />
+                )}
               </View>
 
               {/* β1 期待値補正: 通常の交換提案は郵送のみ。手渡し / 会場交換は venue モード経由。 */}

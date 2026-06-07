@@ -3,6 +3,7 @@ import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { TradeStats } from '@/components/TradeStats'
 import { TradeTag } from '@/components/TradeTag'
 import { TrustBadge } from '@/components/TrustBadge'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, radius, spacing } from '@/constants/theme'
 import { Card, computeTrustBadge, CONDITION_LABELS } from '@/lib/types'
 import { router } from 'expo-router'
@@ -114,10 +115,13 @@ export function CardItem({ card, onPropose }: CardItemProps) {
         <View style={styles.tagsRow}>
           {card.allows_mail && <TradeTag label="郵送可" variant="mail" />}
           {card.allows_handoff && <TradeTag label="手渡し可" variant="handoff" />}
-          {card.allows_adjustment ? (
-            <TradeTag label="調整金あり" variant="adjustment" />
-          ) : (
-            <TradeTag label="調整金なし" variant="no_adjustment" />
+          {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金 Tag を非表示 */}
+          {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+            card.allows_adjustment ? (
+              <TradeTag label="調整金あり" variant="adjustment" />
+            ) : (
+              <TradeTag label="調整金なし" variant="no_adjustment" />
+            )
           )}
         </View>
 

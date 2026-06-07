@@ -5,6 +5,7 @@
 // 写真右上に LikeButton (size=small) overlay。Trust は出品詳細画面で密度確保 (機能 H 戦略)。
 
 import { LikeButton } from '@/components/LikeButton'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card } from '@/lib/types'
 import { Image } from 'expo-image'
@@ -61,10 +62,13 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
           </View>
         )}
 
-        {/* Diff label: bottom-left overlay */}
-        <View style={[styles.diffOverlay, { backgroundColor: diff.bg }]}>
-          <Text style={[styles.diffText, { color: diff.textColor }]}>{diff.text}</Text>
-        </View>
+        {/* Diff label: bottom-left overlay
+            β1: ADJUSTMENT_MONEY_ENABLED=false 中は非表示 */}
+        {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+          <View style={[styles.diffOverlay, { backgroundColor: diff.bg }]}>
+            <Text style={[styles.diffText, { color: diff.textColor }]}>{diff.text}</Text>
+          </View>
+        )}
 
         {/* 自分の出品バッジ: top-left overlay */}
         {isOwn && (

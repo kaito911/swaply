@@ -2,6 +2,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { ALL_MEMBERS, MemberMaster } from '../constants/members'
 import {
+  Bookmark,
+  BookmarkWithCard,
   Card,
   computeTrustBadge,
   Offer,
@@ -235,6 +237,89 @@ export async function fetchUserCards(
   }
 
   return (data ?? []) as Card[]
+}
+
+// ─────────────────────────────────────────
+// Bookmarks (他人の出品を保存するブックマーク、♡ ボタン専用)
+//
+// 求リスト (wanted_cards) とは別概念。matcher / easyScore / searchWantedCards /
+// searchDirectMatch では使わない。純 UI 用途 (保存 / 参照) のみ。
+// 詳細: docs/migration_bookmarks.sql / lib/types.ts Bookmark
+// ─────────────────────────────────────────
+
+/**
+ * ブックマーク追加 (冪等 upsert)。
+ * UNIQUE (user_id, card_id) 制約により重複 INSERT は 23505 を投げない。
+ * onConflict 指定で既存行があれば no-op 動作。
+ */
+export async function addBookmark(
+  userId: string,
+  cardId: string,
+): Promise<Bookmark> {
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .upsert(
+      { user_id: userId, card_id: cardId },
+      { onConflict: 'user_id,card_id' },
+    )
+    .select()
+    .single()
+
+  if (error) throw error
+  return data as Bookmark
+}
+
+/** ブックマーク削除 (存在しなくてもエラーにしない) */
+export async function removeBookmark(
+  userId: string,
+  cardId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('bookmarks')
+    .delete()
+    .eq('user_id', userId)
+    .eq('card_id', cardId)
+
+  if (error) throw error
+}
+
+/**
+ * 自分のブックマーク一覧 (card + owner を join、created_at DESC)。
+ * /bookmarks 画面の listing preview 表示用。
+ */
+export async function fetchMyBookmarks(
+  userId: string,
+): Promise<BookmarkWithCard[]> {
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .select('*, card:cards(*, owner:profiles(*))')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[fetchMyBookmarks]', error)
+    return []
+  }
+  return (data ?? []) as unknown as BookmarkWithCard[]
+}
+
+/**
+ * ♡ button の isBookmarked 判定用に card_id だけを Set で返す高速版。
+ * home.tsx / listing/[id].tsx の optimistic state 初期化で使う。
+ */
+export async function fetchMyBookmarkedCardIds(
+  userId: string,
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .select('card_id')
+    .eq('user_id', userId)
+
+  if (error) {
+    console.error('[fetchMyBookmarkedCardIds]', error)
+    return new Set()
+  }
+  return new Set((data ?? []).map((r) => r.card_id as string))
 }
 
 // ─────────────────────────────────────────

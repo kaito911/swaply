@@ -270,6 +270,27 @@ export interface WantedCard {
 }
 
 // ─────────────────────────────────────────
+// bookmarks (他人の出品を保存するブックマーク、♡ ボタン専用)
+//
+// 求リスト (wanted_cards) とは別概念。両者を統合しない。
+//   - wanted_cards = 自分が交換で求める商品 (matcher / easyScore 入力)
+//   - bookmarks    = 他人の出品保存 (純 UI 用途、matcher には使わない)
+// 詳細: docs/migration_bookmarks.sql
+// ─────────────────────────────────────────
+
+export interface Bookmark {
+  id: string
+  user_id: string
+  card_id: string
+  created_at: string
+}
+
+/** /bookmarks 一覧表示用 (card + owner を join) */
+export interface BookmarkWithCard extends Bookmark {
+  card: Card
+}
+
+// ─────────────────────────────────────────
 // shelf_items
 // ─────────────────────────────────────────
 

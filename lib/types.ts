@@ -267,6 +267,11 @@ export interface WantedCard {
   status: WantedCardStatus
   created_at: string
   updated_at: string
+  // Phase B-1: 参考画像 URL (任意)。「ほしい商品の参考画像」用途で、出品商品の実物画像とは別概念。
+  // 詳細: docs/migration_wanted_cards_add_image_url.sql
+  // Storage は既存 'card-images' bucket を流用、path 規約: `${userId}/wants/${fileName}`
+  // optional: 既存行 / 既存呼出と互換、image_url なしでも全機能動作する
+  image_url?: string | null
 }
 
 // ─────────────────────────────────────────

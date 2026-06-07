@@ -361,22 +361,31 @@ export async function addWantedCard(params: {
   groupName: string | null
   memberName: string | null
   series: string | null
+  // Phase B-1: 参考画像 URL (任意、optional)
+  //   - undefined: payload に含めない → 新規行は NULL、既存行は image_url 保持
+  //   - null:      payload に image_url=null を明示 (画像を外したい時)
+  //   - string:    payload に image_url=URL を投入
+  imageUrl?: string | null
 }): Promise<WantedCard> {
+  const payload: Record<string, unknown> = {
+    user_id: params.userId,
+    card_name: params.cardName,
+    group_name: params.groupName,
+    member_name: params.memberName,
+    series: params.series,
+    status: 'active',
+  }
+  // 既存呼出 (onboarding 等、imageUrl 未指定) を壊さないため undefined のときは
+  // payload に image_url を含めない (= upsert で既存値を保持 / 新規は NULL)。
+  if (params.imageUrl !== undefined) {
+    payload.image_url = params.imageUrl
+  }
+
   const { data, error } = await supabase
     .from('wanted_cards')
-    .upsert(
-      {
-        user_id: params.userId,
-        card_name: params.cardName,
-        group_name: params.groupName,
-        member_name: params.memberName,
-        series: params.series,
-        status: 'active',
-      },
-      {
-        onConflict: 'user_id,card_name,group_name,member_name,series',
-      },
-    )
+    .upsert(payload, {
+      onConflict: 'user_id,card_name,group_name,member_name,series',
+    })
     .select()
     .single()
 

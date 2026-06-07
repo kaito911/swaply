@@ -5,12 +5,13 @@ import { TrustBadge } from '@/components/TrustBadge'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
+  addBookmark,
   addUserBlock,
-  addWantedCard,
-  archiveWantedCard,
   fetchCard,
   fetchMyBlockedUserIds,
+  fetchMyBookmarkedCardIds,
   fetchMyWantedCards,
+  removeBookmark,
   removeUserBlock,
   supabase,
 } from '@/lib/supabase'
@@ -20,7 +21,7 @@ import {
   getWorkById,
 } from '@/lib/master'
 import { Card, computeTrustBadge, Profile, TrustBadgeLevel, WantedCard, WantMatchScore } from '@/lib/types'
-import { isWantMatchV2, scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
+import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
@@ -163,13 +164,13 @@ export default function ListingDetailScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [descExpanded, setDescExpanded] = useState(false)
+  // matcher (bestMatchScore) の計算は load 内で local wants で実施するため、myWants state は
+  // 現状 JSX 非使用。Phase B 以降の参照余地として state ホールド、意図を eslint-disable で明示。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [myWants, setMyWants] = useState<WantedCard[]>([])
   const [likeToggling, setLikeToggling] = useState(false)
-  // ★ 3.5a fix: optimistic 状態 (home.tsx と同じ設計、ただし 1 card のみなので scalar)
-  // 'liked' = add 直後 + wantId 保持、'unliked' = archive 直後、null = myWants 判定にフォール
-  const [pendingLikeState, setPendingLikeState] = useState<
-    { kind: 'liked'; wantId: string } | { kind: 'unliked' } | null
-  >(null)
+  // ★ Phase A: bookmarks 化により optimistic state は単純な boolean に簡素化
+  const [isBookmarked, setIsBookmarked] = useState(false)
   const [bestMatchScore, setBestMatchScore] = useState<WantMatchScore>('none')
   const [imageSide, setImageSide] = useState<'front' | 'back'>('front')
   // 譲 / 求 タブ: 初期表示は譲 (まず相手が何を出しているかを見せる)
@@ -204,12 +205,14 @@ export default function ListingDetailScreen() {
       setCard(fetched)
 
       if (uid != null) {
-        const [wants, blockedIds] = await Promise.all([
+        const [wants, blockedIds, bookmarkedIds] = await Promise.all([
           fetchMyWantedCards(uid),
           fetchMyBlockedUserIds(),
+          fetchMyBookmarkedCardIds(uid),
         ])
         setMyWants(wants)
         setIsBlocked(blockedIds.includes(fetched.owner_user_id))
+        setIsBookmarked(bookmarkedIds.has(fetched.id))
 
         const best = wants.reduce<WantMatchScore>((acc, want) => {
           const s = scoreWantMatchV2(fetched, want)
@@ -396,50 +399,26 @@ export default function ListingDetailScreen() {
     )
   }
 
-  // ★ 3.5a 機能 H + LikeButton bug fix: optimistic update で構造化 card の fuzzy match 漏れに対応
-  // home.tsx と同じ設計 (詳細は home.tsx コメント参照)、ここでは 1 card のみなので scalar state
-  //
-  // exact name match (card.name === w.card_name) を最優先:
-  //   wanted_cards_unique_per_user (user_id, card_name, ...) と整合、Pioneer #001 直接交換と同じ思想
-  //   2026-05-23 のホーム ♡ tap バグ (23505 duplicate key) と同根の対策
-  const matchesCard = (c: Card, w: WantedCard): boolean =>
-    w.card_name === c.name || isWantMatchV2(c, w)
-
-  const isLiked = (() => {
-    if (card == null) return false
-    if (pendingLikeState?.kind === 'unliked') return false
-    if (pendingLikeState?.kind === 'liked') return true
-    return myWants.some((w) => matchesCard(card, w))
-  })()
+  // ★ Phase A: bookmarks 化により card_id ベースの exact match に簡素化。
+  // pendingLikeState / matchesCard / fuzzy match はすべて不要に。
+  const isLiked = isBookmarked
 
   const handleToggleLike = async () => {
     if (currentUserId == null || card == null || likeToggling) return
     setLikeToggling(true)
+    const wasBookmarked = isBookmarked
+    // Optimistic UI update
+    setIsBookmarked(!wasBookmarked)
     try {
-      if (isLiked) {
-        // archive: pending 由来 or myWants 由来の wantId を解決
-        const pendingWantId =
-          pendingLikeState?.kind === 'liked' ? pendingLikeState.wantId : null
-        const matched = myWants.find((w) => matchesCard(card, w))
-        const wantIdToArchive = pendingWantId ?? matched?.id
-        setPendingLikeState({ kind: 'unliked' })
-        if (wantIdToArchive != null) {
-          await archiveWantedCard(wantIdToArchive)
-        }
+      if (wasBookmarked) {
+        await removeBookmark(currentUserId, card.id)
       } else {
-        const newWant = await addWantedCard({
-          userId: currentUserId,
-          cardName: card.name,
-          groupName: card.group_name,
-          memberName: card.member_name,
-          series: card.series,
-        })
-        setPendingLikeState({ kind: 'liked', wantId: newWant.id })
+        await addBookmark(currentUserId, card.id)
       }
-      const next = await fetchMyWantedCards(currentUserId)
-      setMyWants(next)
     } catch {
-      Alert.alert('エラー', 'いいねの更新に失敗しました')
+      // 失敗時は元の状態に revert
+      setIsBookmarked(wasBookmarked)
+      Alert.alert('エラー', '更新に失敗しました')
     } finally {
       setLikeToggling(false)
     }

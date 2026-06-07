@@ -10,7 +10,9 @@
 //   1. mypage 設定リンク (commit 8 で「求リスト」label に整理予定)
 //   2. (Phase B 以降) 出品作成時の求選択モーダルからも遷移
 import { ScreenHeader } from '@/components/ScreenHeader'
+import { WantSuggestInput } from '@/components/WantSuggestInput'
 import { addWantedCard, archiveWantedCard, fetchMyWantedCards } from '@/lib/supabase'
+import { getWorkById, type SearchSuggestion } from '@/lib/master'
 import { WantedCard } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors } from '@/constants/theme'
@@ -54,6 +56,8 @@ export default function WantsScreen() {
   const [formMemberName, setFormMemberName] = useState('')
   const [formSeries, setFormSeries] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // WantSuggestInput の入力欄テキスト (4 form fields とは独立、suggestion 検索専用)
+  const [suggestInput, setSuggestInput] = useState('')
 
   const load = useCallback(async () => {
     if (userId == null) {
@@ -103,7 +107,33 @@ export default function WantsScreen() {
     setFormGroupName('')
     setFormMemberName('')
     setFormSeries('')
+    setSuggestInput('')
   }
+
+  // WantSuggestInput からの候補 tap を form field に振り分ける。
+  // ルール (B-0 採用方針):
+  //   - work          → formGroupName (work.category 関わらず group/作品 欄に統一)
+  //   - character     → formMemberName + 親 work が解決できれば formGroupName も
+  //   - item_type     → formCardName
+  //   - series        → 該当 master なし、自由入力欄のまま (B-0 スコープ外)
+  // ユーザーは選択後も 4 fields を手動編集できる (suggestion は補助、最終決定は親フォーム)
+  const handleSelectSuggestion = useCallback((s: SearchSuggestion) => {
+    if (s.type === 'work') {
+      setFormGroupName(s.data.display_name_ja)
+      return
+    }
+    if (s.type === 'character') {
+      setFormMemberName(s.data.display_name_ja)
+      // 親 work が master cache から取れれば group_name にも自動 fill
+      const work = getWorkById(s.data.work_id)
+      if (work != null) {
+        setFormGroupName(work.display_name_ja)
+      }
+      return
+    }
+    // item_type
+    setFormCardName(s.data.display_name_ja)
+  }, [])
 
   const handleOpenAdd = () => {
     resetForm()
@@ -239,6 +269,20 @@ export default function WantsScreen() {
             <Text style={styles.modalSub}>
               交換で求めている商品を登録します。商品名は必須、その他は任意です。
             </Text>
+
+            {/* 候補検索 (任意): tap で下のフォームに自動入力 */}
+            <View style={styles.suggestBlock}>
+              <Text style={styles.fieldLabel}>候補から検索（任意）</Text>
+              <WantSuggestInput
+                value={suggestInput}
+                onChangeValue={setSuggestInput}
+                onSelectSuggestion={handleSelectSuggestion}
+                placeholder="例: ハルト, 鬼滅, アクスタ"
+              />
+              <Text style={styles.suggestHint}>
+                候補を選ぶと下のフォームに入ります。直接入力も可能です。
+              </Text>
+            </View>
 
             <View style={styles.fieldBlock}>
               <Text style={styles.fieldLabel}>商品名 *</Text>
@@ -457,6 +501,18 @@ const styles = StyleSheet.create({
     color: '#71717A',
     lineHeight: 18,
     marginBottom: 4,
+  },
+  suggestBlock: {
+    gap: 6,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ECE8FA',
+    marginBottom: 4,
+  },
+  suggestHint: {
+    fontSize: 11,
+    color: '#8A8499',
+    lineHeight: 16,
   },
   fieldBlock: {
     gap: 6,

@@ -11,12 +11,19 @@
 //   2. (Phase B 以降) 出品作成時の求選択モーダルからも遷移
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { WantSuggestInput } from '@/components/WantSuggestInput'
-import { addWantedCard, archiveWantedCard, fetchMyWantedCards } from '@/lib/supabase'
+import {
+  addWantedCard,
+  archiveWantedCard,
+  fetchMyWantedCards,
+  uploadCardImage,
+} from '@/lib/supabase'
 import { getWorkById, type SearchSuggestion } from '@/lib/master'
 import { WantedCard } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
+import { Image } from 'expo-image'
+import * as ImagePicker from 'expo-image-picker'
 import { useFocusEffect } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
@@ -60,6 +67,54 @@ function buildAutoCardName(params: {
     .join(' ')
 }
 
+// ─────────────────────────────────────────
+// 参考画像 picker helpers (Phase B-1)
+// 「ほしい商品の参考画像」用途、出品画像 (app/listing/new/image.tsx) とは別概念。
+// allowsEditing + aspect [3,4] は listing と同じパターンを踏襲 (オタクグッズは縦長が多い)。
+// ─────────────────────────────────────────
+
+async function pickFromLibrary(): Promise<string | null> {
+  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
+  if (!perm.granted) {
+    Alert.alert('権限が必要です', '写真ライブラリへのアクセスを許可してください。')
+    return null
+  }
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsEditing: true,
+    aspect: [3, 4],
+    quality: 0.8,
+  })
+  if (result.canceled) return null
+  const asset = result.assets?.[0]
+  if (!asset?.uri) {
+    Alert.alert('画像エラー', '画像を取得できませんでした。')
+    return null
+  }
+  return asset.uri
+}
+
+async function pickFromCamera(): Promise<string | null> {
+  const perm = await ImagePicker.requestCameraPermissionsAsync()
+  if (!perm.granted) {
+    Alert.alert('権限が必要です', 'カメラへのアクセスを許可してください。')
+    return null
+  }
+  const result = await ImagePicker.launchCameraAsync({
+    mediaTypes: ['images'],
+    allowsEditing: true,
+    aspect: [3, 4],
+    quality: 0.8,
+  })
+  if (result.canceled) return null
+  const asset = result.assets?.[0]
+  if (!asset?.uri) {
+    Alert.alert('画像エラー', '画像を取得できませんでした。')
+    return null
+  }
+  return asset.uri
+}
+
 export default function WantsScreen() {
   const { session } = useAuthContext()
   const userId = session?.user?.id ?? null
@@ -83,6 +138,9 @@ export default function WantsScreen() {
   // ユーザーが商品名 TextInput を直接編集したら true に固定。以後 auto 合成は無効化。
   // resetForm で false に戻る。
   const [isCardNameManuallyEdited, setIsCardNameManuallyEdited] = useState(false)
+  // Phase B-1: 参考画像のローカル URI (アップロード前)。submit 時に Storage へ upload
+  // → wanted_cards.image_url に publicUrl を入れる。modal 閉じる / submit 成功で reset。
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (userId == null) {
@@ -135,6 +193,23 @@ export default function WantsScreen() {
     setSuggestInput('')
     setSelectedItemTypeName('')
     setIsCardNameManuallyEdited(false)
+    setSelectedImageUri(null)
+  }
+
+  // 参考画像 picker handlers (Phase B-1)
+  const handlePickFromLibrary = async () => {
+    if (submitting) return
+    const uri = await pickFromLibrary()
+    if (uri != null) setSelectedImageUri(uri)
+  }
+  const handlePickFromCamera = async () => {
+    if (submitting) return
+    const uri = await pickFromCamera()
+    if (uri != null) setSelectedImageUri(uri)
+  }
+  const handleRemoveImage = () => {
+    if (submitting) return
+    setSelectedImageUri(null)
   }
 
   // WantSuggestInput からの候補 tap を form field に振り分ける。
@@ -203,14 +278,38 @@ export default function WantsScreen() {
     if (userId == null) return
     const cardName = formCardName.trim()
     if (cardName === '') return
+
+    setSubmitting(true)
+
+    // Phase B-1: 画像がある場合は Storage に upload してから addWantedCard。
+    // upload 失敗時は addWantedCard を実行せず alert + 早期 return (wanted_cards を作らない)。
+    let uploadedImageUrl: string | undefined = undefined
+    if (selectedImageUri != null) {
+      try {
+        const ext = selectedImageUri.split('.').pop()?.split('?')[0] ?? 'jpg'
+        // path 規約: ${userId}/wants/<timestamp>.<ext> (uploadCardImage の fileName 引数経由)
+        const fileName = `wants/${Date.now()}.${ext}`
+        uploadedImageUrl = await uploadCardImage({
+          userId,
+          imageUri: selectedImageUri,
+          fileName,
+        })
+      } catch (e) {
+        console.error('[wants][handleSubmitAdd][uploadImage]', e)
+        Alert.alert('エラー', '画像のアップロードに失敗しました')
+        setSubmitting(false)
+        return
+      }
+    }
+
     try {
-      setSubmitting(true)
       await addWantedCard({
         userId,
         cardName,
         groupName: formGroupName.trim() !== '' ? formGroupName.trim() : null,
         memberName: formMemberName.trim() !== '' ? formMemberName.trim() : null,
         series: formSeries.trim() !== '' ? formSeries.trim() : null,
+        imageUrl: uploadedImageUrl, // undefined なら addWantedCard で payload に含めない
       })
       setShowAddModal(false)
       resetForm()
@@ -278,6 +377,17 @@ export default function WantsScreen() {
 
               return (
                 <View key={want.id} style={styles.row}>
+                  {/* 参考画像 thumbnail (B-1、image_url がある行のみ表示) */}
+                  {want.image_url != null && want.image_url !== '' && (
+                    <Image
+                      source={{ uri: want.image_url }}
+                      style={styles.listThumb}
+                      contentFit="cover"
+                      transition={150}
+                      cachePolicy="memory-disk"
+                    />
+                  )}
+
                   <View style={styles.rowLeft}>
                     <Text style={styles.cardName} numberOfLines={1}>
                       {want.card_name}
@@ -396,6 +506,67 @@ export default function WantsScreen() {
                   editable={!submitting}
                 />
               </View>
+
+              {/* 参考画像セクション (Phase B-1、任意)
+                  「ほしい商品の参考画像」用途。出品画像とは別概念。 */}
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>参考画像を追加（任意）</Text>
+                <Text style={styles.fieldHint}>
+                  ほしい商品の参考画像として使います。出品画像ではありません。
+                </Text>
+
+                {selectedImageUri != null && (
+                  <View style={styles.imagePreviewRow}>
+                    <Image
+                      source={{ uri: selectedImageUri }}
+                      style={styles.imagePreview}
+                      contentFit="cover"
+                      transition={150}
+                    />
+                    <Pressable
+                      style={[
+                        styles.imageRemoveButton,
+                        submitting && styles.imageRemoveButtonDisabled,
+                      ]}
+                      onPress={handleRemoveImage}
+                      disabled={submitting}
+                    >
+                      <Text style={styles.imageRemoveButtonText}>削除</Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                <View style={styles.imagePickButtonRow}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.imagePickButton,
+                      pressed && styles.imagePickButtonPressed,
+                      submitting && styles.imagePickButtonDisabled,
+                    ]}
+                    onPress={handlePickFromLibrary}
+                    disabled={submitting}
+                  >
+                    <Ionicons name="image-outline" size={16} color={colors.primary} />
+                    <Text style={styles.imagePickButtonText}>
+                      {selectedImageUri != null ? '写真から変更' : '写真を選ぶ'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.imagePickButton,
+                      pressed && styles.imagePickButtonPressed,
+                      submitting && styles.imagePickButtonDisabled,
+                    ]}
+                    onPress={handlePickFromCamera}
+                    disabled={submitting}
+                  >
+                    <Ionicons name="camera-outline" size={16} color={colors.primary} />
+                    <Text style={styles.imagePickButtonText}>
+                      {selectedImageUri != null ? 'カメラで再撮影' : 'カメラで撮る'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
             </ScrollView>
 
             {/* sticky 下部: キャンセル / 追加するボタン */}
@@ -506,6 +677,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ECE8FA',
   },
+  listThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    marginRight: 12,
+    backgroundColor: '#FAFAFA',
+    flexShrink: 0,
+  },
   rowLeft: {
     flex: 1,
     minWidth: 0,
@@ -602,6 +781,68 @@ const styles = StyleSheet.create({
     color: '#8A8499',
     lineHeight: 16,
     marginTop: 2,
+  },
+
+  // 参考画像セクション (modal 内、Phase B-1)
+  imagePreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 8,
+  },
+  imagePreview: {
+    width: 80,
+    height: 80,
+    borderRadius: 10,
+    backgroundColor: '#FAFAFA',
+    borderWidth: 1,
+    borderColor: '#E4E4E7',
+  },
+  imageRemoveButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E4E4E7',
+    backgroundColor: '#FAFAFA',
+  },
+  imageRemoveButtonDisabled: {
+    opacity: 0.4,
+  },
+  imageRemoveButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#52525B',
+  },
+  imagePickButtonRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  imagePickButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: colors.primary,
+    backgroundColor: '#FFFFFF',
+  },
+  imagePickButtonPressed: {
+    opacity: 0.7,
+  },
+  imagePickButtonDisabled: {
+    opacity: 0.4,
+  },
+  imagePickButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
   },
   input: {
     borderWidth: 1,

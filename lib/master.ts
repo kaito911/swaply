@@ -357,6 +357,25 @@ export function getSearchSuggestionTypeLabel(s: SearchSuggestion): string {
   return 'グッズ種別'
 }
 
+/**
+ * SearchSuggestion を「{所属作品}・{type}」or「{type}」形式のサブラベルに変換する。
+ * SearchAutocomplete でメイン名 (display_name_ja) の下に小さく薄い色で表示する想定。
+ *
+ * 表示例:
+ *   character (work あり)  : 'TREASURE・メンバー' / '名探偵コナン・キャラ'
+ *   character (work 未解決): 'メンバー' or 'キャラ' (cache に親 work が無い fallback)
+ *   work                    : 'グループ' or '作品'
+ *   item_type               : 'グッズ種別'
+ */
+export function getSearchSuggestionSubLabel(s: SearchSuggestion): string {
+  const typeLabel = getSearchSuggestionTypeLabel(s)
+  if (s.type === 'character') {
+    const work = cache.worksById.get(s.data.work_id)
+    if (work != null) return `${work.display_name_ja}・${typeLabel}`
+  }
+  return typeLabel
+}
+
 // ─────────────────────────────────────────
 // user_keyword_history 記録
 // ─────────────────────────────────────────

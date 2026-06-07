@@ -23,7 +23,7 @@
 import { Ionicons } from '@expo/vector-icons'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import {
-  getSearchSuggestionTypeLabel,
+  getSearchSuggestionSubLabel,
   getUnifiedSearchSuggestions,
   isMasterCacheReady,
   type SearchSuggestion,
@@ -230,29 +230,23 @@ export function SearchAutocomplete(props: SearchAutocompleteProps) {
       {showSuggest && (
         <View style={styles.suggestList}>
           {hasCandidates &&
-            candidates.map((s) => {
-              const id = s.type === 'work' ? s.data.id : s.type === 'character' ? s.data.id : s.data.id
-              const typeLabel = getSearchSuggestionTypeLabel(s)
-              return (
-                <Pressable
-                  key={`${s.type}-${id}`}
-                  onPress={() => handleSelect(s)}
-                  style={({ pressed }) => [
-                    styles.candidateRow,
-                    pressed && styles.candidateRowPressed,
-                  ]}
-                >
-                  <View style={styles.candidateMain}>
-                    <Text style={styles.candidateName} numberOfLines={1}>
-                      {s.data.display_name_ja}
-                    </Text>
-                  </View>
-                  <View style={styles.candidateTypeBadge}>
-                    <Text style={styles.candidateTypeBadgeText}>{typeLabel}</Text>
-                  </View>
-                </Pressable>
-              )
-            })}
+            candidates.map((s) => (
+              <Pressable
+                key={`${s.type}-${s.data.id}`}
+                onPress={() => handleSelect(s)}
+                style={({ pressed }) => [
+                  styles.candidateRow,
+                  pressed && styles.candidateRowPressed,
+                ]}
+              >
+                <Text style={styles.candidateName} numberOfLines={1}>
+                  {s.data.display_name_ja}
+                </Text>
+                <Text style={styles.candidateSubLabel} numberOfLines={1}>
+                  {getSearchSuggestionSubLabel(s)}
+                </Text>
+              </Pressable>
+            ))}
 
           {showFreeTextFallback && (
             <View style={styles.emptyState}>
@@ -355,10 +349,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   candidateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
     borderBottomWidth: 1,
@@ -375,6 +365,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: fontWeight.semibold,
     color: colors.textPrimary,
+  },
+  candidateSubLabel: {
+    fontSize: 11,
+    color: colors.textTertiary,
+    marginTop: 2,
   },
   candidateTypeBadge: {
     paddingHorizontal: spacing.sm,

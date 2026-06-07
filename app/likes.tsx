@@ -1,23 +1,24 @@
-// app/bookmarks.tsx
-// 「保存した出品」一覧画面。
+// app/likes.tsx
+// 「いいね」一覧画面。
 //
 // 用途:
-//   - 他人の出品を ♡ ボタン (home.tsx / listing/[id].tsx) で保存したもの一覧
-//   - bookmarks テーブル (Phase A 新設) を fetchMyBookmarks で読む
+//   - 他人の出品 (cards) を ♡ ボタン (home.tsx / listing/[id].tsx) でいいねしたもの一覧
+//   - liked_cards テーブル (Phase A 新設) を fetchMyLikedCards で読む
 //   - listing card preview (画像 + 名前 + 所有者) で表示、tap で listing 詳細へ
-//   - 削除 button で removeBookmark
+//   - 解除 button で removeLike
 //
 // 非用途:
 //   - 求リスト (wanted_cards) ではない。matcher / easyScore には使わない
 //   - app/wants.tsx (Phase A 後に「求リスト」rebrand 予定) とは別画面・別テーブル
 //
 // アクセス動線:
-//   - HeaderActions の ♡ アイコン → /bookmarks (Phase A commit 4 で /wants から切替)
+//   - HeaderActions の ♡ アイコン → /likes (Phase A commit 4 で /wants から切替、
+//     commit 5 で /bookmarks から /likes へ rename)
 
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
-import { fetchMyBookmarks, removeBookmark } from '@/lib/supabase'
-import { BookmarkWithCard } from '@/lib/types'
+import { fetchMyLikedCards, removeLike } from '@/lib/supabase'
+import { LikedCardWithCard } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { Ionicons } from '@expo/vector-icons'
 import { Image } from 'expo-image'
@@ -34,23 +35,23 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-export default function BookmarksScreen() {
+export default function LikesScreen() {
   const { session } = useAuthContext()
   const userId = session?.user?.id ?? null
 
-  const [bookmarks, setBookmarks] = useState<BookmarkWithCard[]>([])
+  const [likedCards, setLikedCards] = useState<LikedCardWithCard[]>([])
   const [loading, setLoading] = useState(true)
   const [removingCardId, setRemovingCardId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (userId == null) {
-      setBookmarks([])
+      setLikedCards([])
       setLoading(false)
       return
     }
     setLoading(true)
-    const data = await fetchMyBookmarks(userId)
-    setBookmarks(data)
+    const data = await fetchMyLikedCards(userId)
+    setLikedCards(data)
     setLoading(false)
   }, [userId])
 
@@ -64,11 +65,11 @@ export default function BookmarksScreen() {
     router.push({ pathname: '/listing/[id]', params: { id: cardId } } as never)
   }
 
-  const handleRemove = (bookmark: BookmarkWithCard) => {
+  const handleRemove = (liked: LikedCardWithCard) => {
     if (userId == null) return
     Alert.alert(
-      '保存を解除しますか？',
-      `「${bookmark.card.name}」を保存一覧から外します。`,
+      'いいねを解除しますか？',
+      'この出品をいいね一覧から削除します。',
       [
         { text: 'キャンセル', style: 'cancel' },
         {
@@ -76,10 +77,10 @@ export default function BookmarksScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              setRemovingCardId(bookmark.card.id)
-              await removeBookmark(userId, bookmark.card.id)
-              setBookmarks((prev) =>
-                prev.filter((b) => b.card.id !== bookmark.card.id),
+              setRemovingCardId(liked.card.id)
+              await removeLike(userId, liked.card.id)
+              setLikedCards((prev) =>
+                prev.filter((b) => b.card.id !== liked.card.id),
               )
             } catch {
               Alert.alert('エラー', '解除に失敗しました')
@@ -95,7 +96,7 @@ export default function BookmarksScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <ScreenHeader title="保存した出品" />
+        <ScreenHeader title="いいね" />
         <View style={styles.center}>
           <ActivityIndicator size="small" color={colors.primary} />
         </View>
@@ -105,7 +106,7 @@ export default function BookmarksScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-      <ScreenHeader title="保存した出品" />
+      <ScreenHeader title="いいね" />
 
       <ScrollView
         style={styles.scroll}
@@ -113,28 +114,28 @@ export default function BookmarksScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.note}>
-          気になる出品の♡ボタンから保存できます。
+          気になる出品の♡ボタンから追加できます。
         </Text>
 
-        {bookmarks.length === 0 ? (
+        {likedCards.length === 0 ? (
           <View style={styles.emptyBox}>
             <Ionicons name="heart-outline" size={40} color={colors.border} />
-            <Text style={styles.emptyTitle}>まだ保存した出品はありません</Text>
+            <Text style={styles.emptyTitle}>まだいいねした出品はありません</Text>
             <Text style={styles.emptySub}>
-              出品詳細画面の♡ボタンから登録できます。
+              出品詳細画面の♡ボタンから追加できます。
             </Text>
           </View>
         ) : (
           <View style={styles.list}>
-            {bookmarks.map((bookmark) => {
-              const card = bookmark.card
+            {likedCards.map((liked) => {
+              const card = liked.card
               const ownerHandle =
                 card.owner?.handle ?? card.owner?.display_name ?? 'ユーザー'
               const isRemoving = removingCardId === card.id
 
               return (
                 <Pressable
-                  key={bookmark.id}
+                  key={liked.id}
                   style={({ pressed }) => [
                     styles.row,
                     pressed && styles.rowPressed,
@@ -173,7 +174,7 @@ export default function BookmarksScreen() {
                       styles.removeButton,
                       isRemoving && styles.removeButtonDisabled,
                     ]}
-                    onPress={() => handleRemove(bookmark)}
+                    onPress={() => handleRemove(liked)}
                     disabled={isRemoving}
                     hitSlop={8}
                   >

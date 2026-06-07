@@ -5,13 +5,13 @@ import { TrustBadge } from '@/components/TrustBadge'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
-  addBookmark,
+  addLike,
   addUserBlock,
   fetchCard,
   fetchMyBlockedUserIds,
-  fetchMyBookmarkedCardIds,
+  fetchMyLikedCardIds,
   fetchMyWantedCards,
-  removeBookmark,
+  removeLike,
   removeUserBlock,
   supabase,
 } from '@/lib/supabase'
@@ -169,8 +169,9 @@ export default function ListingDetailScreen() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [myWants, setMyWants] = useState<WantedCard[]>([])
   const [likeToggling, setLikeToggling] = useState(false)
-  // ★ Phase A: bookmarks 化により optimistic state は単純な boolean に簡素化
-  const [isBookmarked, setIsBookmarked] = useState(false)
+  // ★ Phase A: liked_cards (UI 上「いいね」) は card_id 直接比較なので
+  // optimistic state は単純な boolean に簡素化
+  const [isLiked, setIsLiked] = useState(false)
   const [bestMatchScore, setBestMatchScore] = useState<WantMatchScore>('none')
   const [imageSide, setImageSide] = useState<'front' | 'back'>('front')
   // 譲 / 求 タブ: 初期表示は譲 (まず相手が何を出しているかを見せる)
@@ -205,14 +206,14 @@ export default function ListingDetailScreen() {
       setCard(fetched)
 
       if (uid != null) {
-        const [wants, blockedIds, bookmarkedIds] = await Promise.all([
+        const [wants, blockedIds, likedIds] = await Promise.all([
           fetchMyWantedCards(uid),
           fetchMyBlockedUserIds(),
-          fetchMyBookmarkedCardIds(uid),
+          fetchMyLikedCardIds(uid),
         ])
         setMyWants(wants)
         setIsBlocked(blockedIds.includes(fetched.owner_user_id))
-        setIsBookmarked(bookmarkedIds.has(fetched.id))
+        setIsLiked(likedIds.has(fetched.id))
 
         const best = wants.reduce<WantMatchScore>((acc, want) => {
           const s = scoreWantMatchV2(fetched, want)
@@ -399,25 +400,23 @@ export default function ListingDetailScreen() {
     )
   }
 
-  // ★ Phase A: bookmarks 化により card_id ベースの exact match に簡素化。
+  // ★ Phase A: liked_cards (UI 上「いいね」) は card_id ベースの exact match なので
   // pendingLikeState / matchesCard / fuzzy match はすべて不要に。
-  const isLiked = isBookmarked
-
   const handleToggleLike = async () => {
     if (currentUserId == null || card == null || likeToggling) return
     setLikeToggling(true)
-    const wasBookmarked = isBookmarked
+    const wasLiked = isLiked
     // Optimistic UI update
-    setIsBookmarked(!wasBookmarked)
+    setIsLiked(!wasLiked)
     try {
-      if (wasBookmarked) {
-        await removeBookmark(currentUserId, card.id)
+      if (wasLiked) {
+        await removeLike(currentUserId, card.id)
       } else {
-        await addBookmark(currentUserId, card.id)
+        await addLike(currentUserId, card.id)
       }
     } catch {
       // 失敗時は元の状態に revert
-      setIsBookmarked(wasBookmarked)
+      setIsLiked(wasLiked)
       Alert.alert('エラー', '更新に失敗しました')
     } finally {
       setLikeToggling(false)

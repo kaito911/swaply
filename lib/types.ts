@@ -270,23 +270,23 @@ export interface WantedCard {
 }
 
 // ─────────────────────────────────────────
-// bookmarks (他人の出品を保存するブックマーク、♡ ボタン専用)
+// liked_cards (UI 上は「いいね」、♡ ボタン専用)
 //
 // 求リスト (wanted_cards) とは別概念。両者を統合しない。
 //   - wanted_cards = 自分が交換で求める商品 (matcher / easyScore 入力)
-//   - bookmarks    = 他人の出品保存 (純 UI 用途、matcher には使わない)
-// 詳細: docs/migration_bookmarks.sql
+//   - liked_cards  = 他人の出品 (cards) を「いいね」して保存 (純 UI 用途、matcher 非使用)
+// 詳細: docs/migration_rename_bookmarks_to_liked_cards.sql
 // ─────────────────────────────────────────
 
-export interface Bookmark {
+export interface LikedCard {
   id: string
   user_id: string
   card_id: string
   created_at: string
 }
 
-/** /bookmarks 一覧表示用 (card + owner を join) */
-export interface BookmarkWithCard extends Bookmark {
+/** /likes 一覧表示用 (card + owner を join) */
+export interface LikedCardWithCard extends LikedCard {
   card: Card
 }
 

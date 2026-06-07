@@ -23,14 +23,14 @@ import { SearchBar } from '@/components/SearchBar'
 import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
 import { Card, WantedCard } from '@/lib/types'
 import {
-  addBookmark,
+  addLike,
   fetchEasyCards,
   fetchMyBlockedUserIds,
-  fetchMyBookmarkedCardIds,
+  fetchMyLikedCardIds,
   fetchMyWantedCards,
   fetchNewCards,
   fetchRecommendedCards,
-  removeBookmark,
+  removeLike,
   supabase,
 } from '@/lib/supabase'
 import { useAuthContext } from '@/providers/AuthProvider'
@@ -57,11 +57,10 @@ export default function HomeScreen() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [myWants, setMyWants] = useState<WantedCard[]>([])
 
-  // ★ Phase A: bookmarks への ♡ button 移行 (commit ed3840a 前提の 3.5a pendingAdds/Archives
-  // ハック解消)。bookmarks は card_id ベースなので fuzzy match 不要、Set<cardId> で完結。
-  const [myBookmarkedCardIds, setMyBookmarkedCardIds] = useState<Set<string>>(
-    new Set(),
-  )
+  // ★ Phase A: ♡ button (UI 上「いいね」) を liked_cards テーブルに保存。
+  // card_id ベースなので fuzzy match 不要、Set<cardId> で完結
+  // (3.5a の pendingAdds/Archives ハック解消)。
+  const [myLikedCardIds, setMyLikedCardIds] = useState<Set<string>>(new Set())
 
   useFocusEffect(
     useCallback(() => {
@@ -86,18 +85,18 @@ export default function HomeScreen() {
           }
         }
 
-        // wants + blocked user ids + bookmarked card ids を並列取得。
-        //   - wants: matcher / easyScore 入力 (fetchEasyCards に渡す)
+        // wants + blocked user ids + liked card ids を並列取得。
+        //   - wants: matcher / easyScore 入力 (fetchEasyCards に渡す、wanted_cards = 求リスト)
         //   - blocked: home 表示から除外する Phase 0 PR-C
-        //   - bookmarkedIds: ♡ button の初期状態 (card_id Set)
-        const [wants, blockedUserIds, bookmarkedIds] = await Promise.all([
+        //   - likedIds: ♡ button の初期状態 (liked_cards、UI 上「いいね」)
+        const [wants, blockedUserIds, likedIds] = await Promise.all([
           user != null ? fetchMyWantedCards(user.id) : Promise.resolve([]),
           user != null ? fetchMyBlockedUserIds() : Promise.resolve([]),
-          user != null ? fetchMyBookmarkedCardIds(user.id) : Promise.resolve(new Set<string>()),
+          user != null ? fetchMyLikedCardIds(user.id) : Promise.resolve(new Set<string>()),
         ])
         if (isActive) {
           setMyWants(wants)
-          setMyBookmarkedCardIds(bookmarkedIds)
+          setMyLikedCardIds(likedIds)
         }
 
         // TODO: 推薦RPC実装後に差し替え (Lane 2: 現行は自分以外のアクティブカードによる近似)
@@ -163,48 +162,48 @@ export default function HomeScreen() {
     router.push('/(tabs)/search')
   }
 
-  // ★ Phase A: bookmarks 化により card_id ベースの exact match に簡素化。
-  // pendingAdds / pendingArchives / matchesCard / isWantMatchV2 fuzzy はすべて不要に。
-  const isCardBookmarked = useCallback(
-    (card: Card): boolean => myBookmarkedCardIds.has(card.id),
-    [myBookmarkedCardIds],
+  // ★ Phase A: liked_cards (UI 上「いいね」) は card_id 直接比較なので
+  // pendingAdds / pendingArchives / matchesCard / isWantMatchV2 fuzzy はすべて不要。
+  const isCardLiked = useCallback(
+    (card: Card): boolean => myLikedCardIds.has(card.id),
+    [myLikedCardIds],
   )
 
   const handleToggleLike = useCallback(
     async (card: Card) => {
       if (user == null) return
-      const wasBookmarked = myBookmarkedCardIds.has(card.id)
+      const wasLiked = myLikedCardIds.has(card.id)
 
       // Optimistic UI update (card_id 直接比較なので fuzzy ハック不要)
-      setMyBookmarkedCardIds((prev) => {
+      setMyLikedCardIds((prev) => {
         const next = new Set(prev)
-        if (wasBookmarked) next.delete(card.id)
+        if (wasLiked) next.delete(card.id)
         else next.add(card.id)
         return next
       })
 
       try {
-        if (wasBookmarked) {
-          await removeBookmark(user.id, card.id)
+        if (wasLiked) {
+          await removeLike(user.id, card.id)
         } else {
-          await addBookmark(user.id, card.id)
+          await addLike(user.id, card.id)
         }
       } catch (e) {
         console.error('[home][handleToggleLike]', e)
         // 失敗時は元の状態に revert
-        setMyBookmarkedCardIds((prev) => {
+        setMyLikedCardIds((prev) => {
           const next = new Set(prev)
-          if (wasBookmarked) next.add(card.id)
+          if (wasLiked) next.add(card.id)
           else next.delete(card.id)
           return next
         })
       }
     },
-    [user, myBookmarkedCardIds],
+    [user, myLikedCardIds],
   )
 
   // Lane 1「いいねした交換」用の暫定データ計算
-  // bookmarks (card_id ベース) で filter する。Phase B 以降に fetchBookmarkedCards 専用
+  // liked_cards (card_id ベース) で filter する。Phase B 以降に fetchLikedCards 専用
   // fetch に置換予定 (現在は home の rec/easy/new 取得結果から抽出する近似)。
   const likedCards = useMemo<Card[]>(() => {
     const all = [...recommendedCards, ...easyCards, ...newCards]
@@ -212,19 +211,19 @@ export default function HomeScreen() {
     const result: Card[] = []
     for (const c of all) {
       if (seen.has(c.id)) continue
-      if (!isCardBookmarked(c)) continue
+      if (!isCardLiked(c)) continue
       seen.add(c.id)
       result.push(c)
     }
     return result
-  }, [recommendedCards, easyCards, newCards, isCardBookmarked])
+  }, [recommendedCards, easyCards, newCards, isCardLiked])
 
   const renderLargeCard = (card: Card) => (
     <HomeLargeCard
       key={card.id}
       card={card}
       isOwn={user != null && card.owner_user_id === user.id}
-      isLiked={isCardBookmarked(card)}
+      isLiked={isCardLiked(card)}
       onToggleLike={user != null ? () => handleToggleLike(card) : undefined}
     />
   )

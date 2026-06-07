@@ -18,7 +18,7 @@ import { useAuthContext } from '@/providers/AuthProvider'
 import { colors } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
 import { useFocusEffect } from 'expo-router'
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -41,6 +41,25 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}/${mm}/${dd}`
 }
 
+/**
+ * group / member / item_type / series を空でないものだけ結合して商品名を合成する。
+ * 例: { groupName: 'TREASURE', memberName: 'ハルト', itemTypeName: 'アクリルスタンド', series: '私服ver.' }
+ *  → 'TREASURE ハルト アクリルスタンド 私服ver.'
+ *
+ * trim() === '' のものを除外、空白 1 個でつなぐ。
+ */
+function buildAutoCardName(params: {
+  groupName: string
+  memberName: string
+  itemTypeName: string
+  series: string
+}): string {
+  return [params.groupName, params.memberName, params.itemTypeName, params.series]
+    .map((v) => v.trim())
+    .filter((v) => v !== '')
+    .join(' ')
+}
+
 export default function WantsScreen() {
   const { session } = useAuthContext()
   const userId = session?.user?.id ?? null
@@ -58,6 +77,12 @@ export default function WantsScreen() {
   const [submitting, setSubmitting] = useState(false)
   // WantSuggestInput の入力欄テキスト (4 form fields とは独立、suggestion 検索専用)
   const [suggestInput, setSuggestInput] = useState('')
+  // item_type は wanted_cards にカラムなし (B-0 スコープ外)、UI state のみで保持して
+  // 商品名 auto 合成に使う。submit 時は card_name に文字列として含まれる。
+  const [selectedItemTypeName, setSelectedItemTypeName] = useState('')
+  // ユーザーが商品名 TextInput を直接編集したら true に固定。以後 auto 合成は無効化。
+  // resetForm で false に戻る。
+  const [isCardNameManuallyEdited, setIsCardNameManuallyEdited] = useState(false)
 
   const load = useCallback(async () => {
     if (userId == null) {
@@ -108,23 +133,20 @@ export default function WantsScreen() {
     setFormMemberName('')
     setFormSeries('')
     setSuggestInput('')
+    setSelectedItemTypeName('')
+    setIsCardNameManuallyEdited(false)
   }
 
   // WantSuggestInput からの候補 tap を form field に振り分ける。
-  // ルール (B-0 採用方針 + 修正版):
-  //   - work          → formGroupName (work.category 関わらず group/作品 欄に統一)
-  //                     + formCardName が空なら work.display_name_ja で埋める (上書きしない)
-  //   - character     → formMemberName + 親 work が解決できれば formGroupName も
-  //                     + formCardName が空なら character.display_name_ja で埋める (上書きしない)
-  //   - item_type     → formCardName (商品名指定の意図が強いため上書き OK)
-  //   - series        → 該当 master なし、自由入力欄のまま (B-0 スコープ外)
-  // 「空判定」は trim() === '' で行う (空白だけの入力は空扱い)。
-  // ユーザーは選択後も 4 fields を手動編集できる (suggestion は補助、最終決定は親フォーム)。
+  // ルール (B-0 修正版):
+  //   - work       → formGroupName だけ更新
+  //   - character  → formMemberName + 親 work が解決できれば formGroupName も
+  //   - item_type  → selectedItemTypeName (UI state、wanted_cards カラムなし)
+  // 商品名の自動合成は下記の useEffect で 4 源 (group / member / item_type / series)
+  // を見て一括処理する (suggestion / 手入力に関わらず単一の合成ロジックで管理)。
   const handleSelectSuggestion = useCallback((s: SearchSuggestion) => {
     if (s.type === 'work') {
       setFormGroupName(s.data.display_name_ja)
-      // 商品名が空なら work 名で埋める (既に値がある場合は上書きしない)
-      setFormCardName((prev) => (prev.trim() === '' ? s.data.display_name_ja : prev))
       return
     }
     if (s.type === 'character') {
@@ -134,13 +156,37 @@ export default function WantsScreen() {
       if (work != null) {
         setFormGroupName(work.display_name_ja)
       }
-      // 商品名が空なら character 名で埋める (既に値がある場合は上書きしない)
-      setFormCardName((prev) => (prev.trim() === '' ? s.data.display_name_ja : prev))
       return
     }
-    // item_type は商品名指定の意図が強いため上書き OK
-    setFormCardName(s.data.display_name_ja)
+    // item_type は wanted_cards カラム不在、UI state のみで保持
+    setSelectedItemTypeName(s.data.display_name_ja)
   }, [])
+
+  // 商品名 auto 合成: group / member / item_type / series のいずれかが変わったら
+  // 自動で商品名を再生成する。ユーザーが商品名を直接編集した後 (isCardNameManuallyEdited=true)
+  // はこの自動更新を停止し、手入力を尊重する。
+  useEffect(() => {
+    if (isCardNameManuallyEdited) return
+    const auto = buildAutoCardName({
+      groupName: formGroupName,
+      memberName: formMemberName,
+      itemTypeName: selectedItemTypeName,
+      series: formSeries,
+    })
+    setFormCardName(auto)
+  }, [
+    formGroupName,
+    formMemberName,
+    selectedItemTypeName,
+    formSeries,
+    isCardNameManuallyEdited,
+  ])
+
+  // 商品名 TextInput の直接編集ハンドラ: 編集を検知したら manualEdited=true に固定。
+  const handleCardNameChange = (text: string) => {
+    setFormCardName(text)
+    setIsCardNameManuallyEdited(true)
+  }
 
   const handleOpenAdd = () => {
     resetForm()
@@ -304,12 +350,15 @@ export default function WantsScreen() {
                 <Text style={styles.fieldLabel}>商品名 *</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="例: 炭治郎 アクスタ"
+                  placeholder="例: TREASURE ハルト アクリルスタンド"
                   value={formCardName}
-                  onChangeText={setFormCardName}
+                  onChangeText={handleCardNameChange}
                   autoCorrect={false}
                   editable={!submitting}
                 />
+                <Text style={styles.fieldHint}>
+                  グループ / キャラ / グッズ種別 / シリーズから自動で組み立てます。直接編集も可能です。
+                </Text>
               </View>
 
               <View style={styles.fieldBlock}>
@@ -547,6 +596,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#52525B',
+  },
+  fieldHint: {
+    fontSize: 11,
+    color: '#8A8499',
+    lineHeight: 16,
+    marginTop: 2,
   },
   input: {
     borderWidth: 1,

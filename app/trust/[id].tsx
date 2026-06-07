@@ -19,6 +19,7 @@ import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SectionHeader } from '@/components/SectionHeader'
 import { TrustBadge } from '@/components/TrustBadge'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
 import { fetchProfile, fetchUserCards } from '@/lib/supabase'
 import {
@@ -209,7 +210,8 @@ export default function TrustProfileScreen() {
             />
           </View>
 
-          {/* 行2: トラブル件数・調整金平均・調整金偏り */}
+          {/* 行2: トラブル件数 (+ β1 後の差額エスクロー解放時に調整金平均/偏りを並べる)
+              β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金 2 StatBox を非表示 */}
           <View style={styles.statsRow}>
             <StatBox
               label="トラブル件数"
@@ -219,21 +221,25 @@ export default function TrustProfileScreen() {
                 profile.trouble_count > 0 ? colors.error : colors.trustGreen
               }
             />
-            <StatBox
-              label="調整金 平均"
-              value={
-                profile.adjustment_avg != null
-                  ? `¥${profile.adjustment_avg}`
-                  : '—'
-              }
-              sub="過去取引より"
-            />
-            {/* 暫定: adjustment_biasはβ後半で算出予定 */}
-            <StatBox
-              label="調整金 偏り"
-              value={profile.adjustment_bias ?? '—'}
-              sub="暫定: 未算出"
-            />
+            {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+              <>
+                <StatBox
+                  label="調整金 平均"
+                  value={
+                    profile.adjustment_avg != null
+                      ? `¥${profile.adjustment_avg}`
+                      : '—'
+                  }
+                  sub="過去取引より"
+                />
+                {/* 暫定: adjustment_biasはβ後半で算出予定 */}
+                <StatBox
+                  label="調整金 偏り"
+                  value={profile.adjustment_bias ?? '—'}
+                  sub="暫定: 未算出"
+                />
+              </>
+            )}
           </View>
         </View>
 

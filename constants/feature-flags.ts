@@ -19,6 +19,12 @@ export const FEATURE_FLAGS = {
   // 解放後の有料機能を一時的に全員に開放するための切替
   PREMIUM_TRIAL_ENABLED: false,
 
+  // 調整金 / 差額 / 追加支払い 系 UI 表示制御 (Phase 2 で差額エスクロー実装時に true へ)
+  // false の間はユーザー向けの「調整金」「差額」「¥XXX 追加」表示が一切出ない
+  // ただし DB カラム (cards.allows_adjustment/adjustment_max, offers.adjustment_amount,
+  // profiles.adjustment_avg/bias) / 型 / RPC 引数 / createOffer API は復活余地として残置
+  ADJUSTMENT_MONEY_ENABLED: false,
+
   // 開発環境でのみ有効化される機能
   // 例: mypage の開発機能セクション（offer-insights、onboarding リセット 等）
   // __DEV__ は Expo / Metro が自動で true (dev) / false (release build) を割り当てる

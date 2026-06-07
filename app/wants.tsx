@@ -111,15 +111,20 @@ export default function WantsScreen() {
   }
 
   // WantSuggestInput からの候補 tap を form field に振り分ける。
-  // ルール (B-0 採用方針):
+  // ルール (B-0 採用方針 + 修正版):
   //   - work          → formGroupName (work.category 関わらず group/作品 欄に統一)
+  //                     + formCardName が空なら work.display_name_ja で埋める (上書きしない)
   //   - character     → formMemberName + 親 work が解決できれば formGroupName も
-  //   - item_type     → formCardName
+  //                     + formCardName が空なら character.display_name_ja で埋める (上書きしない)
+  //   - item_type     → formCardName (商品名指定の意図が強いため上書き OK)
   //   - series        → 該当 master なし、自由入力欄のまま (B-0 スコープ外)
-  // ユーザーは選択後も 4 fields を手動編集できる (suggestion は補助、最終決定は親フォーム)
+  // 「空判定」は trim() === '' で行う (空白だけの入力は空扱い)。
+  // ユーザーは選択後も 4 fields を手動編集できる (suggestion は補助、最終決定は親フォーム)。
   const handleSelectSuggestion = useCallback((s: SearchSuggestion) => {
     if (s.type === 'work') {
       setFormGroupName(s.data.display_name_ja)
+      // 商品名が空なら work 名で埋める (既に値がある場合は上書きしない)
+      setFormCardName((prev) => (prev.trim() === '' ? s.data.display_name_ja : prev))
       return
     }
     if (s.type === 'character') {
@@ -129,9 +134,11 @@ export default function WantsScreen() {
       if (work != null) {
         setFormGroupName(work.display_name_ja)
       }
+      // 商品名が空なら character 名で埋める (既に値がある場合は上書きしない)
+      setFormCardName((prev) => (prev.trim() === '' ? s.data.display_name_ja : prev))
       return
     }
-    // item_type
+    // item_type は商品名指定の意図が強いため上書き OK
     setFormCardName(s.data.display_name_ja)
   }, [])
 
@@ -265,73 +272,84 @@ export default function WantsScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>求商品を追加</Text>
-            <Text style={styles.modalSub}>
-              交換で求めている商品を登録します。商品名は必須、その他は任意です。
-            </Text>
-
-            {/* 候補検索 (任意): tap で下のフォームに自動入力 */}
-            <View style={styles.suggestBlock}>
-              <Text style={styles.fieldLabel}>候補から検索（任意）</Text>
-              <WantSuggestInput
-                value={suggestInput}
-                onChangeValue={setSuggestInput}
-                onSelectSuggestion={handleSelectSuggestion}
-                placeholder="例: ハルト, 鬼滅, アクスタ"
-              />
-              <Text style={styles.suggestHint}>
-                候補を選ぶと下のフォームに入ります。直接入力も可能です。
+            {/* スクロール領域 (タイトル + 候補検索 + 4 form fields)
+                keyboardShouldPersistTaps="handled" でキーボード表示中もサジェスト
+                tap を取りこぼさない。modalActions は sticky 下部で常時表示。 */}
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.modalTitle}>求商品を追加</Text>
+              <Text style={styles.modalSub}>
+                交換で求めている商品を登録します。商品名は必須、その他は任意です。
               </Text>
-            </View>
 
-            <View style={styles.fieldBlock}>
-              <Text style={styles.fieldLabel}>商品名 *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="例: 炭治郎 アクスタ"
-                value={formCardName}
-                onChangeText={setFormCardName}
-                autoCorrect={false}
-                editable={!submitting}
-              />
-            </View>
+              {/* 候補検索 (任意): tap で下のフォームに自動入力 */}
+              <View style={styles.suggestBlock}>
+                <Text style={styles.fieldLabel}>候補から検索（任意）</Text>
+                <WantSuggestInput
+                  value={suggestInput}
+                  onChangeValue={setSuggestInput}
+                  onSelectSuggestion={handleSelectSuggestion}
+                  placeholder="例: ハルト, 鬼滅, アクスタ"
+                />
+                <Text style={styles.suggestHint}>
+                  候補を選ぶと下のフォームに入ります。直接入力も可能です。
+                </Text>
+              </View>
 
-            <View style={styles.fieldBlock}>
-              <Text style={styles.fieldLabel}>グループ / 作品</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="例: 鬼滅の刃 / TREASURE"
-                value={formGroupName}
-                onChangeText={setFormGroupName}
-                autoCorrect={false}
-                editable={!submitting}
-              />
-            </View>
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>商品名 *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="例: 炭治郎 アクスタ"
+                  value={formCardName}
+                  onChangeText={setFormCardName}
+                  autoCorrect={false}
+                  editable={!submitting}
+                />
+              </View>
 
-            <View style={styles.fieldBlock}>
-              <Text style={styles.fieldLabel}>キャラ / メンバー</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="例: 竈門炭治郎 / ハルト"
-                value={formMemberName}
-                onChangeText={setFormMemberName}
-                autoCorrect={false}
-                editable={!submitting}
-              />
-            </View>
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>グループ / 作品</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="例: 鬼滅の刃 / TREASURE"
+                  value={formGroupName}
+                  onChangeText={setFormGroupName}
+                  autoCorrect={false}
+                  editable={!submitting}
+                />
+              </View>
 
-            <View style={styles.fieldBlock}>
-              <Text style={styles.fieldLabel}>シリーズ</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="例: 第1弾 / A ver."
-                value={formSeries}
-                onChangeText={setFormSeries}
-                autoCorrect={false}
-                editable={!submitting}
-              />
-            </View>
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>キャラ / メンバー</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="例: 竈門炭治郎 / ハルト"
+                  value={formMemberName}
+                  onChangeText={setFormMemberName}
+                  autoCorrect={false}
+                  editable={!submitting}
+                />
+              </View>
 
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>シリーズ</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="例: 第1弾 / A ver."
+                  value={formSeries}
+                  onChangeText={setFormSeries}
+                  autoCorrect={false}
+                  editable={!submitting}
+                />
+              </View>
+            </ScrollView>
+
+            {/* sticky 下部: キャンセル / 追加するボタン */}
             <View style={styles.modalActions}>
               <Pressable
                 style={[styles.modalCancelButton, submitting && styles.modalButtonDisabled]}
@@ -486,9 +504,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 32,
+    paddingBottom: 24,
+    // モーダル高さ上限 (キーボード表示時に画面外へ逃げない保険)。
+    // ScrollView がこの高さ内で縦スクロールする。
+    maxHeight: '90%',
+  },
+  modalScroll: {
+    flexShrink: 1,
+  },
+  modalScrollContent: {
+    paddingHorizontal: 20,
     gap: 12,
   },
   modalTitle: {
@@ -535,7 +561,11 @@ const styles = StyleSheet.create({
   modalActions: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#ECE8FA',
   },
   modalCancelButton: {
     flex: 1,

@@ -204,15 +204,6 @@ export default function VenueListScreen() {
           })
         )}
 
-        {/* Bootstrap説明 */}
-        <View style={styles.bootstrapCard}>
-          <Text style={styles.bootstrapTitle}>Bootstrap Venue Mode（初回会場）</Text>
-          <Text style={styles.bootstrapBody}>
-            初回会場はTrustゼロで参加できる特別モード。{'\n'}
-            即手渡しのみが条件。{'\n'}
-            成立するとTrustが自動生成されます。
-          </Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   )
@@ -362,23 +353,5 @@ const styles = StyleSheet.create({
   upcomingNoteText: {
     fontSize: fontSize.xs,
     color: colors.textTertiary,
-  },
-  bootstrapCard: {
-    backgroundColor: '#FFFBEB',
-    borderRadius: radius.xl,
-    padding: spacing.md,
-    borderWidth: 1.5,
-    borderColor: '#FDE68A',
-  },
-  bootstrapTitle: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: '#92400E',
-    marginBottom: spacing.xs,
-  },
-  bootstrapBody: {
-    fontSize: fontSize.xs,
-    color: '#78350F',
-    lineHeight: 18,
   },
 })

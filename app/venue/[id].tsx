@@ -417,12 +417,6 @@ export default function VenueHomeScreen() {
                   </Text>
                 </View>
 
-                <View style={styles.bootstrapNote}>
-                  <Text style={styles.bootstrapNoteText}>
-                    Bootstrap Mode: 即手渡し限定
-                  </Text>
-                </View>
-
                 <View style={styles.fieldBlock}>
                   <Text style={styles.fieldLabel}>あなたが出すグッズ *</Text>
                   <TextInput
@@ -642,14 +636,6 @@ const styles = StyleSheet.create({
     borderColor: '#C7D2FE',
   },
   holdInfoText: { fontSize: fontSize.xs, color: '#3730A3', lineHeight: 18 },
-  bootstrapNote: {
-    backgroundColor: '#FFFBEB',
-    borderRadius: radius.md,
-    padding: spacing.sm,
-    borderWidth: 1,
-    borderColor: '#FDE68A',
-  },
-  bootstrapNoteText: { fontSize: fontSize.xs, color: '#92400E' },
   agreeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   checkbox: {
     width: 20,

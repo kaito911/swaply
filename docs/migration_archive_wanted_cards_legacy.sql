@@ -1,0 +1,98 @@
+-- wanted_cards 既存 active 行の archive 凍結 runbook
+-- Supabase SQL Editor で手動実行してください (実行タイミングは下記参照)
+--
+-- ─────────────────────────────────────────
+-- 背景
+-- ─────────────────────────────────────────
+-- Phase A 以前、♡ ボタン (home.tsx / listing/[id].tsx) は wanted_cards に保存していた。
+-- UI 上は「いいね」と表記されていたが、DB 列構造は (card_name + group_name + member_name +
+-- series) のテキスト 4 列であり、card_id 列を持たない 中途半端な「いいね」semantic。
+--
+-- Phase A 切替後:
+--   - 「いいね」専用 = liked_cards (新設、card_id FK で listing と直接紐付け)
+--   - 求リスト       = wanted_cards (matcher / easyScore 入力、自分が交換で求める商品)
+--
+-- ─────────────────────────────────────────
+-- 既存 wanted_cards データの扱い
+-- ─────────────────────────────────────────
+-- 2026-06-07 時点のスナップショット:
+--   active: 18 (旧「いいね」UI 経由の蓄積、bookmark semantic 想定)
+--   archived: 1
+--
+-- これらの active 行は旧「いいね」semantic で投入されたものであり、Phase A 以降の
+-- wanted_cards (= 求リスト) として混入するのは設計上の整合を破る。よって本 runbook で
+-- 既存 active 行を status='archived' に凍結し、求リスト UI 起動後はクリーンな状態から
+-- 再構築する。
+--
+-- 不可逆な DELETE は採用しない (誤判定時の復元余地を残す、status は復元可能)。
+--
+-- ─────────────────────────────────────────
+-- 実行タイミング (重要)
+-- ─────────────────────────────────────────
+-- 本 SQL は以下の順序を厳守して実行する:
+--
+--   [前提] 以下の commit が deploy 済であること:
+--     - 2da94ba feat(bookmarks): migrate home and listing like buttons to bookmarks
+--     - e9c4f55 feat(bookmarks): add /bookmarks screen and HeaderActions routing
+--     - 42f8672 refactor(likes): rename bookmarks to liked_cards
+--     - 上記により ♡ ボタンは liked_cards に書込、wanted_cards には新規流入なし。
+--
+--   [実行ウィンドウ] 上記 commit deploy 後、wants.tsx rebrand commit (次フェーズ)
+--     deploy 前に実行する。
+--     → このタイミングで実行すれば「鏡像反転」リスクなし:
+--        - 実行前:  /wants は「いいね」UI で wanted_cards.active 18 件を表示
+--        - 実行後:  /wants は「いいね」UI のままだが 0 件表示 (一時的)
+--        - rebrand 後: /wants は「求リスト」UI で 0 件表示 (Phase A 完了)
+--
+--   実行後の影響:
+--     - matcher / easyScore の wants input が一時空に → ホーム recommendation 精度低下
+--     - 影響は β1 前運用で軽微 (ユーザーは新規に求リストを再構築する想定)
+--     - 既存 archived 1 件 (もともと archive 済) はそのまま無影響
+--
+-- ─────────────────────────────────────────
+-- 実行前確認 SQL
+-- ─────────────────────────────────────────
+-- 期待: active 18 / archived 1 (= 2026-06-07 snapshot)
+-- 実行時の数字が異なる場合は要確認 (追加流入があったか、別オペレーションの可能性)
+--
+-- SELECT status, COUNT(*) AS row_count
+-- FROM public.wanted_cards
+-- GROUP BY status
+-- ORDER BY status;
+
+-- ─────────────────────────────────────────
+-- 凍結実行
+-- ─────────────────────────────────────────
+UPDATE public.wanted_cards
+SET status     = 'archived',
+    updated_at = now()
+WHERE status = 'active';
+
+-- ─────────────────────────────────────────
+-- 実行後確認 SQL
+-- ─────────────────────────────────────────
+-- 期待: active 0 / archived 19 (= 18 + 既存 1)
+--
+-- SELECT status, COUNT(*) AS row_count
+-- FROM public.wanted_cards
+-- GROUP BY status
+-- ORDER BY status;
+
+-- ─────────────────────────────────────────
+-- ロールバック (緊急時のみ)
+-- ─────────────────────────────────────────
+-- 本 UPDATE は archived 凍結のみで不可逆ではない。
+-- 「全部 active に戻す」なら以下 (ただし旧 archived 1 件も active 化される点に注意):
+--
+-- UPDATE public.wanted_cards
+-- SET status     = 'active',
+--     updated_at = now()
+-- WHERE status = 'archived';
+--
+-- ピンポイント復元 (本 runbook で archive したものだけ戻す) は updated_at で識別:
+--
+-- UPDATE public.wanted_cards
+-- SET status     = 'active',
+--     updated_at = now()
+-- WHERE status = 'archived'
+--   AND updated_at > '<本 SQL 実行時の timestamp>';

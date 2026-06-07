@@ -132,24 +132,45 @@ interface FilterableMaster {
 }
 
 /**
- * display_name_ja / display_name_en / aliases に対する match score を計算する。
- * 完全一致 = 100、startsWith = 80/70、includes = 60、aliases 完全 = 50、
- * aliases startsWith = 30、aliases includes = 20、未マッチ = 0。
+ * カタカナ → ひらがな 正規化。
+ * U+30A1〜U+30F6 (ァ〜ヶ) を -0x60 シフトしてひらがな範囲 (ぁ〜ゖ) に変換する。
+ * 中点・長音記号 (ー)・漢字・ローマ字には影響なし。
+ * カタカナ↔ひらがな の表記揺れ吸収のみが目的 (漢字↔かな は対象外)。
  */
-function calcMatchScore<T extends FilterableMaster>(item: T, lowerInput: string): number {
-  const ja = item.display_name_ja.toLowerCase()
-  const en = (item.display_name_en ?? '').toLowerCase()
+function toHiragana(s: string): string {
+  return s.replace(/[ァ-ヶ]/g, (m) =>
+    String.fromCharCode(m.charCodeAt(0) - 0x60),
+  )
+}
 
-  if (ja === lowerInput || en === lowerInput) return 100
-  if (ja.startsWith(lowerInput)) return 80
-  if (en !== '' && en.startsWith(lowerInput)) return 70
-  if (ja.includes(lowerInput) || (en !== '' && en.includes(lowerInput))) return 60
+/**
+ * 入力 (normalizedInput) と item の各フィールドを比較してマッチスコアを返す。
+ *
+ * 前提:
+ *   - 呼出側 (filterByFuzzyWithScore) で toLowerCase + toHiragana 正規化済の input を渡す
+ *   - 本関数内で item.display_name_ja / display_name_en / aliases も同じく正規化する
+ *
+ * スコア:
+ *   完全一致 = 100、startsWith = 80/70、includes = 60、aliases 完全 = 50、
+ *   aliases startsWith = 30、aliases includes = 20、未マッチ = 0。
+ *
+ * カタカナ↔ひらがな の表記揺れは正規化で吸収される (例: 「みんぎゅ」「ミンギュ」相互一致)。
+ * 漢字↔かな の変換は辞書が必要なため対象外 (例: 「えどがわこなん」では '江戸川コナン' に hit しない)。
+ */
+function calcMatchScore<T extends FilterableMaster>(item: T, normalizedInput: string): number {
+  const ja = toHiragana(item.display_name_ja.toLowerCase())
+  const en = toHiragana((item.display_name_en ?? '').toLowerCase())
+
+  if (ja === normalizedInput || en === normalizedInput) return 100
+  if (ja.startsWith(normalizedInput)) return 80
+  if (en !== '' && en.startsWith(normalizedInput)) return 70
+  if (ja.includes(normalizedInput) || (en !== '' && en.includes(normalizedInput))) return 60
 
   for (const a of item.aliases) {
-    const al = a.toLowerCase()
-    if (al === lowerInput) return 50
-    if (al.startsWith(lowerInput)) return 30
-    if (al.includes(lowerInput)) return 20
+    const al = toHiragana(a.toLowerCase())
+    if (al === normalizedInput) return 50
+    if (al.startsWith(normalizedInput)) return 30
+    if (al.includes(normalizedInput)) return 20
   }
 
   return 0
@@ -178,9 +199,9 @@ function filterByFuzzyWithScore<T extends FilterableMaster>(
       .map((item) => ({ item, score: 0 }))
   }
 
-  const lower = trimmed.toLowerCase()
+  const normalized = toHiragana(trimmed.toLowerCase())
   return items
-    .map((item) => ({ item, score: calcMatchScore(item, lower) }))
+    .map((item) => ({ item, score: calcMatchScore(item, normalized) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score

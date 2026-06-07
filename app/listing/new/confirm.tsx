@@ -15,6 +15,7 @@
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -385,19 +386,24 @@ export default function ListingNewConfirmScreen() {
               label="求の詳細"
               value={enriched.want_description || '—'}
             />
-            <Row
-              label="調整金"
-              value={enriched.allows_adjustment ? 'あり' : 'なし'}
-            />
-            {enriched.allows_adjustment && (
-              <Row
-                label="調整金目安"
-                value={
-                  enriched.adjustment_max > 0
-                    ? `¥${enriched.adjustment_max.toLocaleString()} まで`
-                    : '¥0'
-                }
-              />
+            {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金確認行を非表示 */}
+            {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+              <>
+                <Row
+                  label="調整金"
+                  value={enriched.allows_adjustment ? 'あり' : 'なし'}
+                />
+                {enriched.allows_adjustment && (
+                  <Row
+                    label="調整金目安"
+                    value={
+                      enriched.adjustment_max > 0
+                        ? `¥${enriched.adjustment_max.toLocaleString()} まで`
+                        : '¥0'
+                    }
+                  />
+                )}
+              </>
             )}
           </View>
         </View>

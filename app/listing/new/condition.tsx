@@ -84,6 +84,10 @@ export default function ListingNewConditionScreen() {
     wantWorksJson?: string
     wantCharactersJson?: string
     wantItemTypesJson?: string
+    // Phase B-2 (commit 4): want.tsx で選択された wanted_card.id 配列 (JSON 文字列)。
+    // 本画面は parse / 利用せず confirm.tsx へそのまま forward する (URL param は自動 forward
+    // されないため明示指定が必要)。
+    selectedWantedCardIdsJson?: string
   }>()
 
   // 受信データを lazy parse (param は同期取得、setter 不要)
@@ -172,6 +176,9 @@ export default function ListingNewConditionScreen() {
         imageUri: params.imageUri ?? '',
         imageBackUri: params.imageBackUri ?? '',
         enrichedListingJson: JSON.stringify(enriched),
+        // Phase B-2: want.tsx → confirm.tsx へ forward (本画面は中継のみ)。
+        // undefined のときは空配列 JSON を渡して confirm 側の parse を壊さない。
+        selectedWantedCardIdsJson: params.selectedWantedCardIdsJson ?? '[]',
       },
     })
   }

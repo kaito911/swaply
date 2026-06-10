@@ -159,12 +159,15 @@ export default function MyPageScreen() {
     <View style={styles.tabContent}>
       <Text style={styles.sectionTitle}>行動データ（確定事実のみ）</Text>
       <View style={styles.dataCard}>
+        {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は「調整金平均」行を除外 */}
         {([
           { label: '成立回数', value: `${tc}回`, color: colors.primary },
           { label: '発送遵守率', value: `${sr}%`, color: colors.success },
           { label: '返信速度', value: rh < 999 ? `${rh}h` : '—', color: '#0891B2' },
           { label: 'トラブル', value: `${trouble}件`, color: trouble === 0 ? colors.success : colors.error },
-          { label: '調整金平均', value: profile?.adjustment_avg != null ? `¥${profile.adjustment_avg}` : '—', color: '#D97706' },
+          ...(FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED
+            ? [{ label: '調整金平均', value: profile?.adjustment_avg != null ? `¥${profile.adjustment_avg}` : '—', color: '#D97706' }]
+            : []),
         ] as const).map((item, i, arr) => (
           <View key={item.label} style={[styles.dataRow, i < arr.length - 1 && styles.dataRowBorder]}>
             <Text style={styles.dataLabel}>{item.label}</Text>
@@ -469,12 +472,16 @@ export default function MyPageScreen() {
           </View>
         )}
 
-        {/* 設定リンク群 (アカウント関連) */}
+        {/* 設定リンク群 (アカウント関連)
+            Phase A (2026-06): いいね (liked_cards) と求リスト (wanted_cards) は別概念のため
+            mypage に明示的に並列リンクを置く。HeaderActions ♡ アイコンは /likes へ遷移するが、
+            mypage では「求リスト」も同列に並べて責務分離を可視化する。 */}
         <View style={styles.settingsSection}>
           {([
             { label: 'プロフィール編集', path: '/profile-edit' },
             { label: '推し編集', path: '/oshi-edit' },
-            // 「いいね」リンクは右上 Heart アイコン (HeaderActions) で動線確保済のため削除 (3.5a fix、動線 ⑦)
+            { label: 'いいね', path: '/likes' },
+            { label: '求リスト', path: '/wants' },
             { label: '配送情報', path: '/shipping' },
           ] as const).map((item, i, arr) => (
             <Pressable

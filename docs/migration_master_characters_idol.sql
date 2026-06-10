@@ -131,7 +131,7 @@ insert into public.master_characters (id, work_id, display_name_ja, display_name
   ('enhypen_heeseung', 'enhypen', 'ヒスン', 'Heeseung',
     array['heeseung', 'ヒースン', '李希昇', 'イ・ヒスン', 'lee heeseung'], 10),
   ('enhypen_jay', 'enhypen', 'ジェイ', 'Jay',
-    array['jay', 'ジェイク', 'パク・ジョンソン', 'park jongseong'], 20),
+    array['jay', 'パク・ジョンソン', 'park jongseong'], 20),
   ('enhypen_jake', 'enhypen', 'ジェイク', 'Jake',
     array['jake', '沈在允', 'シム・ジェユン', 'sim jaeyun'], 30),
   ('enhypen_sunghoon', 'enhypen', 'ソンフン', 'Sunghoon',

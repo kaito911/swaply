@@ -25,7 +25,7 @@ import {
   type DirectMatchResult,
   type WantedCardWithOwner,
 } from '@/lib/supabase'
-import { Card, computeTrustBadge, MasterCharacter, MasterItemType, type SearchMode } from '@/lib/types'
+import { Card, computeTrustBadge, MasterCharacter, MasterItemType, MasterWork, type SearchMode } from '@/lib/types'
 import { TrustBadge } from '@/components/TrustBadge'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
@@ -44,17 +44,18 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-type SearchTab = 'member' | 'text'
-
 // 求 ⇄ 譲 並列検索 (Pioneer #001 提案による実装、2026/5、β1 必須)
 // 「譲 + 求 並列検索」で交換相手を一発で発見する Swaply の核心機能
+//
+// 2026-06 撤去: offer モード内の「キャラ・アイテムを探す / グループ・メンバーで探す」
+// 2 タブ UI を廃止し、TextSearchPane (統合サジェスト) のみを表示する。
+// MemberSearchPane の関数定義は保持 (constants/members.ts と searchCardsByMember
+// への将来再利用余地のため)。
 export default function SearchScreen() {
   const { user } = useAuthContext()
 
   // 外側: 検索モード ('offer' | 'want' | 'direct')
   const [mode, setMode] = useState<SearchMode>('offer')
-  // 内側 (offer モードのみ): 既存 Phase 0.5b の 2 タブ
-  const [tab, setTab] = useState<SearchTab>('text')
 
   // Phase 0 PR-C: ブロック相手の出品を検索結果から除外
   // 画面マウント時に 1 回取得、各 Pane に props で渡す
@@ -105,41 +106,12 @@ export default function SearchScreen() {
         </Pressable>
       </View>
 
-      {/* 譲 (offer) モード: 既存 Phase 0.5b の 2 タブ構造を内包 */}
+      {/* 譲 (offer) モード: 統合サジェスト UI (works/characters/item_types を 1 入力欄で横断) */}
       {mode === 'offer' && (
-        <>
-          <View style={styles.tabBar}>
-            <Pressable
-              onPress={() => setTab('text')}
-              style={[styles.tab, tab === 'text' && styles.tabActive]}
-            >
-              <Text style={[styles.tabLabel, tab === 'text' && styles.tabLabelActive]}>
-                キャラ・アイテムを探す
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setTab('member')}
-              style={[styles.tab, tab === 'member' && styles.tabActive]}
-            >
-              <Text style={[styles.tabLabel, tab === 'member' && styles.tabLabelActive]}>
-                グループ・メンバーで探す
-              </Text>
-            </Pressable>
-          </View>
-          {/* 両方マウントで state 保持 */}
-          <View style={[styles.tabPane, tab !== 'member' && styles.tabPaneHidden]}>
-            <MemberSearchPane
-              currentUserId={user?.id ?? null}
-              blockedUserIds={blockedUserIds}
-            />
-          </View>
-          <View style={[styles.tabPane, tab !== 'text' && styles.tabPaneHidden]}>
-            <TextSearchPane
-              currentUserId={user?.id ?? null}
-              blockedUserIds={blockedUserIds}
-            />
-          </View>
-        </>
+        <TextSearchPane
+          currentUserId={user?.id ?? null}
+          blockedUserIds={blockedUserIds}
+        />
       )}
 
       {/* 求 (want) モード: wanted_cards を検索 */}
@@ -163,8 +135,14 @@ export default function SearchScreen() {
 
 // ─────────────────────────────────────────
 // メンバー検索ペイン (3 段検索)
+//
+// 2026-06: 統合サジェスト導入により UI 導線からは外したが、定義は保持。
+// constants/members.ts (TREASURE 10 名ハードコード) と
+// lib/supabase.ts:searchCardsByMember / getMemberSuggestions / getGroupsForMember /
+// getSeriesOptions も同時に温存。将来の K-POP 専用 UI 復活時に呼び出せるようにする。
 // ─────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function MemberSearchPane({
   currentUserId,
   blockedUserIds,
@@ -451,16 +429,28 @@ function sortByScore(
   cards: Card[],
   selectedCharIds: string[],
   selectedItemTypeIds: string[],
+  selectedWorkIds: string[],
 ): Card[] {
-  if (selectedCharIds.length === 0 && selectedItemTypeIds.length === 0) return cards
+  if (
+    selectedCharIds.length === 0 &&
+    selectedItemTypeIds.length === 0 &&
+    selectedWorkIds.length === 0
+  ) {
+    return cards
+  }
 
   const scoreOrder: Record<SearchMatchScore, number> = {
     strong: 3, medium: 2, weak: 1, none: 0,
   }
+  const workIdSet = new Set(selectedWorkIds)
   return [...cards].sort((a, b) => {
     const sa = scoreOrder[scoreSearchMatch(a, selectedCharIds, selectedItemTypeIds)]
     const sb = scoreOrder[scoreSearchMatch(b, selectedCharIds, selectedItemTypeIds)]
-    return sb - sa
+    if (sa !== sb) return sb - sa
+    // 同 score: work_id 一致を僅かに優先 (legacy ilike fallback hit より master 解決済を上位に)
+    const wa = a.work_id != null && workIdSet.has(a.work_id) ? 1 : 0
+    const wb = b.work_id != null && workIdSet.has(b.work_id) ? 1 : 0
+    return wb - wa
   })
 }
 
@@ -490,6 +480,7 @@ function TextSearchPane({
   blockedUserIds: string[]
 }) {
   const [input, setInput] = useState('')
+  const [selectedWorks, setSelectedWorks] = useState<MasterWork[]>([])
   const [selectedChars, setSelectedChars] = useState<MasterCharacter[]>([])
   const [selectedItems, setSelectedItems] = useState<MasterItemType[]>([])
   const [results, setResults] = useState<Card[]>([])
@@ -515,11 +506,16 @@ function TextSearchPane({
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const hasChips = selectedChars.length > 0 || selectedItems.length > 0
+  const hasChips =
+    selectedWorks.length > 0 || selectedChars.length > 0 || selectedItems.length > 0
   const trimmedInput = input.trim()
 
   // チップ変化 effect (即時、debounce なし)
-  // selectedChars / selectedItems が変わったら searchCards を呼んで sort
+  // selectedWorks / selectedChars / selectedItems が変わったら searchCards を呼んで sort
+  const selectedWorkIds = useMemo(
+    () => selectedWorks.map((w) => w.id),
+    [selectedWorks],
+  )
   const selectedCharIds = useMemo(
     () => selectedChars.map((c) => c.id),
     [selectedChars],
@@ -538,12 +534,13 @@ function TextSearchPane({
     const run = async () => {
       setLoading(true)
       const cards = await searchCards({
+        workIds: selectedWorkIds,
         characterIds: selectedCharIds,
         itemTypeIds: selectedItemTypeIds,
         excludeOwnerIds: blockedUserIds,
       })
       if (cancelled) return
-      setResults(sortByScore(cards, selectedCharIds, selectedItemTypeIds))
+      setResults(sortByScore(cards, selectedCharIds, selectedItemTypeIds, selectedWorkIds))
       setSearched(true)
       setLoading(false)
     }
@@ -551,7 +548,7 @@ function TextSearchPane({
     return () => {
       cancelled = true
     }
-  }, [hasChips, selectedCharIds, selectedItemTypeIds, blockedUserIds])
+  }, [hasChips, selectedWorkIds, selectedCharIds, selectedItemTypeIds, blockedUserIds])
 
   // 入力テキスト変化 effect (debounce 400ms、チップ 0 時のみ走る)
   useEffect(() => {
@@ -589,6 +586,8 @@ function TextSearchPane({
   return (
     <View style={styles.pane}>
       <SearchAutocomplete
+        selectedWorks={selectedWorks}
+        onChangeWorks={setSelectedWorks}
         selectedCharacters={selectedChars}
         onChangeCharacters={setSelectedChars}
         selectedItemTypes={selectedItems}
@@ -596,7 +595,7 @@ function TextSearchPane({
         inputText={input}
         onChangeInputText={setInput}
         onSubmitFreeText={handleSubmitFreeText}
-        placeholder="キャラ・アイテム名で検索 (例: 炭治郎)"
+        placeholder="グループ・作品・キャラ・アイテム名で検索"
       />
 
       <ResultArea

@@ -12,6 +12,7 @@
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { getCharacterById, getItemTypeById, getWorkById } from '@/lib/master'
 import type { MasterCategory } from '@/lib/types'
@@ -83,6 +84,10 @@ export default function ListingNewConditionScreen() {
     wantWorksJson?: string
     wantCharactersJson?: string
     wantItemTypesJson?: string
+    // Phase B-2 (commit 4): want.tsx で選択された wanted_card.id 配列 (JSON 文字列)。
+    // 本画面は parse / 利用せず confirm.tsx へそのまま forward する (URL param は自動 forward
+    // されないため明示指定が必要)。
+    selectedWantedCardIdsJson?: string
   }>()
 
   // 受信データを lazy parse (param は同期取得、setter 不要)
@@ -171,6 +176,9 @@ export default function ListingNewConditionScreen() {
         imageUri: params.imageUri ?? '',
         imageBackUri: params.imageBackUri ?? '',
         enrichedListingJson: JSON.stringify(enriched),
+        // Phase B-2: want.tsx → confirm.tsx へ forward (本画面は中継のみ)。
+        // undefined のときは空配列 JSON を渡して confirm 側の parse を壊さない。
+        selectedWantedCardIdsJson: params.selectedWantedCardIdsJson ?? '[]',
       },
     })
   }
@@ -224,30 +232,36 @@ export default function ListingNewConditionScreen() {
             textAlignVertical="top"
           />
 
-          {/* ── 調整金(任意・折りたたみ)── */}
-          <Pressable
-            style={styles.diffToggleBtn}
-            onPress={() => setShowDiff((v) => !v)}
-          >
-            <Text style={styles.diffToggleBtnText}>
-              {showDiff ? '▼ 調整金を非表示' : '＋ 調整金を許可する(任意)'}
-            </Text>
-          </Pressable>
+          {/* ── 調整金(任意・折りたたみ) ──
+              β1: ADJUSTMENT_MONEY_ENABLED=false 中は非表示。
+              showDiff state は false 固定 → handleNext で allows_adjustment=false, adjustment_max=0 が送られる。 */}
+          {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+            <>
+              <Pressable
+                style={styles.diffToggleBtn}
+                onPress={() => setShowDiff((v) => !v)}
+              >
+                <Text style={styles.diffToggleBtnText}>
+                  {showDiff ? '▼ 調整金を非表示' : '＋ 調整金を許可する(任意)'}
+                </Text>
+              </Pressable>
 
-          {showDiff && (
-            <View style={styles.diffWrap}>
-              <Text style={styles.diffLabel}>調整金の目安(0〜¥1,000)</Text>
-              <TextInput
-                style={styles.diffInput}
-                value={diffAmt}
-                onChangeText={handleDiffChange}
-                keyboardType="number-pad"
-                textAlign="center"
-              />
-              <Text style={styles.diffNote}>
-                出品時点で確定不要。提案時に変更できます。上限¥1,000(売買化防止)。
-              </Text>
-            </View>
+              {showDiff && (
+                <View style={styles.diffWrap}>
+                  <Text style={styles.diffLabel}>調整金の目安(0〜¥1,000)</Text>
+                  <TextInput
+                    style={styles.diffInput}
+                    value={diffAmt}
+                    onChangeText={handleDiffChange}
+                    keyboardType="number-pad"
+                    textAlign="center"
+                  />
+                  <Text style={styles.diffNote}>
+                    出品時点で確定不要。提案時に変更できます。上限¥1,000(売買化防止)。
+                  </Text>
+                </View>
+              )}
+            </>
           )}
         </ScrollView>
 

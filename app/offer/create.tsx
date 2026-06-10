@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
   MAX_PROPOSER_CARDS_PER_OFFER,
@@ -531,23 +532,26 @@ export default function OfferCreateScreen() {
                 <Ionicons name="send-outline" size={11} color={colors.textSecondary} />
                 <Text style={styles.conditionText}>{shippingLabel(targetCard)}</Text>
               </View>
-              <View style={styles.conditionRow}>
-                <Ionicons
-                  name={targetCard.allows_adjustment ? 'cash-outline' : 'remove-outline'}
-                  size={11}
-                  color={
-                    targetCard.allows_adjustment ? colors.trustGreen : colors.textTertiary
-                  }
-                />
-                <Text
-                  style={[
-                    styles.conditionText,
-                    !targetCard.allows_adjustment && styles.conditionTextMuted,
-                  ]}
-                >
-                  {adjustmentLabel(targetCard)}
-                </Text>
-              </View>
+              {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金条件行を非表示 */}
+              {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+                <View style={styles.conditionRow}>
+                  <Ionicons
+                    name={targetCard.allows_adjustment ? 'cash-outline' : 'remove-outline'}
+                    size={11}
+                    color={
+                      targetCard.allows_adjustment ? colors.trustGreen : colors.textTertiary
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.conditionText,
+                      !targetCard.allows_adjustment && styles.conditionTextMuted,
+                    ]}
+                  >
+                    {adjustmentLabel(targetCard)}
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* 相手の求 — 何を欲しがっているかを明示 */}
@@ -666,7 +670,11 @@ export default function OfferCreateScreen() {
           </View>
         </View>
 
-        {/* ── 調整金（任意） ── */}
+        {/* ── 調整金（任意） ──
+            β1: ADJUSTMENT_MONEY_ENABLED=false 中は section ごと非表示。
+            showDiff/adjustmentAmount/chkDiff state は false/空文字のまま → handleSend で
+            parsedAdjustment=0 になり、createOffer に 0 が渡される (既存挙動と整合)。 */}
+        {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
         <View style={styles.section}>
           <Pressable
             style={styles.toggleRow}
@@ -763,6 +771,7 @@ export default function OfferCreateScreen() {
             </>
           )}
         </View>
+        )}
 
         {/* ── メッセージ（コラプシブル） ── */}
         <View style={styles.section}>

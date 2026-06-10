@@ -267,6 +267,62 @@ export interface WantedCard {
   status: WantedCardStatus
   created_at: string
   updated_at: string
+  // Phase B-1: 参考画像 URL (任意)。「ほしい商品の参考画像」用途で、出品商品の実物画像とは別概念。
+  // 詳細: docs/migration_wanted_cards_add_image_url.sql
+  // Storage は既存 'card-images' bucket を流用、path 規約: `${userId}/wants/${fileName}`
+  // optional: 既存行 / 既存呼出と互換、image_url なしでも全機能動作する
+  image_url?: string | null
+}
+
+// ─────────────────────────────────────────
+// card_wanted_links (出品と求リストの紐付け中間テーブル)
+//
+// 用途: 出品作成時に「この出品で受け付ける求」を求リスト (wanted_cards) から複数選択して
+//       紐付ける。出品詳細で他ユーザーに紐付き wanted_cards を表示する。
+// 詳細: docs/migration_card_wanted_links.sql
+// FK:
+//   - card_id        → cards(id)         ON DELETE CASCADE
+//   - wanted_card_id → wanted_cards(id)  ON DELETE CASCADE
+//   - owner_user_id  → profiles(id)      ON DELETE CASCADE (denormalize、RLS 高速化用)
+// UNIQUE (card_id, wanted_card_id) で重複防止。
+// ─────────────────────────────────────────
+
+export interface CardWantedLink {
+  id: string
+  card_id: string
+  wanted_card_id: string
+  owner_user_id: string
+  created_at: string
+}
+
+/**
+ * 出品詳細表示用 (linked wanted_card を join)。
+ * wanted_card は join 結果で null になる可能性を考慮した optional 型
+ * (RLS / archived フィルタ / 削除タイミング race など防御的に nullable)。
+ */
+export interface CardWantedLinkWithWantedCard extends CardWantedLink {
+  wanted_card: WantedCard | null
+}
+
+// ─────────────────────────────────────────
+// liked_cards (UI 上は「いいね」、♡ ボタン専用)
+//
+// 求リスト (wanted_cards) とは別概念。両者を統合しない。
+//   - wanted_cards = 自分が交換で求める商品 (matcher / easyScore 入力)
+//   - liked_cards  = 他人の出品 (cards) を「いいね」して保存 (純 UI 用途、matcher 非使用)
+// 詳細: docs/migration_rename_bookmarks_to_liked_cards.sql
+// ─────────────────────────────────────────
+
+export interface LikedCard {
+  id: string
+  user_id: string
+  card_id: string
+  created_at: string
+}
+
+/** /likes 一覧表示用 (card + owner を join) */
+export interface LikedCardWithCard extends LikedCard {
+  card: Card
 }
 
 // ─────────────────────────────────────────

@@ -1,0 +1,95 @@
+-- wanted_cards に image_url 列を追加
+-- Supabase SQL Editor で手動実行してください
+--
+-- ─────────────────────────────────────────
+-- 目的
+-- ─────────────────────────────────────────
+-- 求リスト (wanted_cards) の各行に「参考画像」を任意で添付できるようにする。
+--
+-- 参考画像の semantic:
+--   - これは「出品商品の実物画像」ではない
+--   - 「ほしい商品の参考画像 (reference image)」
+--   - UI 文言は「参考画像を追加（任意）」で統一
+--   - 「商品画像」「出品画像」表現は避ける
+--
+-- ─────────────────────────────────────────
+-- 設計
+-- ─────────────────────────────────────────
+--   - 列名: image_url
+--   - 型:   text
+--   - NULL: 許容 (参考画像は任意のため、既存行は NULL のまま)
+--   - DEFAULT: 設定しない (省略時 NULL)
+--   - 値:   Supabase Storage の publicUrl 文字列を想定
+--           path 規約は `${userId}/wants/${fileName}` (既存 'card-images' bucket を流用)
+--
+-- ─────────────────────────────────────────
+-- 既存データへの影響
+-- ─────────────────────────────────────────
+--   - active 行 0 件 (Phase A で全件 archive 済)、archived 19 件
+--   - 全行 image_url = NULL で初期化される (NULL 許容 + DEFAULT 不在のため)
+--   - status / created_at / updated_at / 既存テキスト列に影響なし
+--   - UNIQUE 制約 (user_id, card_name, group_name, member_name, series) も無影響
+--   - matcher / easyScore / searchWantedCards / searchDirectMatch も無影響
+--     (image_url は読まない、既存ロジックは触らない)
+--
+-- ─────────────────────────────────────────
+-- ロールバック (緊急時のみ)
+-- ─────────────────────────────────────────
+--   ALTER TABLE public.wanted_cards DROP COLUMN image_url;
+--   ※ 追加後にデータを入れた状態で DROP すると参考画像 URL は失われる
+--     Storage 側のファイル本体は残るが、DB から参照が消える
+--
+-- ─────────────────────────────────────────
+-- 実行前確認 SQL
+-- ─────────────────────────────────────────
+-- 期待: image_url 列が存在しない (実行前なので)
+--
+-- SELECT column_name FROM information_schema.columns
+-- WHERE table_schema = 'public'
+--   AND table_name = 'wanted_cards'
+--   AND column_name = 'image_url';
+-- → 0 行
+--
+-- status 件数 (Phase A 後の snapshot 確認)
+-- SELECT status, COUNT(*) AS row_count
+-- FROM public.wanted_cards
+-- GROUP BY status
+-- ORDER BY status;
+-- → active 0 / archived 19 を期待
+
+-- ─────────────────────────────────────────
+-- 実行
+-- ─────────────────────────────────────────
+ALTER TABLE public.wanted_cards
+  ADD COLUMN image_url text;
+
+-- ─────────────────────────────────────────
+-- 実行後確認 SQL
+-- ─────────────────────────────────────────
+-- (a) image_url 列が追加されたか (期待: 1 行、data_type='text'、is_nullable='YES')
+-- SELECT column_name, data_type, is_nullable, column_default
+-- FROM information_schema.columns
+-- WHERE table_schema = 'public'
+--   AND table_name = 'wanted_cards'
+--   AND column_name = 'image_url';
+--
+-- (b) 全列確認 (期待: id / user_id / card_name / group_name / member_name / series /
+--               status / created_at / updated_at / image_url の 10 列)
+-- SELECT column_name, data_type, is_nullable
+-- FROM information_schema.columns
+-- WHERE table_schema = 'public' AND table_name = 'wanted_cards'
+-- ORDER BY ordinal_position;
+--
+-- (c) status 件数に変化なし (期待: active 0 / archived 19、Phase A snapshot 維持)
+-- SELECT status, COUNT(*) AS row_count
+-- FROM public.wanted_cards
+-- GROUP BY status
+-- ORDER BY status;
+--
+-- (d) image_url 値の分布 (期待: 全行 NULL、image_url がある行 = 0)
+-- SELECT
+--   COUNT(*) AS total,
+--   COUNT(image_url) AS with_image,
+--   COUNT(*) - COUNT(image_url) AS without_image
+-- FROM public.wanted_cards;
+-- → total=19、with_image=0、without_image=19 を期待

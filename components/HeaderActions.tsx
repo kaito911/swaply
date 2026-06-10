@@ -1,10 +1,14 @@
 // components/HeaderActions.tsx
-// タブヘッダー右側の 3 アイコン (通知ベル / いいね♡ / マイページアバター)。
+// タブヘッダー右側の 3 アイコン (通知ベル / いいね ♡ / マイページアバター)。
 // マイページ画面 active 時は Avatar 強調 (primary 色) + tap 無効化。
 // 通知バッジ count は 3.5d でデータソース投入予定 (3.5a 現在は表示なし)。
 //
 // 案 E5 (refactor_plan §3.14-5): マイページはボトムタブ外 (href: null)。
 // 右上アバターからのみ到達 — 全画面共通の唯一の入口。
+//
+// Phase A (2026-06): ♡ アイコンの遷移先を /wants から /likes へ切替。
+// UI は「いいね」、DB は liked_cards、求リスト (wanted_cards) とは別概念。
+// いいねと求リストは別画面・別テーブル・別責務。
 
 import { colors, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
@@ -29,7 +33,7 @@ export function HeaderActions() {
       </Pressable>
 
       <Pressable
-        onPress={() => router.push('/wants')}
+        onPress={() => router.push('/likes')}
         hitSlop={8}
         style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
       >

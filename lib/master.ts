@@ -132,24 +132,45 @@ interface FilterableMaster {
 }
 
 /**
- * display_name_ja / display_name_en / aliases に対する match score を計算する。
- * 完全一致 = 100、startsWith = 80/70、includes = 60、aliases 完全 = 50、
- * aliases startsWith = 30、aliases includes = 20、未マッチ = 0。
+ * カタカナ → ひらがな 正規化。
+ * U+30A1〜U+30F6 (ァ〜ヶ) を -0x60 シフトしてひらがな範囲 (ぁ〜ゖ) に変換する。
+ * 中点・長音記号 (ー)・漢字・ローマ字には影響なし。
+ * カタカナ↔ひらがな の表記揺れ吸収のみが目的 (漢字↔かな は対象外)。
  */
-function calcMatchScore<T extends FilterableMaster>(item: T, lowerInput: string): number {
-  const ja = item.display_name_ja.toLowerCase()
-  const en = (item.display_name_en ?? '').toLowerCase()
+function toHiragana(s: string): string {
+  return s.replace(/[ァ-ヶ]/g, (m) =>
+    String.fromCharCode(m.charCodeAt(0) - 0x60),
+  )
+}
 
-  if (ja === lowerInput || en === lowerInput) return 100
-  if (ja.startsWith(lowerInput)) return 80
-  if (en !== '' && en.startsWith(lowerInput)) return 70
-  if (ja.includes(lowerInput) || (en !== '' && en.includes(lowerInput))) return 60
+/**
+ * 入力 (normalizedInput) と item の各フィールドを比較してマッチスコアを返す。
+ *
+ * 前提:
+ *   - 呼出側 (filterByFuzzyWithScore) で toLowerCase + toHiragana 正規化済の input を渡す
+ *   - 本関数内で item.display_name_ja / display_name_en / aliases も同じく正規化する
+ *
+ * スコア:
+ *   完全一致 = 100、startsWith = 80/70、includes = 60、aliases 完全 = 50、
+ *   aliases startsWith = 30、aliases includes = 20、未マッチ = 0。
+ *
+ * カタカナ↔ひらがな の表記揺れは正規化で吸収される (例: 「みんぎゅ」「ミンギュ」相互一致)。
+ * 漢字↔かな の変換は辞書が必要なため対象外 (例: 「えどがわこなん」では '江戸川コナン' に hit しない)。
+ */
+function calcMatchScore<T extends FilterableMaster>(item: T, normalizedInput: string): number {
+  const ja = toHiragana(item.display_name_ja.toLowerCase())
+  const en = toHiragana((item.display_name_en ?? '').toLowerCase())
+
+  if (ja === normalizedInput || en === normalizedInput) return 100
+  if (ja.startsWith(normalizedInput)) return 80
+  if (en !== '' && en.startsWith(normalizedInput)) return 70
+  if (ja.includes(normalizedInput) || (en !== '' && en.includes(normalizedInput))) return 60
 
   for (const a of item.aliases) {
-    const al = a.toLowerCase()
-    if (al === lowerInput) return 50
-    if (al.startsWith(lowerInput)) return 30
-    if (al.includes(lowerInput)) return 20
+    const al = toHiragana(a.toLowerCase())
+    if (al === normalizedInput) return 50
+    if (al.startsWith(normalizedInput)) return 30
+    if (al.includes(normalizedInput)) return 20
   }
 
   return 0
@@ -160,18 +181,32 @@ function calcMatchScore<T extends FilterableMaster>(item: T, lowerInput: string)
  * 入力が空のときは sort_order 順で全件返す。
  */
 function filterByFuzzy<T extends FilterableMaster>(items: T[], input: string): T[] {
-  const trimmed = input.trim()
-  if (trimmed === '') return [...items].sort((a, b) => a.sort_order - b.sort_order)
+  return filterByFuzzyWithScore(items, input).map((x) => x.item)
+}
 
-  const lower = trimmed.toLowerCase()
+/**
+ * filterByFuzzy と同じ scoring ロジックで、score を保持して返す内部版。
+ * getUnifiedSearchSuggestions の type 横断 merge ソート用に分離。
+ */
+function filterByFuzzyWithScore<T extends FilterableMaster>(
+  items: T[],
+  input: string,
+): Array<{ item: T; score: number }> {
+  const trimmed = input.trim()
+  if (trimmed === '') {
+    return [...items]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((item) => ({ item, score: 0 }))
+  }
+
+  const normalized = toHiragana(trimmed.toLowerCase())
   return items
-    .map((item) => ({ item, score: calcMatchScore(item, lower) }))
+    .map((item) => ({ item, score: calcMatchScore(item, normalized) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score
       return a.item.sort_order - b.item.sort_order
     })
-    .map((x) => x.item)
 }
 
 // ─────────────────────────────────────────
@@ -243,6 +278,102 @@ export function findCharacterIdsByText(text: string): string[] {
 /** master_item_types のうち text に fuzzy match する ID 配列を返す (sync) */
 export function findItemTypeIdsByText(text: string): string[] {
   return filterByFuzzy(cache.itemTypes, text).map((t) => t.id)
+}
+
+// ─────────────────────────────────────────
+// 統合検索サジェスト (master_works + master_characters + master_item_types)
+//
+// 検索画面 (app/(tabs)/search.tsx TextSearchPane) で type 付きの統合候補を返す。
+//
+// 設計方針:
+//   - 3 テーブルを横断 fuzzy filter (既存 calcMatchScore 流用、表記ゆれ吸収)
+//   - 各候補に SearchSuggestion type discriminator を付与、UI 側でラベル出し分け:
+//     work + category='idol'  → 「グループ」
+//     work + category!='idol' → 「作品」
+//     character + work.category='idol' → 「メンバー」
+//     character + work.category!='idol' → 「キャラ」
+//     item_type → 「グッズ種別」
+//   - 全体を score DESC で merge ソート、同 score 内は work > character > item_type
+//     (グループ/作品の検索意図が強い傾向)
+//   - 既存 getCharacterSuggestionsAcrossWorks / getItemTypeSuggestions / getWorkSuggestions
+//     は touch せず、出品 form (work.tsx / characters.tsx / items.tsx) の互換性 100%
+// ─────────────────────────────────────────
+
+export type SearchSuggestion =
+  | { type: 'work'; data: MasterWork; score: number }
+  | { type: 'character'; data: MasterCharacter; score: number }
+  | { type: 'item_type'; data: MasterItemType; score: number }
+
+const SUGGESTION_TYPE_ORDER: Record<SearchSuggestion['type'], number> = {
+  work: 0,
+  character: 1,
+  item_type: 2,
+}
+
+/**
+ * 検索画面用 統合サジェスト関数。
+ * works / characters / item_types を横断 fuzzy filter、score DESC で merge して返す。
+ * 入力が空のときは空配列 (= 候補非表示シグナル、SearchAutocomplete の minInputChars 判定とは独立)。
+ */
+export function getUnifiedSearchSuggestions(
+  input: string,
+  limit = 15,
+): SearchSuggestion[] {
+  const trimmed = input.trim()
+  if (trimmed === '') return []
+
+  const workMatches: SearchSuggestion[] = filterByFuzzyWithScore(cache.works, trimmed).map(
+    (x) => ({ type: 'work', data: x.item, score: x.score }),
+  )
+  const charMatches: SearchSuggestion[] = filterByFuzzyWithScore(
+    cache.characters,
+    trimmed,
+  ).map((x) => ({ type: 'character', data: x.item, score: x.score }))
+  const itemMatches: SearchSuggestion[] = filterByFuzzyWithScore(
+    cache.itemTypes,
+    trimmed,
+  ).map((x) => ({ type: 'item_type', data: x.item, score: x.score }))
+
+  return [...workMatches, ...charMatches, ...itemMatches]
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return SUGGESTION_TYPE_ORDER[a.type] - SUGGESTION_TYPE_ORDER[b.type]
+    })
+    .slice(0, limit)
+}
+
+/**
+ * SearchSuggestion を UI 表示用の type ラベル文字列に変換する。
+ * character は所属 work.category を参照するため getWorkById を経由する。
+ */
+export function getSearchSuggestionTypeLabel(s: SearchSuggestion): string {
+  if (s.type === 'work') {
+    return s.data.category === 'idol' ? 'グループ' : '作品'
+  }
+  if (s.type === 'character') {
+    const work = cache.worksById.get(s.data.work_id)
+    return work?.category === 'idol' ? 'メンバー' : 'キャラ'
+  }
+  return 'グッズ種別'
+}
+
+/**
+ * SearchSuggestion を「{所属作品}・{type}」or「{type}」形式のサブラベルに変換する。
+ * SearchAutocomplete でメイン名 (display_name_ja) の下に小さく薄い色で表示する想定。
+ *
+ * 表示例:
+ *   character (work あり)  : 'TREASURE・メンバー' / '名探偵コナン・キャラ'
+ *   character (work 未解決): 'メンバー' or 'キャラ' (cache に親 work が無い fallback)
+ *   work                    : 'グループ' or '作品'
+ *   item_type               : 'グッズ種別'
+ */
+export function getSearchSuggestionSubLabel(s: SearchSuggestion): string {
+  const typeLabel = getSearchSuggestionTypeLabel(s)
+  if (s.type === 'character') {
+    const work = cache.worksById.get(s.data.work_id)
+    if (work != null) return `${work.display_name_ja}・${typeLabel}`
+  }
+  return typeLabel
 }
 
 // ─────────────────────────────────────────

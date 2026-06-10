@@ -1,10 +1,16 @@
 // app/offer/counter.tsx
 // カウンターオファー作成画面
+//
+// β1: ADJUSTMENT_MONEY_ENABLED=false 中は「調整金変更を提案」ボタンが各画面で
+// 非表示なので通常到達しないが、direct link / 戻る誤操作などの防御として
+// 画面トップで早期 router.back() するガードを置く。
+// フラグを true に切り替えれば即座に画面が機能する。
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, radius, spacing } from '@/constants/theme'
 import { createCounterOffer } from '@/lib/supabase'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +26,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 export default function CounterOfferScreen() {
+  // hooks は順序維持のためフラグ判定より先に全て呼ぶ (rules-of-hooks 準拠)
   const {
     originalOfferId,
     proposerId,
@@ -37,6 +44,23 @@ export default function CounterOfferScreen() {
   const [adjustmentAmount, setAdjustmentAmount] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // β1 ガード: フラグ false 中はこの画面に到達してはならない。
+  // 直リンク / 戻る誤操作で来た場合に即座に元の画面へ戻す。
+  // useEffect で実行することで React の render サイクル内 navigation を避ける。
+  useEffect(() => {
+    if (!FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED) {
+      if (router.canGoBack()) {
+        router.back()
+      } else {
+        router.replace('/(tabs)/trades' as never)
+      }
+    }
+  }, [])
+
+  if (!FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED) {
+    return null
+  }
 
   const handleSubmit = async () => {
     const amount = adjustmentAmount === '' ? 0 : parseInt(adjustmentAmount, 10)

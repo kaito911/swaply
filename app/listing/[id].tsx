@@ -2,14 +2,17 @@
 import { LikeButton } from '@/components/LikeButton'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { TrustBadge } from '@/components/TrustBadge'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
+  addLike,
   addUserBlock,
-  addWantedCard,
-  archiveWantedCard,
   fetchCard,
+  fetchCardLinkedWants,
   fetchMyBlockedUserIds,
+  fetchMyLikedCardIds,
   fetchMyWantedCards,
+  removeLike,
   removeUserBlock,
   supabase,
 } from '@/lib/supabase'
@@ -18,8 +21,8 @@ import {
   getItemTypeById,
   getWorkById,
 } from '@/lib/master'
-import { Card, computeTrustBadge, Profile, TrustBadgeLevel, WantedCard, WantMatchScore } from '@/lib/types'
-import { isWantMatchV2, scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
+import { Card, CardWantedLinkWithWantedCard, computeTrustBadge, Profile, TrustBadgeLevel, WantedCard, WantMatchScore } from '@/lib/types'
+import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
@@ -77,21 +80,27 @@ function getCtaConfig(
 }
 
 // ④ Trust: ホーム削除分の補完として全項目を直接表示 (3.5a 機能 H 戦略)
+// β1: ADJUSTMENT_MONEY_ENABLED=false 中は差額平均 / 差額偏り を出さない。
 function getTrustRows(owner: Profile): { label: string; value: string }[] {
-  return [
+  const rows: { label: string; value: string }[] = [
     { label: '成立件数', value: `${owner.trade_count}件` },
     { label: '発送遵守率', value: `${owner.ship_rate}%` },
     {
       label: '返信中央値',
       value: owner.reply_median_hours < 999 ? `${owner.reply_median_hours}時間` : '—',
     },
-    {
-      label: '差額平均',
-      value: owner.adjustment_avg != null ? `¥${owner.adjustment_avg}` : '—',
-    },
-    { label: '差額偏り', value: owner.adjustment_bias ?? '—' },
-    { label: 'トラブル件数', value: `${owner.trouble_count}件` },
   ]
+  if (FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED) {
+    rows.push(
+      {
+        label: '差額平均',
+        value: owner.adjustment_avg != null ? `¥${owner.adjustment_avg}` : '—',
+      },
+      { label: '差額偏り', value: owner.adjustment_bias ?? '—' },
+    )
+  }
+  rows.push({ label: 'トラブル件数', value: `${owner.trouble_count}件` })
+  return rows
 }
 
 // ⑤ CTA: 押していい理由を1つだけ返す（want一致 → 実績 → 郵送 → 差額 の優先順）
@@ -104,7 +113,10 @@ function getPushReason(
   if (bestMatchScore === 'medium') return 'あなたが求めているカードに近いです'
   if (owner != null && owner.trade_count >= 1) return '交換実績があるため、安心して提案できます'
   if (card.allows_mail) return '郵送で交換しやすい条件です'
-  if (card.allows_adjustment) return '調整金に対応しており、条件が合わせやすいです'
+  // β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金 push 理由を出さない
+  if (FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && card.allows_adjustment) {
+    return '調整金に対応しており、条件が合わせやすいです'
+  }
   return null
 }
 
@@ -153,13 +165,17 @@ export default function ListingDetailScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [descExpanded, setDescExpanded] = useState(false)
+  // matcher (bestMatchScore) の計算は load 内で local wants で実施するため、myWants state は
+  // 現状 JSX 非使用。Phase B 以降の参照余地として state ホールド、意図を eslint-disable で明示。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [myWants, setMyWants] = useState<WantedCard[]>([])
+  // Phase B-2 (commit 5): card_wanted_links 経由で紐付き wanted_cards を表示。
+  // 旧出品 (card_wanted_links 0 件) では既存 cards.want_* / want_description fallback を表示。
+  const [linkedWants, setLinkedWants] = useState<CardWantedLinkWithWantedCard[]>([])
   const [likeToggling, setLikeToggling] = useState(false)
-  // ★ 3.5a fix: optimistic 状態 (home.tsx と同じ設計、ただし 1 card のみなので scalar)
-  // 'liked' = add 直後 + wantId 保持、'unliked' = archive 直後、null = myWants 判定にフォール
-  const [pendingLikeState, setPendingLikeState] = useState<
-    { kind: 'liked'; wantId: string } | { kind: 'unliked' } | null
-  >(null)
+  // ★ Phase A: liked_cards (UI 上「いいね」) は card_id 直接比較なので
+  // optimistic state は単純な boolean に簡素化
+  const [isLiked, setIsLiked] = useState(false)
   const [bestMatchScore, setBestMatchScore] = useState<WantMatchScore>('none')
   const [imageSide, setImageSide] = useState<'front' | 'back'>('front')
   // 譲 / 求 タブ: 初期表示は譲 (まず相手が何を出しているかを見せる)
@@ -193,13 +209,21 @@ export default function ListingDetailScreen() {
 
       setCard(fetched)
 
+      // Phase B-2: linked wants 取得 (認証不要、誰でも読める RLS policy 経由)。
+      // fetchCardLinkedWants は内部で active のみ filter + エラー時 [] 返却するため
+      // 詳細画面全体を落とさない (取得失敗時の fallback は cards.want_* 既存表示)。
+      const linkedW = await fetchCardLinkedWants(fetched.id)
+      setLinkedWants(linkedW)
+
       if (uid != null) {
-        const [wants, blockedIds] = await Promise.all([
+        const [wants, blockedIds, likedIds] = await Promise.all([
           fetchMyWantedCards(uid),
           fetchMyBlockedUserIds(),
+          fetchMyLikedCardIds(uid),
         ])
         setMyWants(wants)
         setIsBlocked(blockedIds.includes(fetched.owner_user_id))
+        setIsLiked(likedIds.has(fetched.id))
 
         const best = wants.reduce<WantMatchScore>((acc, want) => {
           const s = scoreWantMatchV2(fetched, want)
@@ -386,50 +410,24 @@ export default function ListingDetailScreen() {
     )
   }
 
-  // ★ 3.5a 機能 H + LikeButton bug fix: optimistic update で構造化 card の fuzzy match 漏れに対応
-  // home.tsx と同じ設計 (詳細は home.tsx コメント参照)、ここでは 1 card のみなので scalar state
-  //
-  // exact name match (card.name === w.card_name) を最優先:
-  //   wanted_cards_unique_per_user (user_id, card_name, ...) と整合、Pioneer #001 直接交換と同じ思想
-  //   2026-05-23 のホーム ♡ tap バグ (23505 duplicate key) と同根の対策
-  const matchesCard = (c: Card, w: WantedCard): boolean =>
-    w.card_name === c.name || isWantMatchV2(c, w)
-
-  const isLiked = (() => {
-    if (card == null) return false
-    if (pendingLikeState?.kind === 'unliked') return false
-    if (pendingLikeState?.kind === 'liked') return true
-    return myWants.some((w) => matchesCard(card, w))
-  })()
-
+  // ★ Phase A: liked_cards (UI 上「いいね」) は card_id ベースの exact match なので
+  // pendingLikeState / matchesCard / fuzzy match はすべて不要に。
   const handleToggleLike = async () => {
     if (currentUserId == null || card == null || likeToggling) return
     setLikeToggling(true)
+    const wasLiked = isLiked
+    // Optimistic UI update
+    setIsLiked(!wasLiked)
     try {
-      if (isLiked) {
-        // archive: pending 由来 or myWants 由来の wantId を解決
-        const pendingWantId =
-          pendingLikeState?.kind === 'liked' ? pendingLikeState.wantId : null
-        const matched = myWants.find((w) => matchesCard(card, w))
-        const wantIdToArchive = pendingWantId ?? matched?.id
-        setPendingLikeState({ kind: 'unliked' })
-        if (wantIdToArchive != null) {
-          await archiveWantedCard(wantIdToArchive)
-        }
+      if (wasLiked) {
+        await removeLike(currentUserId, card.id)
       } else {
-        const newWant = await addWantedCard({
-          userId: currentUserId,
-          cardName: card.name,
-          groupName: card.group_name,
-          memberName: card.member_name,
-          series: card.series,
-        })
-        setPendingLikeState({ kind: 'liked', wantId: newWant.id })
+        await addLike(currentUserId, card.id)
       }
-      const next = await fetchMyWantedCards(currentUserId)
-      setMyWants(next)
     } catch {
-      Alert.alert('エラー', 'いいねの更新に失敗しました')
+      // 失敗時は元の状態に revert
+      setIsLiked(wasLiked)
+      Alert.alert('エラー', '更新に失敗しました')
     } finally {
       setLikeToggling(false)
     }
@@ -569,12 +567,15 @@ export default function ListingDetailScreen() {
                 </View>
               )}
 
-              {/* 差額: bottom-left overlay（即時スキャン用）*/}
-              <View style={[styles.diffOverlay, { backgroundColor: diff.bgColor }]}>
-                <Text style={[styles.diffOverlayText, { color: diff.textColor }]}>
-                  {diff.text}
-                </Text>
-              </View>
+              {/* 差額: bottom-left overlay（即時スキャン用）
+                  β1: ADJUSTMENT_MONEY_ENABLED=false 中は非表示 */}
+              {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+                <View style={[styles.diffOverlay, { backgroundColor: diff.bgColor }]}>
+                  <Text style={[styles.diffOverlayText, { color: diff.textColor }]}>
+                    {diff.text}
+                  </Text>
+                </View>
+              )}
 
               {/* ♡ いいね: bottom-right overlay (自分の出品では非表示) */}
               {!isOwn && currentUserId != null && (
@@ -638,11 +639,14 @@ export default function ListingDetailScreen() {
                     textColor={colors.tagNeutralText}
                   />
                 )}
-                <Tag
-                  text={diff.text}
-                  bgColor={diff.bgColor}
-                  textColor={diff.textColor}
-                />
+                {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金 Tag を非表示 */}
+                {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+                  <Tag
+                    text={diff.text}
+                    bgColor={diff.bgColor}
+                    textColor={diff.textColor}
+                  />
+                )}
               </View>
 
               {/* β1 期待値補正: 通常の交換提案は郵送のみ。手渡し / 会場交換は venue モード経由。 */}
@@ -673,71 +677,133 @@ export default function ListingDetailScreen() {
         ) : (
           // ─ 求タブ: 相手が求めているもの ─
           <View style={styles.body}>
-            {/* 求条件のメインカード (求 hero) — 構造化された want_* を chip 表示 + 詳細テキスト */}
+            {/* 求条件のメインカード (求 hero) — Phase B-2 (commit 5):
+                  linkedWants > 0 → card_wanted_links 経由の wanted_cards を優先表示
+                  linkedWants 0 件 → 旧出品 fallback (cards.want_* / want_description) */}
             <View style={styles.wantHeroCard}>
               <Text style={styles.wantHeroBadge}>求</Text>
               <Text style={styles.wantHeroSubtitle}>
                 この出品者が求めているもの
               </Text>
 
-              {/* 求める作品 */}
-              {card.want_works != null && card.want_works.length > 0 && (
-                <View style={styles.wantChipBlock}>
-                  <Text style={styles.wantChipBlockLabel}>求める作品</Text>
-                  <View style={styles.wantChipsRow}>
-                    {card.want_works.map((id) => (
-                      <View key={`work-${id}`} style={styles.wantChip}>
-                        <Text style={styles.wantChipText}>
-                          {getWorkById(id)?.display_name_ja ?? id}
-                        </Text>
+              {linkedWants.length > 0 ? (
+                // Phase B-2: linked wanted_cards を row 形式で表示。
+                // wanted_card.image_url があれば 48px サムネイル、なければプレースホルダー。
+                // archived は fetchCardLinkedWants 側で除外済 (active のみ)。
+                <View style={styles.linkedWantsBlock}>
+                  {linkedWants.map((link) => {
+                    const wc = link.wanted_card
+                    if (wc == null) return null // 防御: join race / RLS 等で null になり得る
+                    const sub = [wc.series, wc.group_name, wc.member_name]
+                      .filter((v): v is string => v != null && v !== '')
+                      .join(' · ')
+                    return (
+                      <View key={link.id} style={styles.linkedWantRow}>
+                        {wc.image_url != null && wc.image_url !== '' ? (
+                          <Image
+                            source={{ uri: wc.image_url }}
+                            style={styles.linkedWantThumb}
+                            contentFit="cover"
+                            transition={150}
+                            cachePolicy="memory-disk"
+                          />
+                        ) : (
+                          <View
+                            style={[
+                              styles.linkedWantThumb,
+                              styles.linkedWantThumbPlaceholder,
+                            ]}
+                          >
+                            <Ionicons
+                              name="image-outline"
+                              size={18}
+                              color={colors.border}
+                            />
+                          </View>
+                        )}
+                        <View style={styles.linkedWantMeta}>
+                          <Text
+                            style={styles.linkedWantName}
+                            numberOfLines={2}
+                          >
+                            {wc.card_name}
+                          </Text>
+                          {sub.length > 0 && (
+                            <Text
+                              style={styles.linkedWantSub}
+                              numberOfLines={1}
+                            >
+                              {sub}
+                            </Text>
+                          )}
+                        </View>
                       </View>
-                    ))}
-                  </View>
+                    )
+                  })}
                 </View>
+              ) : (
+                // 旧出品 fallback: 既存の cards.want_* / want_description 表示を維持
+                <>
+                  {/* 求める作品 */}
+                  {card.want_works != null && card.want_works.length > 0 && (
+                    <View style={styles.wantChipBlock}>
+                      <Text style={styles.wantChipBlockLabel}>求める作品</Text>
+                      <View style={styles.wantChipsRow}>
+                        {card.want_works.map((id) => (
+                          <View key={`work-${id}`} style={styles.wantChip}>
+                            <Text style={styles.wantChipText}>
+                              {getWorkById(id)?.display_name_ja ?? id}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* 求めるキャラ */}
+                  {card.want_characters != null &&
+                    card.want_characters.length > 0 && (
+                      <View style={styles.wantChipBlock}>
+                        <Text style={styles.wantChipBlockLabel}>求めるキャラ</Text>
+                        <View style={styles.wantChipsRow}>
+                          {card.want_characters.map((id) => (
+                            <View key={`char-${id}`} style={styles.wantChip}>
+                              <Text style={styles.wantChipText}>
+                                {getCharacterById(id)?.display_name_ja ?? id}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+
+                  {/* 求めるグッズ種類 */}
+                  {card.want_item_types != null &&
+                    card.want_item_types.length > 0 && (
+                      <View style={styles.wantChipBlock}>
+                        <Text style={styles.wantChipBlockLabel}>求めるグッズ種類</Text>
+                        <View style={styles.wantChipsRow}>
+                          {card.want_item_types.map((id) => (
+                            <View key={`type-${id}`} style={styles.wantChip}>
+                              <Text style={styles.wantChipText}>
+                                {getItemTypeById(id)?.display_name_ja ?? id}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+
+                  {/* 詳細・コメント (want_description 既存) */}
+                  <Text style={styles.wantHeroBlockLabel}>詳細・コメント</Text>
+                  <Text style={styles.wantHeroBody}>
+                    {card.want_description != null &&
+                    card.want_description.trim() !== ''
+                      ? card.want_description
+                      : '—'}
+                  </Text>
+                </>
               )}
-
-              {/* 求めるキャラ */}
-              {card.want_characters != null &&
-                card.want_characters.length > 0 && (
-                  <View style={styles.wantChipBlock}>
-                    <Text style={styles.wantChipBlockLabel}>求めるキャラ</Text>
-                    <View style={styles.wantChipsRow}>
-                      {card.want_characters.map((id) => (
-                        <View key={`char-${id}`} style={styles.wantChip}>
-                          <Text style={styles.wantChipText}>
-                            {getCharacterById(id)?.display_name_ja ?? id}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-              {/* 求めるグッズ種類 */}
-              {card.want_item_types != null &&
-                card.want_item_types.length > 0 && (
-                  <View style={styles.wantChipBlock}>
-                    <Text style={styles.wantChipBlockLabel}>求めるグッズ種類</Text>
-                    <View style={styles.wantChipsRow}>
-                      {card.want_item_types.map((id) => (
-                        <View key={`type-${id}`} style={styles.wantChip}>
-                          <Text style={styles.wantChipText}>
-                            {getItemTypeById(id)?.display_name_ja ?? id}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-              {/* 詳細・コメント (want_description 既存) */}
-              <Text style={styles.wantHeroBlockLabel}>詳細・コメント</Text>
-              <Text style={styles.wantHeroBody}>
-                {card.want_description != null &&
-                card.want_description.trim() !== ''
-                  ? card.want_description
-                  : '—'}
-              </Text>
             </View>
 
             {/* 交換条件 (求タブにも表示: 提案時に必要な条件として参照) */}
@@ -1167,6 +1233,46 @@ const styles = StyleSheet.create({
   },
 
   // ── 求タブ: 構造化 chip ────────────────────
+  // Phase B-2 (commit 5): linked wanted_cards 表示用 (card_wanted_links 経由)
+  linkedWantsBlock: {
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  linkedWantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  linkedWantThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
+    flexShrink: 0,
+  },
+  linkedWantThumbPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkedWantMeta: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  linkedWantName: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  linkedWantSub: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+  },
   wantChipBlock: {
     marginTop: spacing.sm,
   },

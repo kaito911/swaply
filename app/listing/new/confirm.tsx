@@ -15,6 +15,7 @@
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -22,7 +23,7 @@ import {
   getItemTypeById,
   getWorkById,
 } from '@/lib/master'
-import { supabase, uploadCardImage } from '@/lib/supabase'
+import { addCardWantedLinks, supabase, uploadCardImage } from '@/lib/supabase'
 import type { MasterCategory } from '@/lib/types'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useState } from 'react'
@@ -215,6 +216,8 @@ export default function ListingNewConfirmScreen() {
     imageUri: string
     imageBackUri: string
     enrichedListingJson: string
+    // Phase B-2 (commit 4): want.tsx で選択された wanted_card.id 配列 (JSON 文字列)
+    selectedWantedCardIdsJson?: string
   }>()
 
   const { imageUri, imageBackUri } = params
@@ -227,6 +230,20 @@ export default function ListingNewConfirmScreen() {
       return null
     }
   })
+
+  // Phase B-2: 求リスト選択 IDs を parse (型ガードで string[] に絞り込み、配列以外は空)
+  const [selectedWantedCardIds] = useState<string[]>(() => {
+    try {
+      const raw = params.selectedWantedCardIdsJson
+      if (raw == null) return []
+      const parsed: unknown = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed.filter((v): v is string => typeof v === 'string')
+    } catch {
+      return []
+    }
+  })
+
   const [submitting, setSubmitting] = useState(false)
 
   const work = enriched != null ? getWorkById(enriched.workId) : undefined
@@ -239,6 +256,11 @@ export default function ListingNewConfirmScreen() {
     }
     if (enriched == null) {
       Alert.alert('エラー', '出品情報を読み込めませんでした')
+      return
+    }
+    // Phase B-2: 求リスト 1 件以上必須 (want.tsx で強制済、ここでも防御的にチェック)
+    if (selectedWantedCardIds.length === 0) {
+      Alert.alert('エラー', '求商品を 1 件以上選択してください')
       return
     }
 
@@ -278,6 +300,8 @@ export default function ListingNewConfirmScreen() {
       }
 
       // 1 row insert (N=1 化、セット 1 出品)
+      // Phase B-2: 後続の card_wanted_links bulk INSERT で card_id が必要なため
+      // .select().single() で挿入行 (id 含む) を取得する。
       const row = toInsertRow(
         enriched,
         userId,
@@ -285,8 +309,40 @@ export default function ListingNewConfirmScreen() {
         resolvedImageBackUrl,
       )
 
-      const { error } = await supabase.from('cards').insert([row])
-      if (error) throw error
+      const { data: createdCard, error: cardError } = await supabase
+        .from('cards')
+        .insert(row)
+        .select()
+        .single()
+      if (cardError) throw cardError
+      if (createdCard == null) {
+        throw new Error('cards INSERT did not return a row')
+      }
+
+      // Phase B-2: card_wanted_links bulk INSERT
+      // ※ クライアント側 2 段階保存 (cards INSERT → card_wanted_links INSERT)。
+      //   完全な原子性は将来 RPC 化で検討 (TODO)。
+      //   link 失敗時は cards 行を残し、partial-success として通知 + mypage へ遷移。
+      try {
+        await addCardWantedLinks({
+          cardId: createdCard.id as string,
+          wantedCardIds: selectedWantedCardIds,
+          ownerUserId: userId,
+        })
+      } catch (linkErr) {
+        console.error('[ListingNewConfirmScreen][addCardWantedLinks]', linkErr)
+        Alert.alert(
+          '一部完了',
+          '出品は作成されましたが、求商品の紐づけに失敗しました。求リスト画面から再設定してください。',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.replace('/(tabs)/mypage' as never),
+            },
+          ],
+        )
+        return
+      }
 
       Alert.alert('出品完了', '出品が完了しました。', [
         {
@@ -385,19 +441,24 @@ export default function ListingNewConfirmScreen() {
               label="求の詳細"
               value={enriched.want_description || '—'}
             />
-            <Row
-              label="調整金"
-              value={enriched.allows_adjustment ? 'あり' : 'なし'}
-            />
-            {enriched.allows_adjustment && (
-              <Row
-                label="調整金目安"
-                value={
-                  enriched.adjustment_max > 0
-                    ? `¥${enriched.adjustment_max.toLocaleString()} まで`
-                    : '¥0'
-                }
-              />
+            {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金確認行を非表示 */}
+            {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+              <>
+                <Row
+                  label="調整金"
+                  value={enriched.allows_adjustment ? 'あり' : 'なし'}
+                />
+                {enriched.allows_adjustment && (
+                  <Row
+                    label="調整金目安"
+                    value={
+                      enriched.adjustment_max > 0
+                        ? `¥${enriched.adjustment_max.toLocaleString()} まで`
+                        : '¥0'
+                    }
+                  />
+                )}
+              </>
             )}
           </View>
         </View>

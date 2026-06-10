@@ -3,6 +3,10 @@ import { createClient } from '@supabase/supabase-js'
 import { ALL_MEMBERS, MemberMaster } from '../constants/members'
 import {
   Card,
+  CardWantedLink,
+  CardWantedLinkWithWantedCard,
+  LikedCard,
+  LikedCardWithCard,
   computeTrustBadge,
   Offer,
   OfferOutcomeLog,
@@ -23,7 +27,7 @@ import {
   WantMatchScore,
 } from './types'
 import { scoreWantMatchV2 } from './matcher' // ★ Step 3 commit 3: v1 → v2 切替
-import { findCharacterIdsByText, findItemTypeIdsByText } from './master' // searchCards (Phase 0.5b) 経路 2 の master fuzzy 解決
+import { findCharacterIdsByText, findItemTypeIdsByText, getWorkById } from './master' // searchCards 経路 2 の master fuzzy 解決 + 経路 1 work_id legacy fallback の aliases 取得
 import { readAsStringAsync } from 'expo-file-system/legacy'
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''
@@ -238,6 +242,89 @@ export async function fetchUserCards(
 }
 
 // ─────────────────────────────────────────
+// Likes (UI 上は「いいね」、♡ ボタン専用、DB: liked_cards)
+//
+// 求リスト (wanted_cards) とは別概念。matcher / easyScore / searchWantedCards /
+// searchDirectMatch では使わない。純 UI 用途 (保存 / 参照) のみ。
+// 詳細: docs/migration_rename_bookmarks_to_liked_cards.sql / lib/types.ts LikedCard
+// ─────────────────────────────────────────
+
+/**
+ * いいね追加 (冪等 upsert)。
+ * UNIQUE (user_id, card_id) 制約により重複 INSERT は 23505 を投げない。
+ * onConflict 指定で既存行があれば no-op 動作。
+ */
+export async function addLike(
+  userId: string,
+  cardId: string,
+): Promise<LikedCard> {
+  const { data, error } = await supabase
+    .from('liked_cards')
+    .upsert(
+      { user_id: userId, card_id: cardId },
+      { onConflict: 'user_id,card_id' },
+    )
+    .select()
+    .single()
+
+  if (error) throw error
+  return data as LikedCard
+}
+
+/** いいね削除 (存在しなくてもエラーにしない) */
+export async function removeLike(
+  userId: string,
+  cardId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('liked_cards')
+    .delete()
+    .eq('user_id', userId)
+    .eq('card_id', cardId)
+
+  if (error) throw error
+}
+
+/**
+ * 自分のいいね一覧 (card + owner を join、created_at DESC)。
+ * /likes 画面の listing preview 表示用。
+ */
+export async function fetchMyLikedCards(
+  userId: string,
+): Promise<LikedCardWithCard[]> {
+  const { data, error } = await supabase
+    .from('liked_cards')
+    .select('*, card:cards(*, owner:profiles(*))')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[fetchMyLikedCards]', error)
+    return []
+  }
+  return (data ?? []) as unknown as LikedCardWithCard[]
+}
+
+/**
+ * ♡ button の isLiked 判定用に card_id だけを Set で返す高速版。
+ * home.tsx / listing/[id].tsx の optimistic state 初期化で使う。
+ */
+export async function fetchMyLikedCardIds(
+  userId: string,
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('liked_cards')
+    .select('card_id')
+    .eq('user_id', userId)
+
+  if (error) {
+    console.error('[fetchMyLikedCardIds]', error)
+    return new Set()
+  }
+  return new Set((data ?? []).map((r) => r.card_id as string))
+}
+
+// ─────────────────────────────────────────
 // Wanted cards (需要DB)
 // ─────────────────────────────────────────
 
@@ -276,22 +363,31 @@ export async function addWantedCard(params: {
   groupName: string | null
   memberName: string | null
   series: string | null
+  // Phase B-1: 参考画像 URL (任意、optional)
+  //   - undefined: payload に含めない → 新規行は NULL、既存行は image_url 保持
+  //   - null:      payload に image_url=null を明示 (画像を外したい時)
+  //   - string:    payload に image_url=URL を投入
+  imageUrl?: string | null
 }): Promise<WantedCard> {
+  const payload: Record<string, unknown> = {
+    user_id: params.userId,
+    card_name: params.cardName,
+    group_name: params.groupName,
+    member_name: params.memberName,
+    series: params.series,
+    status: 'active',
+  }
+  // 既存呼出 (onboarding 等、imageUrl 未指定) を壊さないため undefined のときは
+  // payload に image_url を含めない (= upsert で既存値を保持 / 新規は NULL)。
+  if (params.imageUrl !== undefined) {
+    payload.image_url = params.imageUrl
+  }
+
   const { data, error } = await supabase
     .from('wanted_cards')
-    .upsert(
-      {
-        user_id: params.userId,
-        card_name: params.cardName,
-        group_name: params.groupName,
-        member_name: params.memberName,
-        series: params.series,
-        status: 'active',
-      },
-      {
-        onConflict: 'user_id,card_name,group_name,member_name,series',
-      },
-    )
+    .upsert(payload, {
+      onConflict: 'user_id,card_name,group_name,member_name,series',
+    })
     .select()
     .single()
 
@@ -458,6 +554,145 @@ export async function archiveWantedCard(wantId: string): Promise<void> {
   if (error) {
     throw error
   }
+}
+
+// ─────────────────────────────────────────
+// Card-wanted links (出品と求リストの紐付け)
+//
+// 出品 (cards) × 求リスト (wanted_cards) の N:N 中間テーブル。
+// 出品作成時に「この出品で受け付ける求」を求リストから複数選択して紐付ける。
+// 詳細: docs/migration_card_wanted_links.sql / lib/types.ts CardWantedLink
+//
+// 非用途:
+//   - matcher / easyScore / searchWantedCards / searchDirectMatch では使わない (Phase 1)
+//   - liked_cards (いいね) とは別概念、混在させない
+// ─────────────────────────────────────────
+
+/**
+ * 指定 card_id に対して、wantedCardIds 複数件を bulk 紐付け。
+ *
+ * 冪等性:
+ *   UNIQUE (card_id, wanted_card_id) の重複は upsert + ignoreDuplicates で no-op 扱い。
+ *   既存 link がある場合、新規 row は返らない (data には新規 INSERT 分のみ含まれる)。
+ *
+ * 整合性 (アプリ層担保):
+ *   - ownerUserId は呼出側で auth.uid() と一致させる (RLS でも auth.uid() = owner_user_id 検査)
+ *   - card_id の owner と wantedCardIds の user_id が ownerUserId と一致することは
+ *     呼出側責任 (本関数では検査しない)
+ *
+ * @returns 新規 INSERT された link 行の配列 (重複 skip 分は含まない)
+ */
+export async function addCardWantedLinks(params: {
+  cardId: string
+  wantedCardIds: string[]
+  ownerUserId: string
+}): Promise<CardWantedLink[]> {
+  if (params.wantedCardIds.length === 0) return []
+
+  const rows = params.wantedCardIds.map((wcId) => ({
+    card_id: params.cardId,
+    wanted_card_id: wcId,
+    owner_user_id: params.ownerUserId,
+  }))
+
+  const { data, error } = await supabase
+    .from('card_wanted_links')
+    .upsert(rows, {
+      onConflict: 'card_id,wanted_card_id',
+      ignoreDuplicates: true,
+    })
+    .select()
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []) as CardWantedLink[]
+}
+
+/**
+ * 指定 card_id の紐付き wanted_cards を取得 (active のみ)。
+ * 出品詳細画面で「この出品者がとくに求めているもの」表示用。
+ *
+ * archived フィルタは Supabase の join select でも書けるが、RLS との相互作用 + JS 側で
+ * 簡単に判定できるため、クライアント側で `wanted_card.status === 'active'` で filter する。
+ * Phase 1 では archived 紐付けは表示対象外 (運用方針)、データ自体は残置。
+ *
+ * RLS 前提:
+ *   - card_wanted_links: Anyone read (誰でも紐付き行を取得可能)
+ *   - wanted_cards:      Anyone read linked (紐付き行に限り公開、その他は本人 private)
+ *   - 結果: 他ユーザーが他人の出品を見た時に紐付き wanted_cards だけ表示される
+ */
+export async function fetchCardLinkedWants(
+  cardId: string,
+): Promise<CardWantedLinkWithWantedCard[]> {
+  const { data, error } = await supabase
+    .from('card_wanted_links')
+    .select('*, wanted_card:wanted_cards(*)')
+    .eq('card_id', cardId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    console.error('[fetchCardLinkedWants]', error)
+    return []
+  }
+
+  const rows = (data ?? []) as unknown as CardWantedLinkWithWantedCard[]
+  // active のみクライアント側で filter (archived は表示対象外、Phase 1 方針)
+  return rows.filter((r) => r.wanted_card != null && r.wanted_card.status === 'active')
+}
+
+/**
+ * 紐付き 1 件を削除。
+ *
+ * owner_user_id 条件は RLS でも auth.uid() で担保されているが、二重防御として
+ * 明示的に WHERE 句に含める (RLS 設定漏れ / 将来 policy 変更時の事故予防)。
+ */
+export async function removeCardWantedLink(params: {
+  linkId: string
+  ownerUserId: string
+}): Promise<void> {
+  const { error } = await supabase
+    .from('card_wanted_links')
+    .delete()
+    .eq('id', params.linkId)
+    .eq('owner_user_id', params.ownerUserId)
+
+  if (error) {
+    throw error
+  }
+}
+
+/**
+ * 指定 card_id の紐付きを丸ごと差し替える (編集画面用)。
+ *
+ * 既存 links を delete → 新規 wanted_card_ids を bulk insert の 2 段階。
+ * トランザクション化は将来 RPC で対応検討、Phase 1 は逐次実行 (delete 失敗時は
+ * 例外を投げて insert に進まない)。
+ *
+ * owner_user_id 条件で「自分の link だけ」を delete 対象に絞る (RLS と二重防御)。
+ */
+export async function replaceCardWantedLinks(params: {
+  cardId: string
+  wantedCardIds: string[]
+  ownerUserId: string
+}): Promise<CardWantedLink[]> {
+  const { error: deleteError } = await supabase
+    .from('card_wanted_links')
+    .delete()
+    .eq('card_id', params.cardId)
+    .eq('owner_user_id', params.ownerUserId)
+
+  if (deleteError) {
+    throw deleteError
+  }
+
+  if (params.wantedCardIds.length === 0) return []
+
+  return addCardWantedLinks({
+    cardId: params.cardId,
+    wantedCardIds: params.wantedCardIds,
+    ownerUserId: params.ownerUserId,
+  })
 }
 
 // ─────────────────────────────────────────
@@ -1411,42 +1646,110 @@ export async function searchCards(params: {
   query?: string
   characterIds?: string[]
   itemTypeIds?: string[]
+  workIds?: string[]
   limit?: number
   excludeOwnerIds?: string[]
 }): Promise<Card[]> {
   const limit = params.limit ?? 30
   const characterIds = params.characterIds ?? []
   const itemTypeIds = params.itemTypeIds ?? []
+  const workIds = params.workIds ?? []
   const query = (params.query ?? '').trim()
   const excludeOwnerIds = params.excludeOwnerIds ?? []
   const excludeFilter =
     excludeOwnerIds.length > 0 ? `(${excludeOwnerIds.join(',')})` : null
 
   // 経路 3: 全部空
-  if (characterIds.length === 0 && itemTypeIds.length === 0 && query === '') {
+  if (
+    characterIds.length === 0 &&
+    itemTypeIds.length === 0 &&
+    workIds.length === 0 &&
+    query === ''
+  ) {
     return []
   }
 
-  // 経路 1: チップあり → single query (AND chain)
-  if (characterIds.length > 0 || itemTypeIds.length > 0) {
-    let q = supabase
+  // 経路 1: チップあり (characters / item_types / works のいずれか) → 1〜2 query merge
+  //   Query A: master ID overlap + work_id in (...) (新規出品ヒット)
+  //   Query B: works 選択時のみ実行。group_name / series ilike で legacy 出品 fallback
+  //            (cards.work_id NULL / フリーテキスト group_name の旧出品をカバー)
+  if (characterIds.length > 0 || itemTypeIds.length > 0 || workIds.length > 0) {
+    let qA = supabase
       .from('cards')
       .select('*, owner:profiles(*)')
       .eq('status', 'active')
+    if (characterIds.length > 0) qA = qA.overlaps('characters', characterIds)
+    if (itemTypeIds.length > 0) qA = qA.overlaps('item_types', itemTypeIds)
+    if (workIds.length > 0) qA = qA.in('work_id', workIds)
+    if (excludeFilter != null) qA = qA.not('owner_user_id', 'in', excludeFilter)
 
-    if (characterIds.length > 0) q = q.overlaps('characters', characterIds)
-    if (itemTypeIds.length > 0) q = q.overlaps('item_types', itemTypeIds)
-    if (excludeFilter != null) q = q.not('owner_user_id', 'in', excludeFilter)
-
-    const { data, error } = await q
-      .order('created_at', { ascending: false })
-      .limit(limit)
-
-    if (error) {
-      console.error('[searchCards/chips]', error)
-      return []
+    // works 未選択 → 単一 query で完結 (既存挙動と完全互換)
+    if (workIds.length === 0) {
+      const { data, error } = await qA
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (error) {
+        console.error('[searchCards/chips]', error)
+        return []
+      }
+      return (data ?? []) as Card[]
     }
-    return (data ?? []) as Card[]
+
+    // works 選択あり → legacy fallback query を組み立て
+    // 各 work の display_name_ja / display_name_en / aliases を group_name / series に対する
+    // ilike 句で OR 展開する。カンマ・括弧含む値はスキップ (Supabase .or() のセパレータ衝突回避)
+    const ilikeClauses: string[] = []
+    for (const id of workIds) {
+      const work = getWorkById(id)
+      if (work == null) continue
+      const terms = [work.display_name_ja, work.display_name_en ?? '', ...work.aliases]
+      for (const term of terms) {
+        const t = term.trim()
+        if (t === '' || t.includes(',') || t.includes('(') || t.includes(')')) continue
+        ilikeClauses.push(`group_name.ilike.%${t}%`)
+        ilikeClauses.push(`series.ilike.%${t}%`)
+      }
+    }
+
+    type ChipQueryResult = { data: Card[] | null; error: unknown }
+    const queries: PromiseLike<ChipQueryResult>[] = [
+      qA
+        .order('created_at', { ascending: false })
+        .limit(limit)
+        .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
+    ]
+    if (ilikeClauses.length > 0) {
+      let qB = supabase
+        .from('cards')
+        .select('*, owner:profiles(*)')
+        .eq('status', 'active')
+      if (characterIds.length > 0) qB = qB.overlaps('characters', characterIds)
+      if (itemTypeIds.length > 0) qB = qB.overlaps('item_types', itemTypeIds)
+      qB = qB.or(ilikeClauses.join(','))
+      if (excludeFilter != null) qB = qB.not('owner_user_id', 'in', excludeFilter)
+      queries.push(
+        qB
+          .order('created_at', { ascending: false })
+          .limit(limit)
+          .then((r) => ({ data: r.data as Card[] | null, error: r.error })),
+      )
+    }
+
+    const results = await Promise.all(queries)
+    const seen = new Set<string>()
+    const merged: Card[] = []
+    for (const result of results) {
+      if (result.error) {
+        console.error('[searchCards/chips]', result.error)
+        continue
+      }
+      for (const c of result.data ?? []) {
+        if (seen.has(c.id)) continue
+        seen.add(c.id)
+        merged.push(c)
+      }
+    }
+    return merged.slice(0, limit)
   }
 
   // 経路 2: チップ 0 + free text → 既存 3 query merge

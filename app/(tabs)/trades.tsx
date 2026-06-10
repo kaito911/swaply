@@ -2,6 +2,7 @@ import { HeaderActions } from '@/components/HeaderActions'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { TradeStats } from '@/components/TradeStats'
 import { TrustBadge } from '@/components/TrustBadge'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors } from '@/constants/theme'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useMemo, useState } from 'react'
@@ -510,26 +511,29 @@ export default function ProposeScreen() {
                     </Pressable>
                   </View>
 
-                  <Pressable
-                    style={[styles.counterButton, isActing && styles.disabledButton]}
-                    disabled={isActing}
-                    onPress={() => {
-                      const proposerCardId = getProposerCardId(offer)
-                      if (!proposerCardId || !offer.target_card?.id || !userId) return
-                      router.push({
-                        pathname: '/offer/counter',
-                        params: {
-                          originalOfferId: offer.id,
-                          proposerId: userId,
-                          receiverId: offer.proposer_user_id,
-                          proposerCardId: offer.target_card.id,
-                          receiverCardId: proposerCardId,
-                        },
-                      } as never)
-                    }}
-                  >
-                    <Text style={styles.counterButtonText}>調整金変更を提案</Text>
-                  </Pressable>
+                  {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は「調整金変更を提案」ボタンを非表示 */}
+                  {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+                    <Pressable
+                      style={[styles.counterButton, isActing && styles.disabledButton]}
+                      disabled={isActing}
+                      onPress={() => {
+                        const proposerCardId = getProposerCardId(offer)
+                        if (!proposerCardId || !offer.target_card?.id || !userId) return
+                        router.push({
+                          pathname: '/offer/counter',
+                          params: {
+                            originalOfferId: offer.id,
+                            proposerId: userId,
+                            receiverId: offer.proposer_user_id,
+                            proposerCardId: offer.target_card.id,
+                            receiverCardId: proposerCardId,
+                          },
+                        } as never)
+                      }}
+                    >
+                      <Text style={styles.counterButtonText}>調整金変更を提案</Text>
+                    </Pressable>
+                  )}
                 </View>
               ) : canOpenTrade ? (
                 <View style={styles.actionArea}>

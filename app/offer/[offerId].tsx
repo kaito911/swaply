@@ -3,6 +3,7 @@
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { TradeStats } from '@/components/TradeStats'
 import { TrustBadge } from '@/components/TrustBadge'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, radius, spacing } from '@/constants/theme'
 import { acceptOffer, declineOffer, fetchOfferById } from '@/lib/supabase'
 import {
@@ -331,24 +332,28 @@ export default function OfferDetailScreen() {
           </View>
         </View>
 
-        {/* 調整金 */}
-        {offer.adjustment_amount != null && offer.adjustment_amount !== 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>調整金</Text>
-            <Text style={styles.bodyText}>
-              {(() => {
-                const amount = offer.adjustment_amount
-                const absText = `¥${Math.abs(amount).toLocaleString()}`
-                const proposerPays = amount < 0
-                const youPay =
-                  (isReceived && !proposerPays) ||
-                  (!isReceived && proposerPays)
-                const direction = youPay ? 'あなた → 相手' : '相手 → あなた'
-                return `調整金 ${absText}（${direction}）`
-              })()}
-            </Text>
-          </View>
-        )}
+        {/* 調整金
+            β1: ADJUSTMENT_MONEY_ENABLED=false 中は非表示 (β1 では adjustment_amount=0 で
+            送信される設計のため、フラグオフ時に表示条件 (amount !== 0) は通常 false。
+            既存データ復活時の防御として AND ガードする) */}
+        {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED &&
+          offer.adjustment_amount != null && offer.adjustment_amount !== 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>調整金</Text>
+              <Text style={styles.bodyText}>
+                {(() => {
+                  const amount = offer.adjustment_amount
+                  const absText = `¥${Math.abs(amount).toLocaleString()}`
+                  const proposerPays = amount < 0
+                  const youPay =
+                    (isReceived && !proposerPays) ||
+                    (!isReceived && proposerPays)
+                  const direction = youPay ? 'あなた → 相手' : '相手 → あなた'
+                  return `調整金 ${absText}（${direction}）`
+                })()}
+              </Text>
+            </View>
+          )}
 
         {/* メッセージ */}
         {offer.message != null && offer.message.trim().length > 0 && (
@@ -377,13 +382,16 @@ export default function OfferDetailScreen() {
                 <Text style={styles.primaryButtonText}>承認</Text>
               </Pressable>
             </View>
-            <Pressable
-              style={[styles.counterButton, acting && styles.disabledButton]}
-              disabled={acting}
-              onPress={handleCounter}
-            >
-              <Text style={styles.counterButtonText}>調整金変更を提案</Text>
-            </Pressable>
+            {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は「調整金変更を提案」ボタンを非表示 */}
+            {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
+              <Pressable
+                style={[styles.counterButton, acting && styles.disabledButton]}
+                disabled={acting}
+                onPress={handleCounter}
+              >
+                <Text style={styles.counterButtonText}>調整金変更を提案</Text>
+              </Pressable>
+            )}
           </>
         )}
       </ScrollView>

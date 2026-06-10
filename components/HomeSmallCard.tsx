@@ -4,6 +4,7 @@
 // 写真右上に LikeButton (size=small) overlay。
 
 import { LikeButton } from '@/components/LikeButton'
+import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card } from '@/lib/types'
 import { Image } from 'expo-image'
@@ -58,8 +59,9 @@ export function HomeSmallCard({
           </View>
         )}
 
-        {/* 差額なしタグ: bottom-left overlay（Lane 2 の責務を視覚的に伝える） */}
-        {!card.allows_adjustment && (
+        {/* 差額なしタグ: bottom-left overlay（Lane 2 の責務を視覚的に伝える）
+            β1: ADJUSTMENT_MONEY_ENABLED=false 中は非表示 */}
+        {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && !card.allows_adjustment && (
           <View style={styles.diffOverlay}>
             <Text style={styles.diffText}>調整金なし</Text>
           </View>

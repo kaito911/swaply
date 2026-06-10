@@ -1,42 +1,50 @@
 // app/listing/new/want.tsx
-// Step 3.5c Phase 1: 出品 form「求」構造化入力 step
+// Phase B-2 (commit 3): 求リストから選ぶ step
 //
-// 設計方針:
-//   - 譲側 (work / characters / items) と同じ MultiSelectAutocomplete + free text fallback
-//     パターンを再利用、画面分割せず 1 ページに 3 個の autocomplete を縦並び
-//     (求は全 optional なので「気軽に書ける」UX を演出する)
-//   - want_works / want_characters / want_item_types の 3 配列を出力 (master id + free text 混在)
-//   - 「入力するとマッチングされやすくなります」コピーで matcher v3 連動を匂わせる
+// 設計刷新 (採用方針 A):
+//   - 既存の構造化自由入力 (master ID + free text の MultiSelectAutocomplete x3) を廃止し、
+//     自分の求リスト (wanted_cards, active のみ) から複数選択する UX に置換
+//   - 1 件以上選択必須、未選択時は「次へ」disabled
+//   - 求リスト 0 件時はその場で簡易追加できる救済モーダルを内包
+//
+// 案 X: 既存 cards.want_* の扱い
+//   - 新規出品では cards.want_* を空配列で投入 → card_wanted_links を正とする
+//   - condition.tsx 互換のため want*Json は空配列 JSON で渡す
+//   - matcher 互換は今回考えない (matcher v3 / card_wanted_links 連携は Phase 1 範囲外)
+//
+// 簡易追加モーダル方針 (commit 3 では簡素化):
+//   - 商品名 (card_name) のみ必須
+//   - グループ / メンバー / シリーズ / 参考画像は未入力 (詳細編集は /wants 画面で実施)
+//   - 既存 /wants のモーダル (600 行、サジェスト + auto 合成 + 画像 picker) は再利用しない
+//     → 共通コンポーネント抽出は別 commit で検討、commit 3 のスコープは「UI 置換」に限定
 //
 // 受け取る params (items.tsx から):
 //   imageUri, imageBackUri, workId, category, charactersJson, itemTypesJson
 // 渡す params (condition.tsx へ):
-//   上記 + wantCharactersJson, wantItemTypesJson, wantWorksJson
+//   上記 + wantWorksJson='[]' / wantCharactersJson='[]' / wantItemTypesJson='[]' (空配列、案 X)
+//        + selectedWantedCardIdsJson (新規、card_wanted_links 保存用、confirm.tsx で消費予定)
 
-import { Ionicons } from '@expo/vector-icons'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
-import { MultiSelectAutocomplete } from '@/components/MultiSelectAutocomplete'
 import { ScreenHeader } from '@/components/ScreenHeader'
-import { colors, fontWeight, radius, spacing } from '@/constants/theme'
+import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
-import {
-  getCharacterSuggestionsAcrossWorks,
-  getItemTypeSuggestions,
-  getWorkSuggestions,
-  recordListingKeyword,
-} from '@/lib/master'
-import type {
-  MasterCharacter,
-  MasterItemType,
-  MasterWork,
-} from '@/lib/types'
+import { addWantedCard, fetchMyWantedCards } from '@/lib/supabase'
+import { WantedCard } from '@/lib/types'
+import { Ionicons } from '@expo/vector-icons'
+import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -52,56 +60,47 @@ export default function ListingNewWantScreen() {
   }>()
   const { userId } = useAuth()
 
-  // master 選択 (chip 表示) と free text を分離保持 (characters/items.tsx と同じ paradigm)
-  const [wantWorks, setWantWorks] = useState<MasterWork[]>([])
-  const [wantWorkFreeTexts, setWantWorkFreeTexts] = useState<string[]>([])
+  const [wants, setWants] = useState<WantedCard[]>([])
+  const [loading, setLoading] = useState(true)
+  // 選択中 wanted_card.id の Set (順序保持不要、has() で高速判定)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-  const [wantChars, setWantChars] = useState<MasterCharacter[]>([])
-  const [wantCharFreeTexts, setWantCharFreeTexts] = useState<string[]>([])
+  // 簡易追加モーダル state (commit 3 では商品名のみ必須)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [formCardName, setFormCardName] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  const [wantItemTypes, setWantItemTypes] = useState<MasterItemType[]>([])
-  const [wantItemTypeFreeTexts, setWantItemTypeFreeTexts] = useState<string[]>([])
-
-  // 自分の出品作品でフィルタしない (求は別作品も対象になり得る)。
-  // matcher v3 で「Aの譲 ↔ Bの求」を overlap マッチする前提で、別作品の指定を許容する。
-  const fetchWorkSuggestions = (input: string) =>
-    getWorkSuggestions(input, 10)
-
-  // 求めるキャラは特定 work に紐づかない (別作品キャラの指定可)
-  // Phase 0.5b で追加された作品横断 fuzzy filter を流用
-  const fetchCharSuggestions = (input: string) =>
-    getCharacterSuggestionsAcrossWorks(input)
-
-  const fetchItemTypeSuggestions = (input: string) =>
-    getItemTypeSuggestions(input)
-
-  const handleFreeText = (
-    text: string,
-    setter: React.Dispatch<React.SetStateAction<string[]>>,
-  ) => {
-    const trimmed = text.trim()
-    if (trimmed === '') return
-    setter((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]))
-    if (userId != null) {
-      void recordListingKeyword(userId, trimmed)
+  // 求リスト取得 (fetchMyWantedCards は内部で status='active' フィルタ済、archived は返らない)
+  const load = useCallback(async () => {
+    if (userId == null) {
+      setWants([])
+      setLoading(false)
+      return
     }
+    setLoading(true)
+    const data = await fetchMyWantedCards(userId)
+    setWants(data)
+    setLoading(false)
+  }, [userId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
-  const removeFreeText = (
-    text: string,
-    setter: React.Dispatch<React.SetStateAction<string[]>>,
-  ) => {
-    setter((prev) => prev.filter((t) => t !== text))
-  }
+  const canProceed = selectedIds.size > 0
 
-  // 「次へ」は常に有効 (求は全 optional)
   const handleNext = () => {
-    const allWorks = [...wantWorks.map((w) => w.id), ...wantWorkFreeTexts]
-    const allChars = [...wantChars.map((c) => c.id), ...wantCharFreeTexts]
-    const allItemTypes = [
-      ...wantItemTypes.map((t) => t.id),
-      ...wantItemTypeFreeTexts,
-    ]
+    if (!canProceed) return
+    const ids = Array.from(selectedIds)
     router.push({
       pathname: '/listing/new/condition' as never,
       params: {
@@ -111,16 +110,75 @@ export default function ListingNewWantScreen() {
         category: params.category,
         charactersJson: params.charactersJson,
         itemTypesJson: params.itemTypesJson,
-        wantWorksJson: JSON.stringify(allWorks),
-        wantCharactersJson: JSON.stringify(allChars),
-        wantItemTypesJson: JSON.stringify(allItemTypes),
+        // 案 X: cards.want_* は新規空配列、condition.tsx の既存 parse 互換のため空 JSON で渡す
+        wantWorksJson: '[]',
+        wantCharactersJson: '[]',
+        wantItemTypesJson: '[]',
+        // 新規 (Phase B-2): 求リストから選んだ wanted_card ID 配列
+        // confirm.tsx で消費して card_wanted_links に bulk INSERT 予定 (commit 4)
+        selectedWantedCardIdsJson: JSON.stringify(ids),
       },
     })
+  }
+
+  // ── 簡易追加モーダル handlers ──
+  const handleOpenAdd = () => {
+    setFormCardName('')
+    setShowAddModal(true)
+  }
+  const handleCancelAdd = () => {
+    if (submitting) return
+    setShowAddModal(false)
+    setFormCardName('')
+  }
+  const handleSubmitAdd = async () => {
+    if (userId == null) return
+    const cardName = formCardName.trim()
+    if (cardName === '') return
+    try {
+      setSubmitting(true)
+      const created = await addWantedCard({
+        userId,
+        cardName,
+        groupName: null,
+        memberName: null,
+        series: null,
+      })
+      // 新規行を一覧の先頭に追加 + 自動選択 (採用方針: 「追加後は自動で選択済」)
+      setWants((prev) => [created, ...prev])
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.add(created.id)
+        return next
+      })
+      setShowAddModal(false)
+      setFormCardName('')
+    } catch {
+      Alert.alert('エラー', '追加に失敗しました')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const canSubmitAdd = formCardName.trim() !== '' && !submitting
+
+  // ── render ──
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
+        <ScreenHeader title="出品" subtitle="求 5/6" />
+        <View style={styles.center}>
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    )
   }
 
   return (
     <SafeAreaView style={styles.outerWrap} edges={['top', 'bottom']}>
       <ScreenHeader title="出品" subtitle="求 5/6" />
+
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -128,157 +186,171 @@ export default function ListingNewWantScreen() {
       >
         {/* 説明 */}
         <View style={styles.desc}>
-          <Text style={styles.descTitle}>求めるものを選択（任意）</Text>
+          <Text style={styles.descTitle}>あなたの求リストから選択</Text>
           <Text style={styles.descSub}>
-            空のままでも出品できます。{'\n'}
-            入力するとマッチングされやすくなります。
+            この出品で受け付けたい求商品を 1 件以上選んでください。
           </Text>
         </View>
 
-        {/* ── 求める作品 ─── */}
-        <Text style={styles.sectionLabel}>求める作品（任意）</Text>
-        <MultiSelectAutocomplete<MasterWork>
-          selected={wantWorks}
-          onChange={setWantWorks}
-          fetchSuggestions={fetchWorkSuggestions}
-          getKey={(w) => w.id}
-          renderOption={(w) => (
-            <View>
-              <Text style={styles.optionMain}>{w.display_name_ja}</Text>
-              {w.display_name_en != null && w.display_name_en !== '' && (
-                <Text style={styles.optionSub}>{w.display_name_en}</Text>
-              )}
-            </View>
-          )}
-          renderChip={(w) => (
-            <Text style={styles.chipLabel}>{w.display_name_ja}</Text>
-          )}
-          placeholder="例: 鬼滅の刃, TREASURE"
-          minInputChars={2}
-          softLimit={10}
-          freeTextEnabled
-          onFreeText={(t) => handleFreeText(t, setWantWorkFreeTexts)}
-          freeTextModalTitle="フリーテキストで追加"
-          freeTextModalBody="マスタにない作品/グループを追加できます。"
-        />
-        {wantWorkFreeTexts.length > 0 && (
-          <FreeTextChipsRow
-            items={wantWorkFreeTexts}
-            onRemove={(t) => removeFreeText(t, setWantWorkFreeTexts)}
-          />
-        )}
+        {/* + 求商品を追加 ボタン (求リスト 0 件・非 0 件 共通で表示) */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.addButton,
+            pressed && styles.addButtonPressed,
+          ]}
+          onPress={handleOpenAdd}
+        >
+          <Ionicons name="add" size={18} color={colors.primary} />
+          <Text style={styles.addButtonText}>求商品を追加</Text>
+        </Pressable>
 
-        {/* ── 求めるキャラ ─── */}
-        <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>
-          求めるキャラ・メンバー（任意）
-        </Text>
-        <MultiSelectAutocomplete<MasterCharacter>
-          selected={wantChars}
-          onChange={setWantChars}
-          fetchSuggestions={fetchCharSuggestions}
-          getKey={(c) => c.id}
-          renderOption={(c) => (
-            <View>
-              <Text style={styles.optionMain}>{c.display_name_ja}</Text>
-              {c.display_name_en != null && c.display_name_en !== '' && (
-                <Text style={styles.optionSub}>{c.display_name_en}</Text>
-              )}
-            </View>
-          )}
-          renderChip={(c) => (
-            <Text style={styles.chipLabel}>{c.display_name_ja}</Text>
-          )}
-          placeholder="例: 炭治郎, ハルト"
-          minInputChars={2}
-          softLimit={10}
-          freeTextEnabled
-          onFreeText={(t) => handleFreeText(t, setWantCharFreeTexts)}
-          freeTextModalTitle="フリーテキストで追加"
-          freeTextModalBody="マスタにない名前を追加できます。"
-        />
-        {wantCharFreeTexts.length > 0 && (
-          <FreeTextChipsRow
-            items={wantCharFreeTexts}
-            onRemove={(t) => removeFreeText(t, setWantCharFreeTexts)}
-          />
-        )}
+        {wants.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Ionicons name="list-outline" size={36} color={colors.border} />
+            <Text style={styles.emptyTitle}>まだ求リストがありません</Text>
+            <Text style={styles.emptySub}>
+              出品するには、受け付けたい求商品を 1 件以上追加してください。
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.list}>
+            {wants.map((want) => {
+              const isSelected = selectedIds.has(want.id)
+              const sub = [want.series, want.group_name, want.member_name]
+                .filter((v): v is string => v != null && v !== '')
+                .join(' · ')
 
-        {/* ── 求めるグッズ種類 ─── */}
-        <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>
-          求めるグッズ種類（任意）
-        </Text>
-        <MultiSelectAutocomplete<MasterItemType>
-          selected={wantItemTypes}
-          onChange={setWantItemTypes}
-          fetchSuggestions={fetchItemTypeSuggestions}
-          getKey={(t) => t.id}
-          renderOption={(t) => (
-            <View>
-              <Text style={styles.optionMain}>{t.display_name_ja}</Text>
-              {t.display_name_en != null && t.display_name_en !== '' && (
-                <Text style={styles.optionSub}>{t.display_name_en}</Text>
-              )}
-            </View>
-          )}
-          renderChip={(t) => (
-            <Text style={styles.chipLabel}>{t.display_name_ja}</Text>
-          )}
-          placeholder="例: アクスタ, トレカ, 缶バッジ"
-          minInputChars={2}
-          softLimit={10}
-          freeTextEnabled
-          onFreeText={(t) => handleFreeText(t, setWantItemTypeFreeTexts)}
-          freeTextModalTitle="フリーテキストで追加"
-          freeTextModalBody="マスタにない種別を追加できます。"
-        />
-        {wantItemTypeFreeTexts.length > 0 && (
-          <FreeTextChipsRow
-            items={wantItemTypeFreeTexts}
-            onRemove={(t) => removeFreeText(t, setWantItemTypeFreeTexts)}
-          />
+              return (
+                <Pressable
+                  key={want.id}
+                  style={({ pressed }) => [
+                    styles.row,
+                    isSelected && styles.rowSelected,
+                    pressed && styles.rowPressed,
+                  ]}
+                  onPress={() => toggleSelect(want.id)}
+                >
+                  {want.image_url != null && want.image_url !== '' ? (
+                    <Image
+                      source={{ uri: want.image_url }}
+                      style={styles.thumb}
+                      contentFit="cover"
+                      transition={150}
+                      cachePolicy="memory-disk"
+                    />
+                  ) : (
+                    <View style={[styles.thumb, styles.thumbPlaceholder]}>
+                      <Ionicons name="image-outline" size={18} color={colors.border} />
+                    </View>
+                  )}
+
+                  <View style={styles.rowMeta}>
+                    <Text style={styles.cardName} numberOfLines={2}>
+                      {want.card_name}
+                    </Text>
+                    {sub.length > 0 && (
+                      <Text style={styles.cardSub} numberOfLines={1}>
+                        {sub}
+                      </Text>
+                    )}
+                  </View>
+
+                  <View
+                    style={[
+                      styles.checkbox,
+                      isSelected && styles.checkboxChecked,
+                    ]}
+                  >
+                    {isSelected && (
+                      <Ionicons name="checkmark" size={14} color={colors.textInverse} />
+                    )}
+                  </View>
+                </Pressable>
+              )
+            })}
+          </View>
         )}
       </ScrollView>
 
+      {/* 「次へ」CTA */}
       <View style={styles.ctaWrap}>
-        <PrimaryCTA label="次へ" onPress={handleNext} size="lg" />
+        <PrimaryCTA
+          label={
+            canProceed
+              ? `次へ（${selectedIds.size} 件選択中）`
+              : '求商品を 1 件以上選んでください'
+          }
+          onPress={handleNext}
+          disabled={!canProceed}
+          size="lg"
+        />
       </View>
+
+      {/* 簡易追加モーダル (commit 3 範囲: 商品名のみ必須、画像 / サジェストなし) */}
+      <Modal
+        visible={showAddModal}
+        transparent
+        animationType="slide"
+        onRequestClose={handleCancelAdd}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>求商品を追加</Text>
+            <Text style={styles.modalSub}>
+              商品名のみ必須です。詳細情報や参考画像は、後で「求リスト」画面から編集できます。
+            </Text>
+
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>商品名 *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="例: TREASURE ハルト アクリルスタンド"
+                value={formCardName}
+                onChangeText={setFormCardName}
+                autoCorrect={false}
+                editable={!submitting}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[
+                  styles.modalCancelButton,
+                  submitting && styles.modalButtonDisabled,
+                ]}
+                onPress={handleCancelAdd}
+                disabled={submitting}
+              >
+                <Text style={styles.modalCancelButtonText}>キャンセル</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.modalSubmitButton,
+                  !canSubmitAdd && styles.modalButtonDisabled,
+                ]}
+                onPress={handleSubmitAdd}
+                disabled={!canSubmitAdd}
+              >
+                {submitting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalSubmitButtonText}>追加する</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   )
 }
 
 // ─────────────────────────────────────────
-// sub-components
+// styles
 // ─────────────────────────────────────────
-
-function FreeTextChipsRow({
-  items,
-  onRemove,
-}: {
-  items: string[]
-  onRemove: (text: string) => void
-}) {
-  return (
-    <View style={styles.freeTextSection}>
-      <Text style={styles.freeTextSectionTitle}>
-        フリーテキスト追加分 ({items.length})
-      </Text>
-      <View style={styles.freeTextChipsRow}>
-        {items.map((t) => (
-          <View key={t} style={styles.freeTextChip}>
-            <Text style={styles.freeTextChipLabel}>{t}</Text>
-            <Pressable
-              onPress={() => onRemove(t)}
-              hitSlop={8}
-              style={styles.freeTextChipClear}
-            >
-              <Ionicons name="close" size={12} color={colors.primary} />
-            </Pressable>
-          </View>
-        ))}
-      </View>
-    </View>
-  )
-}
 
 const styles = StyleSheet.create({
   outerWrap: { flex: 1, backgroundColor: colors.background },
@@ -287,82 +359,135 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     paddingTop: spacing.lg,
     paddingBottom: spacing.xl,
+    gap: spacing.md,
   },
-  desc: { marginBottom: spacing.md },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // 説明
+  desc: {
+    gap: spacing.xs,
+  },
   descTitle: {
     fontSize: 18,
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
-    marginBottom: spacing.xs,
   },
   descSub: {
     fontSize: 13,
     color: colors.textSecondary,
     lineHeight: 19,
   },
-  sectionLabel: {
-    fontSize: 14,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  sectionLabelSpaced: {
-    marginTop: spacing.lg,
-  },
-  optionMain: {
-    fontSize: 14,
-    fontWeight: fontWeight.semibold,
-    color: colors.textPrimary,
-  },
-  optionSub: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginTop: 1,
-  },
-  chipLabel: {
-    fontSize: 12,
-    fontWeight: fontWeight.semibold,
-    color: colors.textInverse,
-  },
-  freeTextSection: {
-    marginTop: spacing.sm,
-  },
-  freeTextSectionTitle: {
-    fontSize: 11,
-    fontWeight: fontWeight.semibold,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
-  },
-  freeTextChipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-  },
-  freeTextChip: {
+
+  // + 求商品を追加
+  addButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: radius.md,
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: colors.primary,
-    borderRadius: radius.full,
-    paddingLeft: spacing.sm,
-    paddingRight: 4,
-    paddingVertical: 3,
-    backgroundColor: colors.background,
+    backgroundColor: colors.backgroundCard,
   },
-  freeTextChipLabel: {
-    fontSize: 12,
-    fontWeight: fontWeight.semibold,
+  addButtonPressed: {
+    opacity: 0.7,
+  },
+  addButtonText: {
+    fontSize: 14,
+    fontWeight: fontWeight.bold,
     color: colors.primary,
   },
-  freeTextChipClear: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+
+  // 空状態
+  emptyBox: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  emptyTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  emptySub: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: spacing.lg,
+  },
+
+  // 求リスト row
+  list: {
+    gap: spacing.sm,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.backgroundCard,
+    borderRadius: radius.lg,
+    padding: spacing.sm + 2,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  rowSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.backgroundMuted,
+  },
+  rowPressed: {
+    opacity: 0.8,
+  },
+  thumb: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
+    flexShrink: 0,
+  },
+  thumbPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rowMeta: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  cardName: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  cardSub: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  checkboxChecked: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+
+  // CTA
   ctaWrap: {
     paddingHorizontal: spacing.base,
     paddingTop: spacing.sm,
@@ -370,5 +495,83 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.background,
+  },
+
+  // 簡易追加モーダル
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: colors.backgroundCard,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: 32,
+    gap: spacing.md,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  modalSub: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  fieldBlock: {
+    gap: 6,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    fontSize: 14,
+    color: colors.textPrimary,
+    backgroundColor: colors.background,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  modalCancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+    alignItems: 'center',
+  },
+  modalCancelButtonText: {
+    fontSize: 14,
+    fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
+  },
+  modalSubmitButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+  },
+  modalSubmitButtonText: {
+    fontSize: 14,
+    fontWeight: fontWeight.bold,
+    color: colors.textInverse,
+  },
+  modalButtonDisabled: {
+    opacity: 0.4,
   },
 })

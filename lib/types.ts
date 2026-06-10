@@ -275,6 +275,36 @@ export interface WantedCard {
 }
 
 // ─────────────────────────────────────────
+// card_wanted_links (出品と求リストの紐付け中間テーブル)
+//
+// 用途: 出品作成時に「この出品で受け付ける求」を求リスト (wanted_cards) から複数選択して
+//       紐付ける。出品詳細で他ユーザーに紐付き wanted_cards を表示する。
+// 詳細: docs/migration_card_wanted_links.sql
+// FK:
+//   - card_id        → cards(id)         ON DELETE CASCADE
+//   - wanted_card_id → wanted_cards(id)  ON DELETE CASCADE
+//   - owner_user_id  → profiles(id)      ON DELETE CASCADE (denormalize、RLS 高速化用)
+// UNIQUE (card_id, wanted_card_id) で重複防止。
+// ─────────────────────────────────────────
+
+export interface CardWantedLink {
+  id: string
+  card_id: string
+  wanted_card_id: string
+  owner_user_id: string
+  created_at: string
+}
+
+/**
+ * 出品詳細表示用 (linked wanted_card を join)。
+ * wanted_card は join 結果で null になる可能性を考慮した optional 型
+ * (RLS / archived フィルタ / 削除タイミング race など防御的に nullable)。
+ */
+export interface CardWantedLinkWithWantedCard extends CardWantedLink {
+  wanted_card: WantedCard | null
+}
+
+// ─────────────────────────────────────────
 // liked_cards (UI 上は「いいね」、♡ ボタン専用)
 //
 // 求リスト (wanted_cards) とは別概念。両者を統合しない。

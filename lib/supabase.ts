@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 import { ALL_MEMBERS, MemberMaster } from '../constants/members'
 import {
   Card,
+  CardWantedLink,
+  CardWantedLinkWithWantedCard,
   LikedCard,
   LikedCardWithCard,
   computeTrustBadge,
@@ -552,6 +554,145 @@ export async function archiveWantedCard(wantId: string): Promise<void> {
   if (error) {
     throw error
   }
+}
+
+// ─────────────────────────────────────────
+// Card-wanted links (出品と求リストの紐付け)
+//
+// 出品 (cards) × 求リスト (wanted_cards) の N:N 中間テーブル。
+// 出品作成時に「この出品で受け付ける求」を求リストから複数選択して紐付ける。
+// 詳細: docs/migration_card_wanted_links.sql / lib/types.ts CardWantedLink
+//
+// 非用途:
+//   - matcher / easyScore / searchWantedCards / searchDirectMatch では使わない (Phase 1)
+//   - liked_cards (いいね) とは別概念、混在させない
+// ─────────────────────────────────────────
+
+/**
+ * 指定 card_id に対して、wantedCardIds 複数件を bulk 紐付け。
+ *
+ * 冪等性:
+ *   UNIQUE (card_id, wanted_card_id) の重複は upsert + ignoreDuplicates で no-op 扱い。
+ *   既存 link がある場合、新規 row は返らない (data には新規 INSERT 分のみ含まれる)。
+ *
+ * 整合性 (アプリ層担保):
+ *   - ownerUserId は呼出側で auth.uid() と一致させる (RLS でも auth.uid() = owner_user_id 検査)
+ *   - card_id の owner と wantedCardIds の user_id が ownerUserId と一致することは
+ *     呼出側責任 (本関数では検査しない)
+ *
+ * @returns 新規 INSERT された link 行の配列 (重複 skip 分は含まない)
+ */
+export async function addCardWantedLinks(params: {
+  cardId: string
+  wantedCardIds: string[]
+  ownerUserId: string
+}): Promise<CardWantedLink[]> {
+  if (params.wantedCardIds.length === 0) return []
+
+  const rows = params.wantedCardIds.map((wcId) => ({
+    card_id: params.cardId,
+    wanted_card_id: wcId,
+    owner_user_id: params.ownerUserId,
+  }))
+
+  const { data, error } = await supabase
+    .from('card_wanted_links')
+    .upsert(rows, {
+      onConflict: 'card_id,wanted_card_id',
+      ignoreDuplicates: true,
+    })
+    .select()
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []) as CardWantedLink[]
+}
+
+/**
+ * 指定 card_id の紐付き wanted_cards を取得 (active のみ)。
+ * 出品詳細画面で「この出品者がとくに求めているもの」表示用。
+ *
+ * archived フィルタは Supabase の join select でも書けるが、RLS との相互作用 + JS 側で
+ * 簡単に判定できるため、クライアント側で `wanted_card.status === 'active'` で filter する。
+ * Phase 1 では archived 紐付けは表示対象外 (運用方針)、データ自体は残置。
+ *
+ * RLS 前提:
+ *   - card_wanted_links: Anyone read (誰でも紐付き行を取得可能)
+ *   - wanted_cards:      Anyone read linked (紐付き行に限り公開、その他は本人 private)
+ *   - 結果: 他ユーザーが他人の出品を見た時に紐付き wanted_cards だけ表示される
+ */
+export async function fetchCardLinkedWants(
+  cardId: string,
+): Promise<CardWantedLinkWithWantedCard[]> {
+  const { data, error } = await supabase
+    .from('card_wanted_links')
+    .select('*, wanted_card:wanted_cards(*)')
+    .eq('card_id', cardId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    console.error('[fetchCardLinkedWants]', error)
+    return []
+  }
+
+  const rows = (data ?? []) as unknown as CardWantedLinkWithWantedCard[]
+  // active のみクライアント側で filter (archived は表示対象外、Phase 1 方針)
+  return rows.filter((r) => r.wanted_card != null && r.wanted_card.status === 'active')
+}
+
+/**
+ * 紐付き 1 件を削除。
+ *
+ * owner_user_id 条件は RLS でも auth.uid() で担保されているが、二重防御として
+ * 明示的に WHERE 句に含める (RLS 設定漏れ / 将来 policy 変更時の事故予防)。
+ */
+export async function removeCardWantedLink(params: {
+  linkId: string
+  ownerUserId: string
+}): Promise<void> {
+  const { error } = await supabase
+    .from('card_wanted_links')
+    .delete()
+    .eq('id', params.linkId)
+    .eq('owner_user_id', params.ownerUserId)
+
+  if (error) {
+    throw error
+  }
+}
+
+/**
+ * 指定 card_id の紐付きを丸ごと差し替える (編集画面用)。
+ *
+ * 既存 links を delete → 新規 wanted_card_ids を bulk insert の 2 段階。
+ * トランザクション化は将来 RPC で対応検討、Phase 1 は逐次実行 (delete 失敗時は
+ * 例外を投げて insert に進まない)。
+ *
+ * owner_user_id 条件で「自分の link だけ」を delete 対象に絞る (RLS と二重防御)。
+ */
+export async function replaceCardWantedLinks(params: {
+  cardId: string
+  wantedCardIds: string[]
+  ownerUserId: string
+}): Promise<CardWantedLink[]> {
+  const { error: deleteError } = await supabase
+    .from('card_wanted_links')
+    .delete()
+    .eq('card_id', params.cardId)
+    .eq('owner_user_id', params.ownerUserId)
+
+  if (deleteError) {
+    throw deleteError
+  }
+
+  if (params.wantedCardIds.length === 0) return []
+
+  return addCardWantedLinks({
+    cardId: params.cardId,
+    wantedCardIds: params.wantedCardIds,
+    ownerUserId: params.ownerUserId,
+  })
 }
 
 // ─────────────────────────────────────────

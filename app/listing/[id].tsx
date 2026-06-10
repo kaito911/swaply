@@ -8,6 +8,7 @@ import {
   addLike,
   addUserBlock,
   fetchCard,
+  fetchCardLinkedWants,
   fetchMyBlockedUserIds,
   fetchMyLikedCardIds,
   fetchMyWantedCards,
@@ -20,7 +21,7 @@ import {
   getItemTypeById,
   getWorkById,
 } from '@/lib/master'
-import { Card, computeTrustBadge, Profile, TrustBadgeLevel, WantedCard, WantMatchScore } from '@/lib/types'
+import { Card, CardWantedLinkWithWantedCard, computeTrustBadge, Profile, TrustBadgeLevel, WantedCard, WantMatchScore } from '@/lib/types'
 import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -168,6 +169,9 @@ export default function ListingDetailScreen() {
   // 現状 JSX 非使用。Phase B 以降の参照余地として state ホールド、意図を eslint-disable で明示。
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [myWants, setMyWants] = useState<WantedCard[]>([])
+  // Phase B-2 (commit 5): card_wanted_links 経由で紐付き wanted_cards を表示。
+  // 旧出品 (card_wanted_links 0 件) では既存 cards.want_* / want_description fallback を表示。
+  const [linkedWants, setLinkedWants] = useState<CardWantedLinkWithWantedCard[]>([])
   const [likeToggling, setLikeToggling] = useState(false)
   // ★ Phase A: liked_cards (UI 上「いいね」) は card_id 直接比較なので
   // optimistic state は単純な boolean に簡素化
@@ -204,6 +208,12 @@ export default function ListingDetailScreen() {
       }
 
       setCard(fetched)
+
+      // Phase B-2: linked wants 取得 (認証不要、誰でも読める RLS policy 経由)。
+      // fetchCardLinkedWants は内部で active のみ filter + エラー時 [] 返却するため
+      // 詳細画面全体を落とさない (取得失敗時の fallback は cards.want_* 既存表示)。
+      const linkedW = await fetchCardLinkedWants(fetched.id)
+      setLinkedWants(linkedW)
 
       if (uid != null) {
         const [wants, blockedIds, likedIds] = await Promise.all([
@@ -667,71 +677,133 @@ export default function ListingDetailScreen() {
         ) : (
           // ─ 求タブ: 相手が求めているもの ─
           <View style={styles.body}>
-            {/* 求条件のメインカード (求 hero) — 構造化された want_* を chip 表示 + 詳細テキスト */}
+            {/* 求条件のメインカード (求 hero) — Phase B-2 (commit 5):
+                  linkedWants > 0 → card_wanted_links 経由の wanted_cards を優先表示
+                  linkedWants 0 件 → 旧出品 fallback (cards.want_* / want_description) */}
             <View style={styles.wantHeroCard}>
               <Text style={styles.wantHeroBadge}>求</Text>
               <Text style={styles.wantHeroSubtitle}>
                 この出品者が求めているもの
               </Text>
 
-              {/* 求める作品 */}
-              {card.want_works != null && card.want_works.length > 0 && (
-                <View style={styles.wantChipBlock}>
-                  <Text style={styles.wantChipBlockLabel}>求める作品</Text>
-                  <View style={styles.wantChipsRow}>
-                    {card.want_works.map((id) => (
-                      <View key={`work-${id}`} style={styles.wantChip}>
-                        <Text style={styles.wantChipText}>
-                          {getWorkById(id)?.display_name_ja ?? id}
-                        </Text>
+              {linkedWants.length > 0 ? (
+                // Phase B-2: linked wanted_cards を row 形式で表示。
+                // wanted_card.image_url があれば 48px サムネイル、なければプレースホルダー。
+                // archived は fetchCardLinkedWants 側で除外済 (active のみ)。
+                <View style={styles.linkedWantsBlock}>
+                  {linkedWants.map((link) => {
+                    const wc = link.wanted_card
+                    if (wc == null) return null // 防御: join race / RLS 等で null になり得る
+                    const sub = [wc.series, wc.group_name, wc.member_name]
+                      .filter((v): v is string => v != null && v !== '')
+                      .join(' · ')
+                    return (
+                      <View key={link.id} style={styles.linkedWantRow}>
+                        {wc.image_url != null && wc.image_url !== '' ? (
+                          <Image
+                            source={{ uri: wc.image_url }}
+                            style={styles.linkedWantThumb}
+                            contentFit="cover"
+                            transition={150}
+                            cachePolicy="memory-disk"
+                          />
+                        ) : (
+                          <View
+                            style={[
+                              styles.linkedWantThumb,
+                              styles.linkedWantThumbPlaceholder,
+                            ]}
+                          >
+                            <Ionicons
+                              name="image-outline"
+                              size={18}
+                              color={colors.border}
+                            />
+                          </View>
+                        )}
+                        <View style={styles.linkedWantMeta}>
+                          <Text
+                            style={styles.linkedWantName}
+                            numberOfLines={2}
+                          >
+                            {wc.card_name}
+                          </Text>
+                          {sub.length > 0 && (
+                            <Text
+                              style={styles.linkedWantSub}
+                              numberOfLines={1}
+                            >
+                              {sub}
+                            </Text>
+                          )}
+                        </View>
                       </View>
-                    ))}
-                  </View>
+                    )
+                  })}
                 </View>
+              ) : (
+                // 旧出品 fallback: 既存の cards.want_* / want_description 表示を維持
+                <>
+                  {/* 求める作品 */}
+                  {card.want_works != null && card.want_works.length > 0 && (
+                    <View style={styles.wantChipBlock}>
+                      <Text style={styles.wantChipBlockLabel}>求める作品</Text>
+                      <View style={styles.wantChipsRow}>
+                        {card.want_works.map((id) => (
+                          <View key={`work-${id}`} style={styles.wantChip}>
+                            <Text style={styles.wantChipText}>
+                              {getWorkById(id)?.display_name_ja ?? id}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* 求めるキャラ */}
+                  {card.want_characters != null &&
+                    card.want_characters.length > 0 && (
+                      <View style={styles.wantChipBlock}>
+                        <Text style={styles.wantChipBlockLabel}>求めるキャラ</Text>
+                        <View style={styles.wantChipsRow}>
+                          {card.want_characters.map((id) => (
+                            <View key={`char-${id}`} style={styles.wantChip}>
+                              <Text style={styles.wantChipText}>
+                                {getCharacterById(id)?.display_name_ja ?? id}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+
+                  {/* 求めるグッズ種類 */}
+                  {card.want_item_types != null &&
+                    card.want_item_types.length > 0 && (
+                      <View style={styles.wantChipBlock}>
+                        <Text style={styles.wantChipBlockLabel}>求めるグッズ種類</Text>
+                        <View style={styles.wantChipsRow}>
+                          {card.want_item_types.map((id) => (
+                            <View key={`type-${id}`} style={styles.wantChip}>
+                              <Text style={styles.wantChipText}>
+                                {getItemTypeById(id)?.display_name_ja ?? id}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+
+                  {/* 詳細・コメント (want_description 既存) */}
+                  <Text style={styles.wantHeroBlockLabel}>詳細・コメント</Text>
+                  <Text style={styles.wantHeroBody}>
+                    {card.want_description != null &&
+                    card.want_description.trim() !== ''
+                      ? card.want_description
+                      : '—'}
+                  </Text>
+                </>
               )}
-
-              {/* 求めるキャラ */}
-              {card.want_characters != null &&
-                card.want_characters.length > 0 && (
-                  <View style={styles.wantChipBlock}>
-                    <Text style={styles.wantChipBlockLabel}>求めるキャラ</Text>
-                    <View style={styles.wantChipsRow}>
-                      {card.want_characters.map((id) => (
-                        <View key={`char-${id}`} style={styles.wantChip}>
-                          <Text style={styles.wantChipText}>
-                            {getCharacterById(id)?.display_name_ja ?? id}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-              {/* 求めるグッズ種類 */}
-              {card.want_item_types != null &&
-                card.want_item_types.length > 0 && (
-                  <View style={styles.wantChipBlock}>
-                    <Text style={styles.wantChipBlockLabel}>求めるグッズ種類</Text>
-                    <View style={styles.wantChipsRow}>
-                      {card.want_item_types.map((id) => (
-                        <View key={`type-${id}`} style={styles.wantChip}>
-                          <Text style={styles.wantChipText}>
-                            {getItemTypeById(id)?.display_name_ja ?? id}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-              {/* 詳細・コメント (want_description 既存) */}
-              <Text style={styles.wantHeroBlockLabel}>詳細・コメント</Text>
-              <Text style={styles.wantHeroBody}>
-                {card.want_description != null &&
-                card.want_description.trim() !== ''
-                  ? card.want_description
-                  : '—'}
-              </Text>
             </View>
 
             {/* 交換条件 (求タブにも表示: 提案時に必要な条件として参照) */}
@@ -1161,6 +1233,46 @@ const styles = StyleSheet.create({
   },
 
   // ── 求タブ: 構造化 chip ────────────────────
+  // Phase B-2 (commit 5): linked wanted_cards 表示用 (card_wanted_links 経由)
+  linkedWantsBlock: {
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  linkedWantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  linkedWantThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
+    flexShrink: 0,
+  },
+  linkedWantThumbPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkedWantMeta: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  linkedWantName: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  linkedWantSub: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+  },
   wantChipBlock: {
     marginTop: spacing.sm,
   },

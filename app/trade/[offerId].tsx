@@ -490,7 +490,15 @@ export default function TradeDetailScreen() {
       Alert.alert('発送通知完了', '発送状況を更新しました。')
       await loadTrade()
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '発送通知に失敗しました。'
+      // supabase-js の RPC error は PostgrestError (plain object) で instanceof Error が false。
+      // RAISE EXCEPTION の message を拾うため plain object の .message も読む。
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'object' && error !== null && 'message' in error
+            ? String((error as { message?: unknown }).message ?? '') ||
+              '発送通知に失敗しました。'
+            : '発送通知に失敗しました。'
       Alert.alert('発送通知エラー', message)
     } finally {
       setSubmittingShipment(false)

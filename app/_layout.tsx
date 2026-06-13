@@ -192,6 +192,16 @@ function RootNavigator() {
           }}
         />
         <Stack.Screen
+          name="venue/my-posts"
+          options={{
+            headerShown: true,
+            title: '自分の会場投稿',
+            headerStyle: { backgroundColor: colors.background },
+            headerTintColor: colors.textPrimary,
+            headerShadowVisible: false,
+          }}
+        />
+        <Stack.Screen
           name="legal"
           options={{ headerShown: false }}
         />

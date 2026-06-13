@@ -359,7 +359,7 @@ export interface UserOshi {
 
 export type VenueStatus = 'upcoming' | 'open' | 'closed'
 export type SupplyPostStatus = 'active' | 'withdrawn' | 'held'
-export type VenueHoldStatus = 'pending' | 'held' | 'expired' | 'cancelled' | 'converted'
+export type VenueHoldStatus = 'pending' | 'held' | 'expired' | 'cancelled' | 'converted' | 'declined'
 export type VenueTradeStatus = 'pending' | 'proposer_confirmed' | 'completed' | 'cancelled'
 
 export interface Venue {
@@ -515,6 +515,18 @@ export const TRADE_STATUS_LABELS: Record<TradeStatus, string> = {
   completed: '完了',
   cancelled: 'キャンセル',
   disputed: 'トラブル',
+}
+
+// venue_holds.status の表示ラベル。VenueHoldStatus と 1:1 で対応。
+// 'expired' は lazy 判定 (expires_at < now() の pending を UI 上で expired 扱い) でも使用するため、
+// 「期限切れ」表示はこの値を流用する。
+export const VENUE_HOLD_STATUS_LABELS: Record<VenueHoldStatus, string> = {
+  pending: '承認待ち',
+  held: 'Hold確定',
+  expired: '期限切れ',
+  cancelled: 'キャンセル',
+  converted: '取引化済み',
+  declined: '拒否済み',
 }
 
 // バッジ表示ラベルの単一情報源（TrustBadge / offer-insights / 他で共有）

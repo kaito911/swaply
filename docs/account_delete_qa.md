@@ -439,15 +439,40 @@ PR #22 で trade 系 6 FK を `profiles(id) ON DELETE CASCADE` に張り替え�
 - 相手側 UI で履歴が確認できる
 - → **A-1 trade 側 end-to-end 再検証は PASS**
 
-### 6.6 残課題 (今回スコープ外)
+### 6.6 残課題 (2026-06-10 時点、その後の進捗は §7 参照)
 
-- A-3 venue 系 FK の張り替え (`venue_holds` / `venue_trades` / `venue_checkins` / `venue_supply_posts` 等は依然 `auth.users(id)` 参照)
+- A-3 venue 系 FK の張り替え (`venue_holds` / `venue_trades` / `venue_checkins` / `venue_supply_posts` 等は依然 `auth.users(id)` 参照) → §7 で進捗更新
 - その他 `auth.users(id)` 参照のまま残るテーブル (`wanted_cards` / `reports` / `user_blocks` / `shelf_items` / `user_oshi` / `user_keyword_history` / `pioneer_program_applications`) の処置方針確定
 - 普通郵便・ミニレター時の発送通知失敗の調査
 
 ---
 
-## 7. 改訂履歴
+## 7. A-3 venue FK audit / 退会処理の E2E 状況
+
+- PR #24 は venue FK / `delete_my_account` の DB 基盤 PR として扱う。
+- 変更は本番 Supabase DB に適用済み。
+- `delete_my_account` の tombstone 前提は確認済み。
+  - `profiles` は物理削除しない。
+  - PII を NULL 化し、`profiles.id` は維持する。
+  - 相手側履歴では「削除済みユーザー」として表示する設計。
+- ただし A-3 E2E は venue モードの P0 未整備により blocked。
+  - Hold 受信の気づき導線
+  - Hold 承認導線
+  - venue_trade 生成後の状態遷移
+  - 会場取引履歴表示
+  - venue_trade 専用 DM
+
+  が未整備のため、会場取引ループを実機で完走できない。
+- 本 PR / 本記録をもって A-3 完了扱いにはしない。
+- venue モード P0 修正後に A-3 E2E を再開する。
+- 既知リスク:
+  - 通常退会 RPC では発生しないが、`profiles` を手動 DELETE すると、`ON DELETE CASCADE` により venue 履歴や将来の DM 証跡が消える可能性がある。
+  - 手動 DELETE は禁止運用とし、将来的に DB 防御を検討する。
+- 関連: 会場モード刷新の P0 / P1 / P2 仕様および A-3 再開条件は `docs/venue_mode_requirements.md` 参照。
+
+---
+
+## 8. 改訂履歴
 
 - **v1 (2026-06-05)**: 初版。Phase 0 外部レビュー指摘を受けて作成。
   - P0-1 確認結果 (Edge Function 本人性 OK)
@@ -458,3 +483,8 @@ PR #22 で trade 系 6 FK を `profiles(id) ON DELETE CASCADE` に張り替え�
   - PR #22 (FK 6 本張り替え) merge 後の実機 E2E 再検証結果を記録
   - S1 / S2 両シナリオ PASS を明記
   - DB 検証結果を表形式で残存 (UID `1583f8d1-87ec-4ef8-bc43-59c61da24ca8`)
+- **v3 (2026-06-13)**: §7 を追加。
+  - PR #24 (venue FK 5 本張り替え + `delete_my_account` venue active 判定追加) の状態を記録
+  - A-3 E2E が venue モード P0 未整備により blocked であることを明記
+  - 本 PR / 本記録での A-3 完了扱いを否定
+  - § 6.6 の残課題見出しを「2026-06-10 時点」と注記し §7 への参照を追加

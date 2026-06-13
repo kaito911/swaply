@@ -23,6 +23,7 @@ const HOLD_STATUS_LABELS: Record<VenueHoldStatus, string> = {
   expired: '期限切れ',
   cancelled: 'キャンセル',
   converted: '取引化済み',
+  declined: '拒否済み',
 }
 
 const HOLD_STATUS_COLORS: Record<VenueHoldStatus, string> = {
@@ -31,6 +32,7 @@ const HOLD_STATUS_COLORS: Record<VenueHoldStatus, string> = {
   expired: '#6B7280',
   cancelled: '#6B7280',
   converted: '#4F46E5',
+  declined: '#6B7280',
 }
 
 function timeLeft(expiresAt: string): string {

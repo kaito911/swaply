@@ -17,6 +17,7 @@ import {
   TradeStatus,
   TrustBadgeLevel,
   UserOshi,
+  SupplyPostStatus,
   Venue,
   VenueCheckin,
   VenueHold,
@@ -2273,23 +2274,241 @@ export async function withdrawSupplyPost(postId: string): Promise<void> {
   }
 }
 
+// PR2: 受信 Hold inbox 用に拡張した戻り値型。
+// fetchVenueHolds が profile / supply_post を join した結果を保持する。
+// 既存呼出 (venueHold として使う側) は VenueHold[] への代入で互換 (上位互換型)。
+export interface VenueHoldCounterpartProfile {
+  id: string
+  handle: string | null
+  display_name: string | null
+  trade_count: number
+  ship_rate: number
+  trouble_count: number
+}
+
+export interface VenueHoldWithRelations extends VenueHold {
+  proposer_profile?: VenueHoldCounterpartProfile | null
+  receiver_profile?: VenueHoldCounterpartProfile | null
+  // supply_post_id が NULL でない場合のみ参照。SET NULL FK で削除済みなら null。
+  supply_post_meta?: { id: string; card_name: string; status: SupplyPostStatus } | null
+}
+
+export type VenueHoldDirection = 'all' | 'received' | 'sent'
+
+/**
+ * 指定 venue における自分関与の Hold を取得。
+ *
+ * direction:
+ *   - 'all'      : proposer / receiver どちらかが自分
+ *   - 'received' : receiver_id = userId (自分が受信者 = supply_post 投稿者)
+ *   - 'sent'     : proposer_id = userId (自分が申請者)
+ *
+ * 返却に proposer / receiver の profile 概要と supply_post 概要を含めるため、
+ * 1 回の本クエリ + profiles 取得 + venue_supply_posts 取得 の最大 3 回のリクエスト。
+ * RLS で当事者のみ可視のため、漏洩リスクなし。
+ */
 export async function fetchVenueHolds(
   venueId: string,
-  userId: string
-): Promise<VenueHold[]> {
-  const { data, error } = await supabase
+  userId: string,
+  direction: VenueHoldDirection = 'all'
+): Promise<VenueHoldWithRelations[]> {
+  let query = supabase
     .from('venue_holds')
     .select('*')
     .eq('venue_id', venueId)
-    .or(`proposer_id.eq.${userId},receiver_id.eq.${userId}`)
-    .order('created_at', { ascending: false })
+
+  if (direction === 'received') {
+    query = query.eq('receiver_id', userId)
+  } else if (direction === 'sent') {
+    query = query.eq('proposer_id', userId)
+  } else {
+    query = query.or(`proposer_id.eq.${userId},receiver_id.eq.${userId}`)
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: false })
 
   if (error) {
     console.error('[fetchVenueHolds]', error)
     return []
   }
 
-  return (data ?? []) as VenueHold[]
+  const holds = (data ?? []) as VenueHold[]
+  if (holds.length === 0) return []
+
+  // proposer / receiver の profile を 1 クエリで取得 (denormalize merge)
+  const userIds = Array.from(new Set([
+    ...holds.map((h) => h.proposer_id),
+    ...holds.map((h) => h.receiver_id),
+  ]))
+
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, handle, display_name, trade_count, ship_rate, trouble_count')
+    .in('id', userIds)
+
+  const profileMap: Record<string, VenueHoldCounterpartProfile> = Object.fromEntries(
+    (profiles ?? []).map((p: VenueHoldCounterpartProfile) => [p.id, p])
+  )
+
+  // supply_post meta 取得 (削除済 / 取下済の表示判定に必要)
+  const supplyPostIds = Array.from(new Set(
+    holds.map((h) => h.supply_post_id).filter((id): id is string => id != null)
+  ))
+
+  let supplyPostMap: Record<string, { id: string; card_name: string; status: SupplyPostStatus }> = {}
+  if (supplyPostIds.length > 0) {
+    const { data: posts } = await supabase
+      .from('venue_supply_posts')
+      .select('id, card_name, status')
+      .in('id', supplyPostIds)
+
+    supplyPostMap = Object.fromEntries(
+      (posts ?? []).map((p: { id: string; card_name: string; status: SupplyPostStatus }) => [p.id, p])
+    )
+  }
+
+  return holds.map((h) => ({
+    ...h,
+    proposer_profile: profileMap[h.proposer_id] ?? null,
+    receiver_profile: profileMap[h.receiver_id] ?? null,
+    supply_post_meta:
+      h.supply_post_id != null ? (supplyPostMap[h.supply_post_id] ?? null) : null,
+  }))
+}
+
+/**
+ * Hold を拒否する (受信者 = supply_post 投稿者の操作)。
+ * 更新クエリ側で status='pending' AND receiver_id=userId を強制 → UI 改竄や
+ * race condition で他人の Hold を書き換えられない。
+ */
+export async function declineVenueHold(
+  holdId: string,
+  userId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('venue_holds')
+    .update({ status: 'declined', updated_at: new Date().toISOString() })
+    .eq('id', holdId)
+    .eq('status', 'pending')
+    .eq('receiver_id', userId)
+
+  if (error) throw error
+}
+
+/**
+ * 自分が送った Hold を取り消す (申請者の操作)。
+ * 更新クエリ側で status='pending' AND proposer_id=userId を強制。
+ */
+export async function cancelVenueHold(
+  holdId: string,
+  userId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('venue_holds')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('id', holdId)
+    .eq('status', 'pending')
+    .eq('proposer_id', userId)
+
+  if (error) throw error
+}
+
+/**
+ * 自分宛の受信中 (pending かつ未失効) Hold 件数を取得。
+ * venueId を渡せば当該 venue 限定。未指定なら全 venue 横断 (BadgeProvider 用)。
+ * RLS でも当事者のみカウントされるため二重防御。
+ */
+export async function fetchReceivedHoldCount(
+  userId: string,
+  venueId?: string
+): Promise<number> {
+  const now = new Date().toISOString()
+  let query = supabase
+    .from('venue_holds')
+    .select('id', { count: 'exact', head: true })
+    .eq('receiver_id', userId)
+    .eq('status', 'pending')
+    .gt('expires_at', now)
+
+  if (venueId != null) {
+    query = query.eq('venue_id', venueId)
+  }
+
+  const { count, error } = await query
+
+  if (error) {
+    console.error('[fetchReceivedHoldCount]', error)
+    return 0
+  }
+
+  return count ?? 0
+}
+
+/**
+ * 自分の supply_post 一覧 (status / expires_at 不問、全件)。
+ * /venue/my-posts 用。active / withdrawn / 期限切れ表示を呼出側で判定する。
+ */
+export async function fetchMySupplyPosts(
+  venueId: string,
+  userId: string
+): Promise<VenueSupplyPost[]> {
+  const { data, error } = await supabase
+    .from('venue_supply_posts')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[fetchMySupplyPosts]', error)
+    return []
+  }
+
+  return (data ?? []) as VenueSupplyPost[]
+}
+
+/**
+ * 自分の supply_post id 群に対する pending Hold 件数。
+ *
+ * 呼出規約 (RLS 漏洩防止):
+ *   - supplyPostIds は **必ず** fetchMySupplyPosts の戻り値 (= 自分の post のみ) を渡すこと。
+ *   - 他人の supply_post id を混ぜると、本関数は count=0 を返す (RLS により当事者でない hold は見えない)
+ *     が、論理的に「他人の supply 状況を覗く意図」になるため絶対にやってはいけない。
+ *
+ * 集計条件:
+ *   - supply_post_id IN supplyPostIds
+ *   - receiver_id = userId (自分が受信者 = supply_post 投稿者)
+ *   - status = 'pending'
+ *   - expires_at > now()
+ */
+export async function fetchHoldCountsForSupplyPosts(
+  supplyPostIds: string[],
+  userId: string
+): Promise<Record<string, number>> {
+  if (supplyPostIds.length === 0) return {}
+
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('venue_holds')
+    .select('supply_post_id')
+    .in('supply_post_id', supplyPostIds)
+    .eq('receiver_id', userId)
+    .eq('status', 'pending')
+    .gt('expires_at', now)
+
+  if (error) {
+    console.error('[fetchHoldCountsForSupplyPosts]', error)
+    return {}
+  }
+
+  const counts: Record<string, number> = {}
+  for (const row of data ?? []) {
+    const id = (row as { supply_post_id: string | null }).supply_post_id
+    if (id != null) {
+      counts[id] = (counts[id] ?? 0) + 1
+    }
+  }
+  return counts
 }
 
 export async function createVenueHold(params: {

@@ -434,6 +434,11 @@ export interface VenueTrade {
   completed_at: string | null
   created_at: string
   updated_at: string
+  // PR4b で追加: 成立時点のアイテム情報スナップショット。
+  // supply_post / cards が後で変更/削除されても trade 履歴の意味を保つ。
+  // 構造は migration_venue_trades_add_snapshot_columns.sql 参照。
+  offered_snapshot: Record<string, unknown>
+  wanted_snapshot: Record<string, unknown>
 }
 
 /**

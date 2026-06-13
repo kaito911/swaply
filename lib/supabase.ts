@@ -2585,37 +2585,34 @@ export async function createVenueHold(params: {
   return data as VenueHold
 }
 
+/**
+ * Hold を承認して venue_trade を生成する (PR4b で原子化 RPC に置換)。
+ *
+ * 旧 JS 実装の 3 ステップ (SELECT hold / UPDATE hold / INSERT trade) は廃止。
+ * 全処理を accept_venue_hold(p_hold_id uuid) RPC に集約:
+ *   - hold / supply_post 双方を FOR UPDATE でロック
+ *   - 当事者 / 状態 / 期限 / 兄弟成立を厳密にガード
+ *   - hold を 'held'、supply_post を 'held'、兄弟 pending hold を 'declined' に一括更新
+ *   - offered_snapshot / wanted_snapshot を構築して venue_trade を INSERT
+ *
+ * エラー (raise exception 文字列):
+ *   - AUTH_REQUIRED, HOLD_NOT_FOUND, NOT_RECEIVER
+ *   - HOLD_NOT_PENDING:<status>, HOLD_EXPIRED
+ *   - SUPPLY_POST_NOT_FOUND, SUPPLY_POST_NOT_ACTIVE:<status>, SUPPLY_POST_ALREADY_TAKEN
+ *
+ * 関連: docs/migration_rpc_accept_venue_hold.sql
+ */
 export async function acceptVenueHold(holdId: string): Promise<VenueTrade> {
-  const hold = await supabase
-    .from('venue_holds')
-    .select('*')
-    .eq('id', holdId)
-    .single()
-
-  if (hold.error) throw hold.error
-
-  const { error: holdError } = await supabase
-    .from('venue_holds')
-    .update({ status: 'held' })
-    .eq('id', holdId)
-
-  if (holdError) throw holdError
-
-  const { data, error } = await supabase
-    .from('venue_trades')
-    .insert({
-      venue_id: hold.data.venue_id,
-      hold_id: holdId,
-      proposer_id: hold.data.proposer_id,
-      receiver_id: hold.data.receiver_id,
-      proposer_card: hold.data.proposer_card,
-      receiver_card: hold.data.receiver_card,
-    })
-    .select()
-    .single()
+  const { data, error } = await supabase.rpc('accept_venue_hold', {
+    p_hold_id: holdId,
+  })
 
   if (error) throw error
+  if (data == null) {
+    throw new Error('NO_TRADE_RETURNED')
+  }
 
+  // RPC は public.venue_trades 行を 1 件返す
   return data as VenueTrade
 }
 

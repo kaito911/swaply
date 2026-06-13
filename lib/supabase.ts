@@ -2291,6 +2291,10 @@ export interface VenueHoldWithRelations extends VenueHold {
   receiver_profile?: VenueHoldCounterpartProfile | null
   // supply_post_id が NULL でない場合のみ参照。SET NULL FK で削除済みなら null。
   supply_post_meta?: { id: string; card_name: string; status: SupplyPostStatus } | null
+  // PR4a (B1 修正): held / converted hold に対応する venue_trade。pending hold では null。
+  // 画面再 mount 後も提案者 / 受信者の双方が trade に到達できるようにするため、
+  // fetchVenueHolds で venue_holds.id = venue_trades.hold_id を join 取得する。
+  venue_trade?: VenueTrade | null
 }
 
 export type VenueHoldDirection = 'all' | 'received' | 'sent'
@@ -2367,12 +2371,32 @@ export async function fetchVenueHolds(
     )
   }
 
+  // PR4a (B1 修正): held / converted hold に対応する venue_trade を join 取得。
+  // RLS で venue_trades は当事者のみ可視のため漏洩リスクなし。提案者 / 受信者の
+  // どちらでも自分関与の trade に必ず到達できる (in-memory 依存解消)。
+  const heldOrConvertedHoldIds = holds
+    .filter((h) => h.status === 'held' || h.status === 'converted')
+    .map((h) => h.id)
+
+  const tradeMap: Record<string, VenueTrade> = {}
+  if (heldOrConvertedHoldIds.length > 0) {
+    const { data: trades } = await supabase
+      .from('venue_trades')
+      .select('*')
+      .in('hold_id', heldOrConvertedHoldIds)
+
+    for (const t of (trades ?? []) as VenueTrade[]) {
+      tradeMap[t.hold_id] = t
+    }
+  }
+
   return holds.map((h) => ({
     ...h,
     proposer_profile: profileMap[h.proposer_id] ?? null,
     receiver_profile: profileMap[h.receiver_id] ?? null,
     supply_post_meta:
       h.supply_post_id != null ? (supplyPostMap[h.supply_post_id] ?? null) : null,
+    venue_trade: tradeMap[h.id] ?? null,
   }))
 }
 
@@ -2576,37 +2600,77 @@ export async function acceptVenueHold(holdId: string): Promise<VenueTrade> {
   return data as VenueTrade
 }
 
+/**
+ * 会場交換の手渡し完了確認 (PR4a で role 中立対称確定に再設計)。
+ *
+ * 設計方針:
+ *   - status 文字列に role を含めない (旧 `${role}_confirmed` テンプレート廃止)。
+ *     これにより receiver 先行確定で CHECK 違反 (Postgres 23514) になっていた既知バグ
+ *     (B2) を構造的に消滅させる。
+ *   - 自分 role 側の timestamp を書く + status は両 timestamp の有無で派生:
+ *       両 NULL                                → pending
+ *       片方のみ NOT NULL                      → partially_confirmed
+ *       両 NOT NULL                            → completed (completed_at セット)
+ *   - 既に完了 / キャンセル済みなら no-op (冪等)。
+ *   - 自分側 timestamp が既に立っていれば no-op (二重押し対策、冪等)。
+ *   - UPDATE クエリ側でも当事者条件 + 非終端状態の二重確認 (race condition / UI 改竄
+ *     防御)。
+ *
+ * 関連:
+ *   - docs/migration_venue_trades_state_partially_confirmed.sql (CHECK 制約再設計)
+ *   - docs/venue_mode_requirements.md §5 / §7 (対称確定方針確定)
+ */
 export async function confirmVenueTrade(
   tradeId: string,
   userId: string,
   role: 'proposer' | 'receiver'
 ): Promise<void> {
   const now = new Date().toISOString()
-  const field = role === 'proposer' ? 'proposer_confirmed_at' : 'receiver_confirmed_at'
+  const field =
+    role === 'proposer' ? 'proposer_confirmed_at' : 'receiver_confirmed_at'
+  const userIdField = role === 'proposer' ? 'proposer_id' : 'receiver_id'
 
+  // 当事者であることを fetch 時点でも確認 (二重防御の最初の壁)
   const { data: trade, error: fetchError } = await supabase
     .from('venue_trades')
     .select('*')
     .eq('id', tradeId)
+    .eq(userIdField, userId)
     .single()
 
   if (fetchError) throw fetchError
 
-  const otherConfirmed = role === 'proposer'
-    ? trade.receiver_confirmed_at != null
-    : trade.proposer_confirmed_at != null
+  // 既に終端状態 → no-op (冪等、二重押し / 古いボタンタップを吸収)
+  if (trade.status === 'completed' || trade.status === 'cancelled') {
+    return
+  }
 
-  const newStatus = otherConfirmed ? 'completed' : `${role}_confirmed` as VenueTradeStatus
-  const completedAt = otherConfirmed ? now : null
+  // 自分側の timestamp が既に立っている → no-op (二重押し対策)
+  const myTimestamp: string | null =
+    role === 'proposer' ? trade.proposer_confirmed_at : trade.receiver_confirmed_at
+  if (myTimestamp != null) {
+    return
+  }
 
+  // 相手側 timestamp で派生 status を決定
+  const otherTimestamp: string | null =
+    role === 'proposer' ? trade.receiver_confirmed_at : trade.proposer_confirmed_at
+  const newStatus: VenueTradeStatus =
+    otherTimestamp != null ? 'completed' : 'partially_confirmed'
+  const completedAt = newStatus === 'completed' ? now : null
+
+  // UPDATE クエリ側で当事者条件 + 非終端状態を再強制 (race 防御)
   const { error } = await supabase
     .from('venue_trades')
     .update({
       [field]: now,
       status: newStatus,
       ...(completedAt != null ? { completed_at: completedAt } : {}),
+      updated_at: now,
     })
     .eq('id', tradeId)
+    .eq(userIdField, userId)
+    .in('status', ['pending', 'partially_confirmed'])
 
   if (error) throw error
 }

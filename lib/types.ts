@@ -360,7 +360,14 @@ export interface UserOshi {
 export type VenueStatus = 'upcoming' | 'open' | 'closed'
 export type SupplyPostStatus = 'active' | 'withdrawn' | 'held'
 export type VenueHoldStatus = 'pending' | 'held' | 'expired' | 'cancelled' | 'converted' | 'declined'
-export type VenueTradeStatus = 'pending' | 'proposer_confirmed' | 'completed' | 'cancelled'
+// PR4a (2026-06-13): role 中立対称確定への再設計に伴い 'proposer_confirmed' を廃止し
+// 'partially_confirmed' を導入。DB CHECK 制約・delete_my_account active 判定とも整合。
+// status は両 timestamp の有無で派生する設計:
+//   両 NULL                                → pending
+//   片方のみ NOT NULL                      → partially_confirmed
+//   両 NOT NULL                            → completed
+// 詳細: docs/migration_venue_trades_state_partially_confirmed.sql
+export type VenueTradeStatus = 'pending' | 'partially_confirmed' | 'completed' | 'cancelled'
 
 export interface Venue {
   id: string

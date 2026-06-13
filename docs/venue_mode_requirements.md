@@ -125,7 +125,7 @@
 ### venue_supply_posts
 
 - **[確定]** status: `active` / `withdrawn` / `held`、expires_at あり、cron なし、読取時に `active AND expires_at > now()` でフィルタ、DB 上は期限切れも active のまま。`held` は定義のみで書き込み経路なし。画像カラムなし。
-- 変更方針: `image_path`（text, nullable）を追加する (PR3 範囲)。
+- **[適用済 2026-06-13]** `image_url`（text, nullable）を PR3 で追加済。任意項目。`cards.image_url` / `wanted_cards.image_url` と同じ「publicUrl 文字列を格納」流儀。bucket は既存 `card-images` を流用 (path 規約: `${userId}/venue-supply/${ts}.${ext}`)、INSERT policy は自分 folder のみ書き込み可に hardening 済。画像の cleanup は β1 では未対応 (P2 課題)。
 - **[適用済 2026-06-13]** `held` への書き込み経路 (承認時のロック先) を `accept_venue_hold` RPC に実装済。旧 JS accept 由来の `active` 残置を補正する UPDATE も PR4b の migration に同梱。
 - **[適用済 2026-06-13]** `expires_at` を「イベント当日 23:59 (JST) まで有効」で設定する。30 分固定失効は廃止。
   - `venue.event_date` の JST 23:59:59 を UTC ISO に正規化して書き込む。
@@ -306,13 +306,12 @@ pending / partially_confirmed ──当事者が取消──▶ cancelled
 
 ## 9. 画像要件
 
-- **[確定]** cards は画像列 + `card-images` バケットを持つ。venue_supply_posts には画像列なし。storage RLS は repo に無い。
-- 変更方針: `venue_supply_posts` に `image_path` を追加（`image_url` ではなく path。バケット / ドメイン変更耐性）。**[要確認]** cards 既存命名と統一する。
-- バケット: β1 は `card-images` を venue prefix（例 `venue-supply/{user_id}/...`）で流用する方針。長期的には `venue-images` 新設が綺麗。**[要確認]** 最終決定。
-- 写真の必須性: β1 は任意（強く推奨）。会場での速さを優先し、テキストのみ投稿も許す。棚経由投稿は写真を自動付与。
-- アップロード失敗 UX: 入力テキストを保持・リトライ・再失敗時は画像なしで投稿可（graceful degrade）。
-- storage RLS: write = owner path スコープ、read = 公開（§6）。
-- 退会時の storage 実ファイル残存: β1 は残置を許容し P2 でクリーンアップ（グッズ写真の PII 混入は低リスク）。スナップショットで画像参照を保持するため、履歴側は別途 `image_path` を保持する点に留意。
+- **[適用済 2026-06-13]** PR3 で `venue_supply_posts.image_url` (text, nullable) を追加。`cards.image_url` / `wanted_cards.image_url` と同じ「publicUrl 文字列を格納」流儀で命名を統一した (旧案 `image_path` は不採用)。
+- **[適用済 2026-06-13]** バケットは既存 `card-images` を流用。path 規約: `${userId}/venue-supply/${ts}.${ext}`。長期的に `venue-images` 新設の余地は残す。
+- 写真の必須性: β1 は任意。会場での速さを優先し、テキストのみ投稿も許す。棚経由投稿は写真を自動付与 (P1)。
+- アップロード失敗 UX: upload 失敗時は DB INSERT せず Alert で通知、入力は残して再試行可。upload 成功 → INSERT 失敗時の orphan は β1 では許容 (P2 で cleanup)。
+- **[適用済 2026-06-13]** storage RLS: SELECT 公開、INSERT は `auth.role() = 'authenticated' AND (storage.foldername(name))[1] = auth.uid()::text` で自分 folder のみ許可 (本 PR3 で hardening)。
+- 退会時の storage 実ファイル残存: β1 は残置を許容し P2 でクリーンアップ。`venue_trades.wanted_snapshot.image_url` で snapshot 保持しているため、supply_post 削除後も trade 履歴では画像表示可。
 
 ---
 

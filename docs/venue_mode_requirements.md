@@ -65,7 +65,7 @@
 
 - イベント表示ロジック修正（複数日・status・時刻ベース）
 - 当日供給板への写真付き投稿（image 列追加 + storage RLS）
-- 投稿フォームのキーボード被り修正 + 期限 15 / 30 / 60 分選択
+- 投稿フォームのキーボード被り修正 (期限はイベント当日中で固定、選択 UI 不要)
 - 自分の会場投稿一覧画面
 - 受信 Hold / 送信 Hold の分離 + 気づき導線（バッジ / CTA） + 投稿ごと Hold 件数
 - Hold 承認 / 拒否 / キャンセル導線 + 承認待ち期限 + 期限切れ表示
@@ -110,7 +110,7 @@
 | イベント一覧 `/venue/index` | 入口 | 開催中 / 近日 / 参加予定カード（名称・会場・日付・状態・件数）＋未読 Hold バッジ | イベントを開く | 「対象イベントなし」/ 再取得 | P0 |
 | イベント詳細 `/venue/[id]` | ハブ | 最上部に「届いた Hold (n)」固定 / 当日供給板 / (P1: 成立候補・棚) | 出品 / Hold 画面 / 合流 | セクション別フォールバック | P0 |
 | 当日供給板 | 募集閲覧 | 写真・譲 / 求・投稿者 Trust・残時間 | Hold 申請 | 「募集なし」/ 期限切れは非表示 | P0 |
-| 会場出品フォーム | 出品 | 写真・譲 / 求・期限 15 / 30 / 60 | 投稿 | 写真アップ失敗時に入力保持＆リトライ | P0 |
+| 会場出品フォーム | 出品 | 写真・譲 / 求 (期限はイベント当日中で自動設定) | 投稿 | 写真アップ失敗時に入力保持＆リトライ | P0 |
 | 自分の会場投稿一覧 | 管理 | active / 期限切れ・Hold 件数バッジ | 取り下げ / 受信 Hold へ | 「未出品」 | P0 |
 | Hold `/venue/holds`（受信 / 送信 / 成立済タブ） | Hold 全把握 | 受信: 相手の譲 / 求 + 承認 / 拒否、送信: 状態、成立済: DM へ | 承認 / 拒否 / キャンセル | タブ別「なし」/ 対象投稿削除済の表示 | P0 |
 | 会場取引詳細 + DM | 合流〜完了 | 相手 Trust・双方の譲 / 求（スナップショット）・状態・DM スレッド・定型文チップ・手渡し完了 | 送信 / 完了確認 | 送信失敗 / 退会済相手 / cancelled は閲覧のみ | P0 |
@@ -124,15 +124,18 @@
 
 ### venue_supply_posts
 
-- **[確定]** status: `active` / `withdrawn` / `held`、expires_at あり（作成時 +30 分固定）、cron なし、読取時に `active AND expires_at > now()` でフィルタ、DB 上は期限切れも active のまま。`held` は定義のみで書き込み経路なし。画像カラムなし。
-- 変更方針: `image_path`（text, nullable）を追加する。
-- 変更方針: `held` への書き込み経路を持たせる（承認時のロック先）。
-- 変更方針: `expires_at` を作成時に 15 / 30 / 60 分のユーザー選択値で設定する（既定 30 分）。
+- **[確定]** status: `active` / `withdrawn` / `held`、expires_at あり、cron なし、読取時に `active AND expires_at > now()` でフィルタ、DB 上は期限切れも active のまま。`held` は定義のみで書き込み経路なし。画像カラムなし。
+- 変更方針: `image_path`（text, nullable）を追加する (PR3 範囲)。
+- 変更方針: `held` への書き込み経路を持たせる（承認時のロック先、PR4b 範囲）。
+- **[適用済 2026-06-13]** `expires_at` を「イベント当日中有効」で設定する。30 分固定失効は廃止。
+  - `venue.ends_at` が NOT NULL → ends_at + 3 時間 (公演後の交換タイム想定)
+  - `venue.ends_at` が NULL     → event_date の JST 23:59:59
+  - 詳細: `lib/venueExpiry.ts` `computeVenueExpiry`
 - 方針: `expired` status は追加しない（enum に無く、expires_at 派生で処理する）。post 期限は板の表示可否のみを支配し、pending Hold の生存には影響させない（§10 参照）。
 
 ### venue_holds
 
-- **[確定]** status: `pending` / `held` / `expired` / `cancelled` / `converted`、expires_at あり（+30 分）。ただし `pending → expired` 自動遷移なし、fetch フィルタなし、受信 / 送信を合算取得。
+- **[確定]** status: `pending` / `held` / `expired` / `cancelled` / `converted` / `declined` (PR #26 で `declined` 追加)、expires_at あり。ただし `pending → expired` 自動遷移なし、fetch フィルタなし、受信 / 送信を合算取得。
 - 変更方針: `declined` を CHECK に追加する（拒否 / 兄弟 Hold 承認時の自動非 active 化を意味づけ）。
 - 方針: ステータス運用を整理する。
   - 承認された 1 件 → `converted`（trade 生成済み）
@@ -140,7 +143,7 @@
   - 申請者の取消 → `cancelled`
   - 承認待ち期限切れ → `expired`（lazy 判定。P1 で pg_cron）
   - `held`（holds 側）は本設計では使用しない（legacy 扱い）。
-- 変更方針: `expires_at` の既定を承認待ち期限（10〜15 分、§10）に合わせる。**[要確認]** 既定値を 10 / 15 のどちらにするか。
+- **[適用済 2026-06-13]** `expires_at` を「イベント当日中有効」で設定する (supply_post と共通の `computeVenueExpiry`)。承認後 (status='held') 以降は fetch フィルタ対象外のため expires_at は実質影響しない。
 
 ### venue_trades
 
@@ -313,17 +316,19 @@ pending / partially_confirmed ──当事者が取消──▶ cancelled
 
 ---
 
-## 10. 期限要件（3 種を分離）
+## 10. 期限要件
 
 | 種別 | 対象 | 値 | 実装メモ |
 |---|---|---|---|
-| 供給板表示期限 | `venue_supply_posts` | 15 / 30 / 60 分から選択・既定 30 | `expires_at`。投稿フォームで選択。板表示可否のみ支配 |
-| Hold 承認待ち期限 | `venue_holds` | 10〜15 分 | `expires_at` を活用。`pending → expired` は lazy 判定（P1 で pg_cron）。**[要確認]** 既定値 |
-| 合流猶予（completed 前） | `venue_trades` | `ends_at` 基準 + 猶予 | イベント終了基準でよい。`partially_confirmed` は自動失効しない |
+| 供給板表示期限 | `venue_supply_posts` | **イベント当日中** (ends_at+3h or event_date JST 23:59:59) | `expires_at`。`lib/venueExpiry.ts` `computeVenueExpiry` で計算。板表示可否のみ支配 |
+| Hold 申請中期限 | `venue_holds` (status='pending') | **イベント当日中** (supply_post と同じ計算) | 同上。承認後 (`held` 以降) は filter 対象外で実質影響しない |
+| 合流猶予（completed 前） | `venue_trades` | 完了 / キャンセルまで保持 (自動失効しない) | `partially_confirmed` も含めて自動失効なし |
 | DM 送信猶予（completed 後） | `venue_trade_messages` | `completed_at + 48h`（24h でも可） | 取引単位。複数日でも過長にならない |
 
-- 失効方式: β1 は **lazy**（fetch / RPC 時のフィルタ + 承認 RPC のガード）。`expires_at < now()` の post は板非表示、期限切れ pending Hold は承認不可。pg_cron での能動的掃き出しは P1。
-- 供給板 post 期限と Hold 承認待ち期限は独立。post が板から消えても、pending Hold は受信 Hold 一覧で承認待ち期限まで生存する。
+- 失効方式: β1 は **lazy**（fetch / RPC 時のフィルタ）。`expires_at < now()` の post は板非表示、期限切れ pending Hold は承認不可。pg_cron での能動的掃き出しは P1。
+- 30 分固定失効 (旧仕様) は廃止。ライブ現場では「開演前出品 → ライブ中認知 → 終演後交換」の動線が普通のため、イベント当日中は有効に保つ。
+- 供給板 post / 申請中 Hold は同じ event-day-end で同時に切れる。ただし**取り下げ** (status='withdrawn') と Hold の関係は引き続き独立: post を取り下げても、紐づく Hold は受信 Hold 一覧で生存する (supply_post_id は SET NULL FK で守る、PR #24 適用済)。
+- `expires_at` 列は将来の cleanup / 非表示判定のために残す。
 
 ---
 
@@ -358,7 +363,7 @@ pending / partially_confirmed ──当事者が取消──▶ cancelled
 | **PR1** `docs/venue-mode-requirements` | – | 本書 + `account_delete_qa.md` 追記 | なし | 低 |
 | **PR #24** merge | – | venue FK rewiring（既存）を main へ＝基線 | 適用済 | main ↔ 本番の履歴照合必須。以降の前提 |
 | **PR2** `feat/venue-hold-inbox` | P0 | 受信 / 送信分離・バッジ・投稿別件数・承認 / 拒否 / キャンセル導線・自分の投稿一覧・承認待ち lazy expiry・declined 追加 | holds CHECK(`+declined`) | RLS 漏洩注意 |
-| **PR3** `feat/venue-supply-form` | P0 | キーボード被り修正・`image_path` 追加・storage RLS 定義・期限 15 / 30 / 60 | image 列 + storage policy | アップ失敗 UX |
+| **PR3** `feat/venue-supply-form` | P0 | キーボード被り修正・`image_path` 追加・storage RLS 定義 (期限はイベント当日中で固定、別 PR で適用済) | image 列 + storage policy | アップ失敗 UX |
 | **PR4a** `feat/venue-trade-state` | P0 | 状態再設計（案 A）・CHECK migration・`proposer_confirmed` 行移行・role 中立確定 RPC・`delete_my_account` active 更新 | trades CHECK | 高（A-3 面に再接触） |
 | **PR4b** `feat/venue-trade-accept` | P0 | 承認 RPC 原子化（close / 他 pending declined / trade 生成）・partial unique 二重成立防御・アイテムスナップショット | unique index, snapshot 列 | 高（並行 Hold 競合） |
 | **PR5** `feat/venue-trade-dm` | P0 | messages / reads・RLS・send 窓 RPC・未読バッジ・スレッド UI・system メッセージ・定型文 | 新規 2 表 | PR4 依存。RLS で第三者遮断 |

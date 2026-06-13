@@ -1,18 +1,22 @@
 // app/venue/[id].tsx
 // 会場ホーム画面（3レーン: 成立候補・当日供給板・会場商品棚）
+//
+// PR2 (feat/venue-hold-inbox) 追加:
+//   - 最上部「届いた Hold (n)」CTA (件数 > 0 時のみ表示、当該 venue 限定)
+//   - 当日供給板レーンに「自分の会場投稿を管理 →」リンク → /venue/my-posts
 import {
   addSupplyPost,
+  fetchReceivedHoldCount,
   fetchSupplyPosts,
-  fetchVenueHolds,
   withdrawSupplyPost,
 } from '@/lib/supabase'
-import { computeTrustBadge, VenueHold, VenueSupplyPost } from '@/lib/types'
+import { computeTrustBadge, VenueSupplyPost } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { TrustBadge } from '@/components/TrustBadge'
 import { Ionicons } from '@expo/vector-icons'
-import { router, useLocalSearchParams } from 'expo-router'
-import React, { useEffect, useRef, useState } from 'react'
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
+import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -49,7 +53,7 @@ export default function VenueHomeScreen() {
 
   const [lane, setLane] = useState<Lane>('smart')
   const [supplyPosts, setSupplyPosts] = useState<VenueSupplyPost[]>([])
-  const [myHolds, setMyHolds] = useState<VenueHold[]>([])
+  const [receivedHoldCount, setReceivedHoldCount] = useState(0)
   const [loadingSupply, setLoadingSupply] = useState(false)
 
   // 供給板投稿フォーム
@@ -69,24 +73,30 @@ export default function VenueHomeScreen() {
   const [holdSent, setHoldSent] = useState(false)
   const [submittingHold, setSubmittingHold] = useState(false)
 
-  const loadSupply = async () => {
+  const loadSupply = useCallback(async () => {
     if (venueId == null) return
     setLoadingSupply(true)
     const posts = await fetchSupplyPosts(venueId)
     setSupplyPosts(posts)
     setLoadingSupply(false)
-  }
+  }, [venueId])
 
-  const loadHolds = async () => {
-    if (venueId == null || userId == null) return
-    const holds = await fetchVenueHolds(venueId, userId)
-    setMyHolds(holds)
-  }
-
-  useEffect(() => {
-    loadSupply()
-    loadHolds()
+  const loadHoldCount = useCallback(async () => {
+    if (venueId == null || userId == null) {
+      setReceivedHoldCount(0)
+      return
+    }
+    const count = await fetchReceivedHoldCount(userId, venueId)
+    setReceivedHoldCount(count)
   }, [venueId, userId])
+
+  // 画面 focus 時に再取得 (Hold 承認 / 拒否後に戻ったときの最新化)
+  useFocusEffect(
+    useCallback(() => {
+      loadSupply()
+      loadHoldCount()
+    }, [loadSupply, loadHoldCount])
+  )
 
   const handleSubmitPost = async () => {
     if (postCard.trim() === '' || userId == null || venueId == null) return
@@ -174,6 +184,25 @@ export default function VenueHomeScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      {/* 「届いたHold(n)」CTA: 当該 venue 限定の受信 pending Hold が 1 件以上ある時のみ表示 */}
+      {receivedHoldCount > 0 && (
+        <Pressable
+          style={styles.holdBanner}
+          onPress={() =>
+            router.push({
+              pathname: '/venue/holds',
+              params: { venueId: venueId ?? '', tab: 'received' },
+            } as never)
+          }
+        >
+          <Ionicons name="notifications" size={18} color="#FFFFFF" />
+          <Text style={styles.holdBannerText}>
+            届いた Hold が {receivedHoldCount} 件あります
+          </Text>
+          <Text style={styles.holdBannerArrow}>→</Text>
+        </Pressable>
+      )}
+
       {/* レーンタブ */}
       <View style={styles.laneTabs}>
         {LANE_TABS.map((t) => (
@@ -233,6 +262,27 @@ export default function VenueHomeScreen() {
                   </Text>
                 </Pressable>
               </View>
+
+              {/* 自分の会場投稿管理への導線 */}
+              <Pressable
+                style={styles.myPostsLink}
+                onPress={() =>
+                  router.push({
+                    pathname: '/venue/my-posts',
+                    params: { venueId: venueId ?? '' },
+                  } as never)
+                }
+              >
+                <Ionicons
+                  name="person-circle-outline"
+                  size={16}
+                  color={colors.primary}
+                />
+                <Text style={styles.myPostsLinkText}>
+                  自分の会場投稿を管理
+                </Text>
+                <Text style={styles.myPostsLinkArrow}>→</Text>
+              </Pressable>
 
               {showPostForm && (
                 <View style={styles.formCard}>
@@ -471,6 +521,43 @@ export default function VenueHomeScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
+  holdBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: '#D97706',
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.sm,
+  },
+  holdBannerText: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
+  },
+  holdBannerArrow: {
+    fontSize: fontSize.base,
+    color: '#FFFFFF',
+    fontWeight: fontWeight.bold,
+  },
+  myPostsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    alignSelf: 'flex-start',
+  },
+  myPostsLinkText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+  },
+  myPostsLinkArrow: {
+    fontSize: fontSize.xs,
+    color: colors.primary,
+    fontWeight: fontWeight.bold,
+  },
   laneTabs: {
     flexDirection: 'row',
     backgroundColor: colors.backgroundCard,

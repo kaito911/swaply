@@ -8,7 +8,6 @@ import {
   addSupplyPost,
   fetchReceivedHoldCount,
   fetchSupplyPosts,
-  withdrawSupplyPost,
 } from '@/lib/supabase'
 import { computeTrustBadge, VenueSupplyPost } from '@/lib/types'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
@@ -70,10 +69,11 @@ export default function VenueHomeScreen() {
   const loadSupply = useCallback(async () => {
     if (venueId == null) return
     setLoadingSupply(true)
-    const posts = await fetchSupplyPosts(venueId)
+    // 当日掲示板は他人の post のみ表示。自分の post は /venue/my-posts に集約。
+    const posts = await fetchSupplyPosts(venueId, userId)
     setSupplyPosts(posts)
     setLoadingSupply(false)
-  }, [venueId])
+  }, [venueId, userId])
 
   const loadHoldCount = useCallback(async () => {
     if (venueId == null || userId == null) {
@@ -114,24 +114,6 @@ export default function VenueHomeScreen() {
     } finally {
       setPosting(false)
     }
-  }
-
-  const handleWithdraw = async (postId: string) => {
-    Alert.alert('取り下げますか？', '', [
-      { text: 'キャンセル', style: 'cancel' },
-      {
-        text: '取り下げる',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await withdrawSupplyPost(postId)
-            setSupplyPosts((prev) => prev.filter((p) => p.id !== postId))
-          } catch (error) {
-            Alert.alert('エラー', '取り下げに失敗しました')
-          }
-        },
-      },
-    ])
   }
 
   const handleHoldRequest = (post: VenueSupplyPost) => {
@@ -375,21 +357,15 @@ export default function VenueHomeScreen() {
                       <Text style={styles.supplyWant}>求: {post.want_card}</Text>
                     )}
                     <View style={styles.supplyCardActions}>
-                      {post.user_id === userId ? (
-                        <Pressable
-                          style={styles.withdrawButton}
-                          onPress={() => handleWithdraw(post.id)}
-                        >
-                          <Text style={styles.withdrawButtonText}>取り下げ</Text>
-                        </Pressable>
-                      ) : (
-                        <Pressable
-                          style={styles.holdButton}
-                          onPress={() => handleHoldRequest(post)}
-                        >
-                          <Text style={styles.holdButtonText}>Hold申請 →</Text>
-                        </Pressable>
-                      )}
+                      {/* PR feat/venue-supply-board-exclude-own-posts:
+                          当日掲示板は他人の post のみ表示するため、Hold 申請のみ常設。
+                          自分の post 管理は /venue/my-posts に集約。 */}
+                      <Pressable
+                        style={styles.holdButton}
+                        onPress={() => handleHoldRequest(post)}
+                      >
+                        <Text style={styles.holdButtonText}>Hold申請 →</Text>
+                      </Pressable>
                     </View>
                   </View>
                 ))
@@ -699,14 +675,6 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs + 2,
   },
   holdButtonText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: '#FFFFFF' },
-  withdrawButton: {
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  withdrawButtonText: { fontSize: fontSize.xs, color: colors.textTertiary },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',

@@ -71,6 +71,56 @@ function counterpartName(
   return profile.handle ?? profile.display_name ?? 'ユーザー'
 }
 
+// PR4b: accept_venue_hold RPC が raise exception で返すエラー文字列を日本語化する。
+// 関連: docs/migration_rpc_accept_venue_hold.sql
+function venueAcceptErrorMessage(rawMessage: string): { title: string; body: string } {
+  if (rawMessage.startsWith('HOLD_EXPIRED')) {
+    return {
+      title: '期限切れ',
+      body: 'この Hold は期限切れです。申請者に再申請してもらってください。',
+    }
+  }
+  if (rawMessage.startsWith('SUPPLY_POST_ALREADY_TAKEN')) {
+    return {
+      title: '成立済み',
+      body: 'この会場投稿には既に別の Hold が成立しています。',
+    }
+  }
+  if (rawMessage.startsWith('SUPPLY_POST_NOT_FOUND')) {
+    return {
+      title: '投稿が見つかりません',
+      body: '元の会場投稿が削除された可能性があります。',
+    }
+  }
+  if (rawMessage.startsWith('SUPPLY_POST_NOT_ACTIVE')) {
+    const status = rawMessage.split(':')[1] ?? 'unknown'
+    return {
+      title: '受付終了',
+      body: `元の会場投稿は受付中ではありません（${status}）。`,
+    }
+  }
+  if (rawMessage.startsWith('HOLD_NOT_PENDING')) {
+    const status = rawMessage.split(':')[1] ?? 'unknown'
+    return {
+      title: '承認できません',
+      body: `この Hold は既に処理されています（${status}）。一度画面を更新してください。`,
+    }
+  }
+  if (rawMessage.startsWith('NOT_RECEIVER')) {
+    return {
+      title: '権限がありません',
+      body: 'この Hold の受信者でないため承認できません。',
+    }
+  }
+  if (rawMessage.startsWith('AUTH_REQUIRED')) {
+    return {
+      title: '認証エラー',
+      body: 'もう一度ログインしてください。',
+    }
+  }
+  return { title: 'エラー', body: '承認に失敗しました。' }
+}
+
 export default function VenueHoldsScreen() {
   const { venueId, tab: tabParam } = useLocalSearchParams<{
     venueId: string
@@ -141,7 +191,17 @@ export default function VenueHoldsScreen() {
               setTab('converted')
             } catch (error) {
               console.error('[VenueHolds][handleAccept]', error)
-              Alert.alert('エラー', '承認に失敗しました')
+              const rawMessage =
+                error instanceof Error
+                  ? error.message
+                  : typeof error === 'object' &&
+                    error != null &&
+                    'message' in error &&
+                    typeof (error as { message?: unknown }).message === 'string'
+                  ? (error as { message: string }).message
+                  : ''
+              const { title, body } = venueAcceptErrorMessage(rawMessage)
+              Alert.alert(title, body)
             } finally {
               setActingId(null)
             }

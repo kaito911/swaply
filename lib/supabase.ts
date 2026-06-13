@@ -2257,6 +2257,9 @@ export async function addSupplyPost(params: {
   cardName: string
   groupName: string | null
   wantCard: string | null
+  // PR3: 会場投稿の画像 publicUrl (任意)。事前に uploadCardImage で上げて
+  // 戻り値の publicUrl を渡す想定。
+  imageUrl?: string | null
 }): Promise<VenueSupplyPost> {
   // PR feat/venue-event-day-expiry: 30 分固定失効を廃止し、イベント当日 23:59 (JST)
   // までの有効期限に変更。event_date のみ参照し、ends_at は使わない (過去 venue の
@@ -2277,6 +2280,7 @@ export async function addSupplyPost(params: {
       card_name: params.cardName,
       group_name: params.groupName,
       want_card: params.wantCard,
+      image_url: params.imageUrl ?? null,
       expires_at: expiresAt,
     })
     .select()

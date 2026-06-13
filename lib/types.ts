@@ -397,6 +397,10 @@ export interface VenueSupplyPost {
   status: SupplyPostStatus
   expires_at: string
   created_at: string
+  // PR3 で追加: 会場投稿の画像 URL (任意)。
+  // Supabase Storage 'card-images' バケットに保存した publicUrl 文字列を格納。
+  // path 規約: `${userId}/venue-supply/${ts}.${ext}`
+  image_url: string | null
   poster?: {
     handle: string | null
     display_name: string | null

@@ -218,6 +218,41 @@ export default function VenueHomeScreen() {
         ))}
       </View>
 
+      {/* 常設クイックリンク: 受信 Hold 0 件でも Hold 一覧 / 自分の投稿に到達可能。
+          全レーンで表示。届いた Hold が 1 件以上ある場合は上部 holdBanner が優先強調。 */}
+      <View style={styles.quickLinksRow}>
+        <Pressable
+          style={styles.quickLink}
+          onPress={() =>
+            router.push({
+              pathname: '/venue/my-posts',
+              params: { venueId: venueId ?? '' },
+            } as never)
+          }
+        >
+          <Ionicons
+            name="person-circle-outline"
+            size={16}
+            color={colors.primary}
+          />
+          <Text style={styles.quickLinkText}>自分の会場投稿を管理</Text>
+          <Text style={styles.quickLinkArrow}>→</Text>
+        </Pressable>
+        <Pressable
+          style={styles.quickLink}
+          onPress={() =>
+            router.push({
+              pathname: '/venue/holds',
+              params: { venueId: venueId ?? '', tab: 'received' },
+            } as never)
+          }
+        >
+          <Ionicons name="list-outline" size={16} color={colors.primary} />
+          <Text style={styles.quickLinkText}>送受信のHoldを見る</Text>
+          <Text style={styles.quickLinkArrow}>→</Text>
+        </Pressable>
+      </View>
+
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -263,26 +298,6 @@ export default function VenueHomeScreen() {
                 </Pressable>
               </View>
 
-              {/* 自分の会場投稿管理への導線 */}
-              <Pressable
-                style={styles.myPostsLink}
-                onPress={() =>
-                  router.push({
-                    pathname: '/venue/my-posts',
-                    params: { venueId: venueId ?? '' },
-                  } as never)
-                }
-              >
-                <Ionicons
-                  name="person-circle-outline"
-                  size={16}
-                  color={colors.primary}
-                />
-                <Text style={styles.myPostsLinkText}>
-                  自分の会場投稿を管理
-                </Text>
-                <Text style={styles.myPostsLinkArrow}>→</Text>
-              </Pressable>
 
               {showPostForm && (
                 <View style={styles.formCard}>
@@ -540,20 +555,32 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: fontWeight.bold,
   },
-  myPostsLink: {
+  quickLinksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+    backgroundColor: colors.backgroundCard,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  quickLink: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    alignSelf: 'flex-start',
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
   },
-  myPostsLinkText: {
+  quickLinkText: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,
     color: colors.primary,
   },
-  myPostsLinkArrow: {
+  quickLinkArrow: {
     fontSize: fontSize.xs,
     color: colors.primary,
     fontWeight: fontWeight.bold,

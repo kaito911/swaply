@@ -126,7 +126,7 @@
 
 - **[確定]** status: `active` / `withdrawn` / `held`、expires_at あり、cron なし、読取時に `active AND expires_at > now()` でフィルタ、DB 上は期限切れも active のまま。`held` は定義のみで書き込み経路なし。画像カラムなし。
 - 変更方針: `image_path`（text, nullable）を追加する (PR3 範囲)。
-- 変更方針: `held` への書き込み経路を持たせる（承認時のロック先、PR4b 範囲）。
+- **[適用済 2026-06-13]** `held` への書き込み経路 (承認時のロック先) を `accept_venue_hold` RPC に実装済。旧 JS accept 由来の `active` 残置を補正する UPDATE も PR4b の migration に同梱。
 - **[適用済 2026-06-13]** `expires_at` を「イベント当日 23:59 (JST) まで有効」で設定する。30 分固定失効は廃止。
   - `venue.event_date` の JST 23:59:59 を UTC ISO に正規化して書き込む。
   - `ends_at` は使わない (過去 venue の ends_at が過去にあると作成直後に期限切れになる事象を回避)。
@@ -152,14 +152,14 @@
   - PR4a で CHECK migration + role 中立対称確定に書き換え。`receiver_confirmed` バグ消滅。
   - 本番 `proposer_confirmed` 行: 0 件 (適用前確認、データ移行 UPDATE は 0 行成功)。
   - 詳細: `docs/migration_venue_trades_state_partially_confirmed.sql`
-- 変更方針: スナップショット列を追加（`offered_snapshot` / `wanted_snapshot`、jsonb 想定）。venue_trade 生成時に商品名・画像（image_path）・求内容を確定値として保持する。**[要確認]** 構造化属性までスナップショットするか（最低でも商品名 + 画像 + 求内容）。
+- **[適用済 2026-06-13]** スナップショット列 (`offered_snapshot` / `wanted_snapshot` jsonb NOT NULL DEFAULT `'{}'::jsonb`) を追加済。`accept_venue_hold` RPC が `venue_holds.proposer_card / receiver_card` + `venue_supply_posts.group_name / want_card / id` を jsonb_build_object で確定値保持。画像 (`image_path`) は PR3 で supply_post に image 列が追加後に snapshot にも入る想定 (jsonb なので拡張容易)。
 - **[要確認]** `completed_at` 列が既存か。無ければ追加。
 - **[要確認]** venue_trades が `supply_post_id` を直接持つか、Hold 経由か（二重成立防御のキーとスナップショット取得元に影響）。
 
 ### 二重成立防御
 
-- 同一 supply_post につき非終端 trade（`pending` / `partially_confirmed`）は最大 1 件 を保証する partial unique index を張る。
-- 加えて承認 RPC をトランザクション化し、ロック下で「supply_post → held」「選択 hold → converted」「他 pending → declined」「trade 生成（スナップショット込み）」を原子的に行う。
+- **[適用済 2026-06-13]** 同一 supply_post に対する成立 hold は最大 1 件を保証する partial unique index (`venue_holds_supply_post_single_active_idx`、`WHERE status IN ('held','converted')`) と、同一 hold から複数 trade を防ぐ unique index (`venue_trades_hold_id_unique_idx`) を追加済。
+- **[適用済 2026-06-13]** 承認 RPC (`accept_venue_hold(p_hold_id uuid)`、`SECURITY DEFINER`) をトランザクション化。`hold` / `supply_post` 双方を `FOR UPDATE` でロックし、(a) hold → `held`、(b) supply_post → `held`、(c) 兄弟 pending hold → `declined`、(d) trade 生成 (snapshot 込み) を原子的に実行。`unique_violation` を catch して `SUPPLY_POST_ALREADY_TAKEN` に統一。権限は `anon` / `public` REVOKE 済、`authenticated` のみ EXECUTE。
 
 ### 新規テーブル（DM）
 

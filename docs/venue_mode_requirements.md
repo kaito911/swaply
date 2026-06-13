@@ -144,10 +144,11 @@
 
 ### venue_trades
 
-- **[確定]** status: `pending` / `proposer_confirmed` / `completed` / `cancelled`。`receiver_confirmed` は CHECK / TS に無いが、コードが `${role}_confirmed` を生成するため receiver 先行確定で CHECK 違反になる潜在バグが確定。`proposer_confirmed_at` / `receiver_confirmed_at` の両列は既に存在。
-- 変更方針（案 A）: status を `pending` / `partially_confirmed` / `completed` / `cancelled` に再設計（§7・§案 D 相当）。
-  - 既存 `proposer_confirmed` 行を `partially_confirmed` へ移行。**[要確認]** 本番の該当行数（ループ未完走のため恐らく 0）。
-  - CHECK から `proposer_confirmed` を除去し `partially_confirmed` を追加。
+- **[確定 → PR4a 適用済 2026-06-13]** status を `pending` / `partially_confirmed` / `completed` / `cancelled` に再設計済。
+  - 旧バグ: コードが `${role}_confirmed` を生成するため receiver 先行確定で CHECK 違反 (B2)
+  - PR4a で CHECK migration + role 中立対称確定に書き換え。`receiver_confirmed` バグ消滅。
+  - 本番 `proposer_confirmed` 行: 0 件 (適用前確認、データ移行 UPDATE は 0 行成功)。
+  - 詳細: `docs/migration_venue_trades_state_partially_confirmed.sql`
 - 変更方針: スナップショット列を追加（`offered_snapshot` / `wanted_snapshot`、jsonb 想定）。venue_trade 生成時に商品名・画像（image_path）・求内容を確定値として保持する。**[要確認]** 構造化属性までスナップショットするか（最低でも商品名 + 画像 + 求内容）。
 - **[要確認]** `completed_at` 列が既存か。無ければ追加。
 - **[要確認]** venue_trades が `supply_post_id` を直接持つか、Hold 経由か（二重成立防御のキーとスナップショット取得元に影響）。

@@ -254,9 +254,10 @@ pending / partially_confirmed ──当事者が取消──▶ cancelled
 |---|---|---|
 | `id` | uuid pk | `message_id`（将来通報用に保持） |
 | `trade_id` | uuid not null → `venue_trades(id) ON DELETE CASCADE` | |
-| `sender_id` | uuid not null → `profiles(id) ON DELETE CASCADE` | tombstone 前提のため実害なし。手動削除時は trade ごと CASCADE で一貫消滅 |
-| `kind` | text not null default `'user'` | `'user'` / `'system'`（「成立しました」「手渡し完了」等で時系列が読める） |
-| `body` | text not null | 長さ CHECK（例 1〜2000） |
+| `sender_id` | uuid (nullable) → `profiles(id)` (ON DELETE は明示なし＝NO ACTION) | `kind='user'` では NOT NULL、`kind='system'` では NULL（CHECK で強制）。SET NULL は CHECK と衝突するため不採用。tombstone で id 維持のため通常退会で削除されない。手動 DELETE は運用禁止 |
+| `kind` | text not null check (`'user'` / `'system'`) | `kind='user'` ↔ `sender_id is not null` ↔ `system_event is null`、`kind='system'` ↔ `sender_id is null` ↔ `system_event is not null` を CHECK で保証 |
+| `system_event` | text (nullable) | `kind='system'` のときのみ非 NULL。値例: `trade_created` / `partially_confirmed` / `completed` / `cancelled`。通報・将来分析用の機械可読タグ |
+| `body` | text not null | 長さ CHECK（1〜2000） |
 | `created_at` | timestamptz default `now()` | |
 
 - 編集 / 削除用カラムは持たない（不変）。
@@ -271,22 +272,27 @@ pending / partially_confirmed ──当事者が取消──▶ cancelled
 
 - PK: `(trade_id, user_id)`
 
-### RLS
+### RLS（P0.5: SELECT only、書き込みは RPC/trigger 限定）
 
-- **messages** SELECT / INSERT: 当該 trade の `proposer_id` / `receiver_id` のみ。INSERT は更に `sender_id = 自分` かつ送信窓内。UPDATE / DELETE = 禁止。
-- **reads**: 自分の行のみ upsert（当事者条件付き）。
+- **messages**: SELECT policy のみ（当該 trade の participant のみ可視）。**INSERT / UPDATE / DELETE policy は作らない**。ユーザ INSERT は `send_venue_trade_message` RPC、システム INSERT は trigger からのみ。
+- **reads**: SELECT policy のみ（`user_id = auth.uid()` + participant 条件）。upsert は `mark_venue_trade_thread_read` RPC からのみ。
+- **テーブル GRANT**: 両表とも `revoke all from anon, authenticated, public` → `grant select to authenticated`。クライアントから直接 DML できない。
 
 ### 既読・未読バッジ
 
-- 未読数 = `messages WHERE trade_id = ? AND created_at > my.last_read_at AND sender_id <> 自分 AND kind = 'user'`。
+- 未読の対象: `kind = 'user'` AND `sender_id <> auth.uid()` AND `created_at > my.last_read_at`（system message は未読カウント外）。
+- **グローバル未読**: `get_venue_trade_unread_count()` RPC（自分が participant の全 trade を合算した int を返す）。会場タブバッジ用。
+- **per-trade 未読**: `get_venue_trade_unread_counts()` RPC（`(trade_id, unread_count)` 一括返却）。Hold「成立済み」タブ / 取引一覧の N+1 回避。クライアントは Map<trade_id, count> を構築。
 - バッジ表示先: 会場タブ / Hold「成立済み」タブ / 取引カード。
 
-### 送信可否（窓）
+### 送信可否（窓・P0 allowlist）
 
-- `pending` / `partially_confirmed`: 送信可。
-- `completed`: `completed_at + 48h` まで送信可（24h でも可。定数で調整。複数日イベントでも取引単位なので過長にならない）。猶予後は閲覧のみ。
-- `cancelled`: 送信不可・閲覧のみ。
-- 送信可否は send RPC 側で窓判定する方針。RLS は「当事者 + 非 cancelled」を最低限の防壁とする。
+- **送信可**: `pending` / `partially_confirmed`。
+- **read-only**: `completed`（`SEND_WINDOW_CLOSED` エラー）。
+- **read-only**: `cancelled`（`TRADE_CANCELLED` エラー）。
+- **未知 status**: fail-closed（`SEND_WINDOW_CLOSED`）。
+- 送信窓判定は `send_venue_trade_message` RPC 内で行う。テーブル INSERT policy 不在 + テーブル GRANT に INSERT なしで、クライアント直 INSERT による窓回避を二重防御。
+- **P0.5/P1 候補（本 P0 非対象）**: `completed_at + 48h` までの送信猶予、`cancelled` 理由表示、Realtime、push 通知、画像添付、通報 UI、定型文チップ。
 
 ### 退会後の表示
 
@@ -322,7 +328,7 @@ pending / partially_confirmed ──当事者が取消──▶ cancelled
 | 供給板表示期限 | `venue_supply_posts` | **イベント当日 23:59 (JST)** (event_date JST 23:59:59) | `expires_at`。`lib/venueExpiry.ts` `computeVenueExpiry` で計算。`ends_at` は使わない。板表示可否のみ支配 |
 | Hold 申請中期限 | `venue_holds` (status='pending') | **イベント当日 23:59 (JST)** (supply_post と同じ計算) | 同上。承認後 (`held` 以降) は filter 対象外で実質影響しない |
 | 合流猶予（completed 前） | `venue_trades` | 完了 / キャンセルまで保持 (自動失効しない) | `partially_confirmed` も含めて自動失効なし |
-| DM 送信猶予（completed 後） | `venue_trade_messages` | `completed_at + 48h`（24h でも可） | 取引単位。複数日でも過長にならない |
+| DM 送信窓（P0） | `venue_trade_messages` | `pending` / `partially_confirmed` のみ送信可。`completed` / `cancelled` は read-only | send RPC 内で allowlist 判定。`completed_at + 48h` 猶予は P0.5/P1 候補 |
 
 - 失効方式: β1 は **lazy**（fetch / RPC 時のフィルタ）。`expires_at < now()` の post は板非表示、期限切れ pending Hold は承認不可。pg_cron での能動的掃き出しは P1。
 - 30 分固定失効 (旧仕様) は廃止。ライブ現場では「開演前出品 → ライブ中認知 → 終演後交換」の動線が普通のため、イベント当日中は有効に保つ。
@@ -443,7 +449,7 @@ pending / partially_confirmed ──当事者が取消──▶ cancelled
 - 成立候補の一致キー詳細（ジャンル非依存の汎用属性。通常交換の「求はリスト選択」と統一）。
 - DM の Realtime 前倒し可否。
 - 通報 UI の仕様。
-- DM completed 後猶予の最終値（24h vs 48h、既定 48h）。
+- DM completed 後猶予の有無と最終値（P0 では read-only。P0.5/P1 で `completed_at + 24h/48h` 復活可否を判断）。
 
 ### P2
 
@@ -495,7 +501,7 @@ A-3 退会 E2E は **DM の完成を待たずに**実施できる。trade 生成
 - Hold 承認待ち期限切れの承認不可。
 - 供給板 post 期限切れと pending Hold 生存の独立性（post が板から消えても Hold は受信一覧で生存）。
 - `cancelled` trade の DM は閲覧のみ。
-- `completed` 後の DM 送信窓（`completed_at + 48h`）。
+- `completed` / `cancelled` の DM は read-only（P0 では `completed_at + 48h` 送信猶予なし、P0.5/P1 候補）。
 - supply_post SET NULL 時の「投稿は削除されました」表示。
 - 画像アップロード失敗時の入力保持・リトライ・画像なし投稿。
 - 複数日イベント（TREASURE 想定）: イベントが `starts_at..ends_at` をまたいで板 open になる。Day1 成立取引の DM 窓は `completed_at` 基準で、`ends_at` に引きずられない。

@@ -51,7 +51,8 @@ const TABS: VisibleTab[] = [
 
 export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const { bottom: insetBottom } = useSafeAreaInsets()
-  const { pendingOfferCount, receivedHoldCount } = useBadge()
+  const { pendingOfferCount, receivedHoldCount, venueTradeUnreadCount } =
+    useBadge()
   const currentRouteName = state.routes[state.index]?.name ?? ''
 
   const renderTab = (tab: VisibleTab) => {
@@ -72,12 +73,13 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
       }
     }
 
-    // PR2: trades タブは pending offer、venue タブは受信 Hold をそれぞれ表示
+    // PR2: trades タブは pending offer。
+    // PR5: venue タブは受信 Hold + venue_trade DM 未読の合算。二重バッジにはしない。
     const badgeCount =
       tab.name === 'trades'
         ? pendingOfferCount
         : tab.name === 'venue-tab'
-        ? receivedHoldCount
+        ? receivedHoldCount + venueTradeUnreadCount
         : 0
     const showBadge = badgeCount > 0
 

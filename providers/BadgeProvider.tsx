@@ -1,6 +1,10 @@
 // providers/BadgeProvider.tsx
 // 未読バッジ数の管理
-import { fetchReceivedHoldCount, supabase } from '@/lib/supabase'
+import {
+  fetchReceivedHoldCount,
+  fetchVenueTradeUnreadCount,
+  supabase,
+} from '@/lib/supabase'
 import { useAuthContext } from '@/providers/AuthProvider'
 import React, {
   createContext,
@@ -15,12 +19,14 @@ import { AppState, AppStateStatus } from 'react-native'
 interface BadgeContextValue {
   pendingOfferCount: number
   receivedHoldCount: number
+  venueTradeUnreadCount: number
   refreshBadge: () => Promise<void>
 }
 
 const BadgeContext = createContext<BadgeContextValue>({
   pendingOfferCount: 0,
   receivedHoldCount: 0,
+  venueTradeUnreadCount: 0,
   refreshBadge: async () => {},
 })
 
@@ -32,11 +38,16 @@ export function BadgeProvider({ children }: { children: ReactNode }) {
   // 会場タブ (BottomTabBar) のバッジで使用。venueId 指定の per-venue カウントは
   // /venue/[id] 側で fetchReceivedHoldCount(userId, venueId) を直接呼ぶ。
   const [receivedHoldCount, setReceivedHoldCount] = useState(0)
+  // PR5 feat/venue-trade-dm: 自分が participant の全 venue_trade の合算未読数。
+  // RPC get_venue_trade_unread_count() で kind='user' AND sender_id <> auth.uid()
+  // のみカウント。BottomTabBar の会場タブで受信 Hold 件数と合算表示。
+  const [venueTradeUnreadCount, setVenueTradeUnreadCount] = useState(0)
 
   const fetchCount = useCallback(async () => {
     if (userId == null) {
       setPendingOfferCount(0)
       setReceivedHoldCount(0)
+      setVenueTradeUnreadCount(0)
       return
     }
 
@@ -74,6 +85,15 @@ export function BadgeProvider({ children }: { children: ReactNode }) {
     // venue 受信 Hold 件数 (全 venue 横断)
     const holdCount = await fetchReceivedHoldCount(userId)
     setReceivedHoldCount(holdCount)
+
+    // venue_trade DM 合算未読数。RPC エラーは握りつぶさず warn し、表示は 0 にフォールバック。
+    try {
+      const unread = await fetchVenueTradeUnreadCount()
+      setVenueTradeUnreadCount(unread)
+    } catch (error) {
+      console.warn('[BadgeProvider] fetchVenueTradeUnreadCount', error)
+      setVenueTradeUnreadCount(0)
+    }
   }, [userId])
 
   // 初回・userId変更時に取得
@@ -96,7 +116,12 @@ export function BadgeProvider({ children }: { children: ReactNode }) {
 
   return (
     <BadgeContext.Provider
-      value={{ pendingOfferCount, receivedHoldCount, refreshBadge: fetchCount }}
+      value={{
+        pendingOfferCount,
+        receivedHoldCount,
+        venueTradeUnreadCount,
+        refreshBadge: fetchCount,
+      }}
     >
       {children}
     </BadgeContext.Provider>

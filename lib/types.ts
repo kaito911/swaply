@@ -445,6 +445,48 @@ export interface VenueTrade {
   wanted_snapshot: Record<string, unknown>
 }
 
+// ─────────────────────────────────────────
+// venue_trade_messages / venue_trade_reads (PR5: venue trade 専用 DM)
+// 詳細: docs/venue_mode_requirements.md §8
+//       docs/migration_venue_trade_dm_tables.sql
+// ─────────────────────────────────────────
+
+export type VenueTradeMessageKind = 'user' | 'system'
+
+// system_event は kind='system' のとき必ず非 NULL、kind='user' のとき NULL。
+// 現状の値: 'trade_created' / 'partially_confirmed' / 'completed' / 'cancelled'
+export type VenueTradeSystemEvent =
+  | 'trade_created'
+  | 'partially_confirmed'
+  | 'completed'
+  | 'cancelled'
+
+export interface VenueTradeMessage {
+  id: string
+  trade_id: string
+  // kind='system' のとき null。CHECK 制約と整合 (vtm_user_requires_sender / vtm_system_no_sender)。
+  sender_id: string | null
+  kind: VenueTradeMessageKind
+  body: string
+  // kind='system' のときのみ非 NULL。値は VenueTradeSystemEvent だが、将来追加に備え string で受ける。
+  system_event: string | null
+  created_at: string
+}
+
+export interface VenueTradeRead {
+  trade_id: string
+  user_id: string
+  last_read_at: string
+  updated_at: string
+}
+
+// get_venue_trade_unread_counts RPC が返す per-trade 未読数 1 行。
+// クライアントは Map<trade_id, unread_count> に詰め替えて使う。
+export interface VenueTradeUnreadCountRow {
+  trade_id: string
+  unread_count: number
+}
+
 /**
  * 求カード (want) との一致度スコア。
  * - strong: 単独出品で完全一致 (v2) / 全 3 軸完全一致 (v1)

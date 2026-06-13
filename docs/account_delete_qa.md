@@ -367,10 +367,94 @@ create policy "Users can delete their own blocks"
 
 ---
 
-## 6. 改訂履歴
+## 6. A-1 trade 側 E2E 再検証結果 (2026-06-10)
+
+PR #22 で trade 系 6 FK を `profiles(id) ON DELETE CASCADE` に張り替えた後の実機 E2E 再検証記録。
+
+### 6.1 前提
+
+- `fix/fk-user-refs-to-profiles` の migration が main にマージ済 (`d2b7cec`)
+- trade 系 6 FK (`trades.proposer_user_id` / `trades.receiver_user_id` / `shipments.user_id` / `trade_disputes.opened_by_user_id` / `trade_disputes.resolved_by_user_id` / `trade_items.owner_user_id`) が `profiles(id) ON DELETE CASCADE` であることを事前確認済
+- `profiles.id` に `auth.users.id` への FK が無いこと (tombstone 設計成立) を事前確認済 (`Success, No rows returned`)
+
+### 6.2 シナリオ S2: active trade guard
+
+実機で確認済。
+
+手順:
+- X で出品
+- Y で交換提案
+- X で承認
+- trade が `pending` の状態で停止
+- X でアカウント削除画面へ
+- 削除不可表示が出ることを確認
+
+結果:
+- active trade があるユーザーは削除不可
+- 削除 CTA は実行できない
+- → guard 合格
+
+### 6.3 シナリオ S1: completed trade を持つユーザーの削除
+
+実機で確認済。
+
+手順:
+- S2 で使った trade をそのまま進行
+- X / Y 双方発送
+- X / Y 双方受取確認
+- trade `completed`
+- X をアプリ退会フローで削除
+- Y 側 UI で履歴確認
+
+結果:
+- アプリ退会フローで削除完走
+- Y 側 UI で履歴が残ることを確認
+- 「削除済みユーザー」表示を確認
+- → completed trade 履歴保持 合格
+
+### 6.4 DB 検証結果
+
+削除対象ユーザー UID: `1583f8d1-87ec-4ef8-bc43-59c61da24ca8` (tombstone 化済 = 個人情報なし、検証エビデンスとして full UUID 保持)
+
+| 確認項目 | 実測 | 期待 | 判定 |
+|---|---:|---:|---|
+| `auth.users` 残存数 | 0 | 0 | PASS |
+| `profiles` tombstone 残存数 | 1 | 1 | PASS |
+| `profiles.handle` | `deleted_user_1583f8d1` | `deleted_user_*` | PASS |
+| `profiles.display_name` | 削除済みユーザー | 削除済みユーザー | PASS |
+| profile 個人情報列 (avatar_url / shipping_name / postal_code / address_line1 / address_line2 / last_active_at) | NULL | NULL | PASS |
+| `trades` (X 関与) | `completed` 1 件残存 | 残存 | PASS |
+| `shipments` (X 発送) | 1 | 削除前と同値 | PASS |
+| `trade_items` (X 所有) | 1 | 削除前と同値 | PASS |
+| `cards` active / inactive / reserved | 0 | 0 | PASS |
+| `cards` traded | 1 件残存、画像系 NULL | 残存 + 匿名化 | PASS |
+| `wanted_cards` | 0 | 0 | PASS |
+
+### 6.5 結論
+
+- `profiles.id` に `auth.users.id` への FK がないため、`auth.users` 削除後も profiles tombstone が残る
+- trade 系 6 FK は `profiles(id) ON DELETE CASCADE` であることを事前確認済み
+- active trade guard は実機で正常動作確認済み
+- completed trade を持つユーザー削除後も、`trades` / `shipments` / `trade_items` は保持される
+- 相手側 UI で履歴が確認できる
+- → **A-1 trade 側 end-to-end 再検証は PASS**
+
+### 6.6 残課題 (今回スコープ外)
+
+- A-3 venue 系 FK の張り替え (`venue_holds` / `venue_trades` / `venue_checkins` / `venue_supply_posts` 等は依然 `auth.users(id)` 参照)
+- その他 `auth.users(id)` 参照のまま残るテーブル (`wanted_cards` / `reports` / `user_blocks` / `shelf_items` / `user_oshi` / `user_keyword_history` / `pioneer_program_applications`) の処置方針確定
+- 普通郵便・ミニレター時の発送通知失敗の調査
+
+---
+
+## 7. 改訂履歴
 
 - **v1 (2026-06-05)**: 初版。Phase 0 外部レビュー指摘を受けて作成。
   - P0-1 確認結果 (Edge Function 本人性 OK)
   - P0-3 確認結果 (RLS 両表 OK)
   - P0-4 フル QA 手順 + 検証クエリ
   - P1-2 相手側取引履歴 QA 結論
+- **v2 (2026-06-10)**: §6 を追加。
+  - PR #22 (FK 6 本張り替え) merge 後の実機 E2E 再検証結果を記録
+  - S1 / S2 両シナリオ PASS を明記
+  - DB 検証結果を表形式で残存 (UID `1583f8d1-87ec-4ef8-bc43-59c61da24ca8`)

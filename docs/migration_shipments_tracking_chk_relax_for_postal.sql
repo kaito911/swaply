@@ -1,0 +1,116 @@
+-- migration_shipments_tracking_chk_relax_for_postal.sql
+-- Supabase SQL Editor で手動実行してください。
+--
+-- ─────────────────────────────────────────
+-- 目的
+-- ─────────────────────────────────────────
+-- 普通郵便・ミニレター (shipping_method='postal') では追跡番号なしを許容する。
+--
+-- 背景:
+--   β1 で配送方法 5 択 ('postal' / 'click_post' / 'letter_pack' / 'yamato' / 'other')
+--   を導入したが、shipments_tracking_required_when_shipped_chk が
+--   status='shipped' 時に tracking_number を無条件必須としていた。
+--   このため submit_trade_shipment RPC を 'postal' で呼ぶと:
+--     new row for relation "shipments" violates check constraint
+--     "shipments_tracking_required_when_shipped_chk"
+--   で reject され、普通郵便・ミニレター発送通知が機能しなかった。
+--
+-- ─────────────────────────────────────────
+-- 設計
+-- ─────────────────────────────────────────
+-- 新制約は 3 OR で構成:
+--   (a) status <> 'shipped'                                    → 発送前 / 受取済は不問
+--   (b) shipping_method = 'postal'                             → 普通郵便・ミニレターは追跡不要
+--   (c) nullif(btrim(tracking_number), '') is not null         → 上記以外は追跡番号必須 (空文字不可)
+--
+-- (c) によって、shipping_method が 'click_post' / 'letter_pack' / 'yamato' / 'other' の
+-- いずれかで status='shipped' のとき tracking_number は依然として必須 (空文字も不可)。
+-- = 追跡あり配送方法の tracking_number 必須は緩んでいない。
+--
+-- 旧制約からの変化:
+--   旧 (推定): CHECK (status <> 'shipped' OR tracking_number IS NOT NULL)
+--   新:        CHECK (status <> 'shipped'
+--                    OR shipping_method = 'postal'
+--                    OR nullif(btrim(tracking_number), '') is not null)
+-- = 旧で PASS した行は新でも PASS (新は OR 句を 1 本増やすだけ、緩める方向)
+-- = 既存違反行発生のリスクなし (事前 SCAN で 0 件確認済)
+--
+-- 防御層の整理 (postal で追跡なし shipped 化を許容するのは制約のみで OK か):
+--   UI 側 (app/trade/[offerId].tsx:474-481):
+--     SHIPPING_METHOD_OPTIONS で postal は hasTracking=false、postal 選択時に
+--     追跡入力欄を非表示にしバリデーションをスキップ。
+--   RPC 側 (submit_trade_shipment, docs/migration_rpc_submit_trade_shipment.sql:101-106):
+--     v_tracking_required := p_shipping_method <> 'postal';
+--     postal は追跡なしで通過、非 postal は 'TRACKING_NUMBER_REQUIRED' を raise。
+--   DB 制約 (本 migration):
+--     postal を 'shipped' 化する経路を許容、それ以外は tracking_number 非空必須。
+--   → 3 層で「postal は追跡不要 / 非 postal は追跡必須」が整合する。
+--
+-- ─────────────────────────────────────────
+-- 事前確認結果 (2026-06-11)
+-- ─────────────────────────────────────────
+--   - public.shipments.tracking_number : nullable=YES, text
+--   - public.shipments.shipping_method : nullable=YES, text
+--   - public.shipments.status          : NOT NULL, USER-DEFINED (enum)
+--   - 既存制約: shipments_pkey / shipments_shipping_method_check
+--              / shipments_tracking_required_when_shipped_chk
+--              / shipments_trade_id_fkey / shipments_trade_user_unique
+--              / shipments_user_id_fkey
+--   - 新制約で既存違反となる行: 0 件
+--     (select ... where not (新制約式) → No rows returned)
+--
+-- ─────────────────────────────────────────
+-- 既存データへの影響
+-- ─────────────────────────────────────────
+--   - 0 行 (事前 SCAN 済)
+--   - 旧制約より緩いだけのため、論理的にも違反は発生し得ない
+--
+-- ─────────────────────────────────────────
+-- ロールバック (緊急時のみ)
+-- ─────────────────────────────────────────
+--   alter table public.shipments
+--     drop constraint if exists shipments_tracking_required_when_shipped_chk;
+--
+--   alter table public.shipments
+--     add constraint shipments_tracking_required_when_shipped_chk
+--     check (status <> 'shipped' or tracking_number is not null);
+--   ※ 上記は推定 (旧制約全文を Dashboard で取得できていないため)。
+--     ロールバック実施時は実際の旧定義を pg_get_constraintdef で再確認すること。
+--
+-- ─────────────────────────────────────────
+-- 実行
+-- ─────────────────────────────────────────
+alter table public.shipments
+  drop constraint if exists shipments_tracking_required_when_shipped_chk;
+
+alter table public.shipments
+  add constraint shipments_tracking_required_when_shipped_chk
+  check (
+    status <> 'shipped'
+    or shipping_method = 'postal'
+    or nullif(btrim(tracking_number), '') is not null
+  );
+
+-- ─────────────────────────────────────────
+-- 実行後確認 SQL
+-- ─────────────────────────────────────────
+-- (a) 新制約定義の取得 (期待: 1 行、definition に 3 OR 構成が表示される)
+-- select conname, pg_get_constraintdef(oid) as definition
+-- from pg_constraint
+-- where conrelid = 'public.shipments'::regclass
+--   and conname = 'shipments_tracking_required_when_shipped_chk';
+--
+-- (b) 既存行が依然全件 PASS することの再確認 (期待: 0)
+-- select count(*) as violation_count
+-- from public.shipments
+-- where not (
+--   status <> 'shipped'
+--   or shipping_method = 'postal'
+--   or nullif(btrim(tracking_number), '') is not null
+-- );
+--
+-- (c) shipments 制約一覧 (制約名が同名で残っていることを確認)
+-- select conname, pg_get_constraintdef(oid) as definition
+-- from pg_constraint
+-- where conrelid = 'public.shipments'::regclass
+-- order by conname;

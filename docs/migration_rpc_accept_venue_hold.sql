@@ -34,6 +34,10 @@
 --           - SECURITY DEFINER で動作するため RLS をバイパスするが、関数内で
 --             auth.uid() = receiver_id を明示チェック (NOT_RECEIVER ガード)
 --
+--         PR3 (2026-06-13): wanted_snapshot に v_supply.image_url を追加。
+--           supply_post が後で削除されても trade 履歴で画像を表示できるようにする。
+--           FOR UPDATE / ガード / unique_violation catch / anon revoke は完全温存。
+--
 -- 関連:
 --   - docs/migration_venue_trades_add_snapshot_columns.sql (snapshot 列)
 --   - docs/migration_venue_trade_accept_unique_constraints.sql (unique index 2 件)
@@ -144,11 +148,14 @@ begin
     'supply_post_id', v_hold.supply_post_id,
     'source', 'venue_hold + venue_supply_post'
   );
-  -- jsonb_strip_nulls で group_name / want_card が NULL のキーは省略
+  -- jsonb_strip_nulls で group_name / want_card / image_url が NULL のキーは省略
+  -- PR3 (2026-06-13): venue_supply_posts.image_url を snapshot に追加。
+  -- supply_post が後で削除されても trade 履歴で画像を表示できるようにする。
   v_wanted := v_wanted ||
     jsonb_strip_nulls(jsonb_build_object(
       'group_name', v_supply.group_name,
-      'want_card_text', v_supply.want_card
+      'want_card_text', v_supply.want_card,
+      'image_url', v_supply.image_url
     ));
 
   -- (13) venue_trade を INSERT (status='pending' で開始)

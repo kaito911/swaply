@@ -8,6 +8,7 @@ import {
   addSupplyPost,
   fetchReceivedHoldCount,
   fetchSupplyPosts,
+  uploadCardImage,
 } from '@/lib/supabase'
 import { computeTrustBadge, VenueSupplyPost } from '@/lib/types'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
@@ -15,11 +16,13 @@ import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { TrustBadge } from '@/components/TrustBadge'
 import { Ionicons } from '@expo/vector-icons'
+import * as ImagePicker from 'expo-image-picker'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -54,6 +57,7 @@ export default function VenueHomeScreen() {
   const [postCard, setPostCard] = useState('')
   const [postGroup, setPostGroup] = useState('')
   const [postWant, setPostWant] = useState('')
+  const [postImageUri, setPostImageUri] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
 
   // Hold申請モーダル
@@ -92,22 +96,82 @@ export default function VenueHomeScreen() {
     }, [loadSupply, loadHoldCount])
   )
 
+  const handlePickImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (!perm.granted) {
+      Alert.alert(
+        '権限が必要です',
+        '写真ライブラリへのアクセスを許可してください。'
+      )
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [3, 4],
+      quality: 0.8,
+    })
+    if (result.canceled) return
+    const asset = result.assets?.[0]
+    if (asset?.uri != null) {
+      setPostImageUri(asset.uri)
+    }
+  }
+
+  const handleClearImage = () => {
+    setPostImageUri(null)
+  }
+
   const handleSubmitPost = async () => {
     if (postCard.trim() === '' || userId == null || venueId == null) return
     try {
       setPosting(true)
+
+      // PR3: 画像があれば先に upload して publicUrl を得る。upload 失敗時は
+      // DB insert をせず、入力は残して再試行できるようにする。
+      let uploadedUrl: string | null = null
+      if (postImageUri != null) {
+        try {
+          const ext =
+            postImageUri.split('.').pop()?.split('?')[0] ?? 'jpg'
+          uploadedUrl = await uploadCardImage({
+            userId,
+            imageUri: postImageUri,
+            // path 規約: ${userId}/venue-supply/${ts}.${ext}
+            // (storage INSERT policy で第 1 階層 = userId が強制されるため、
+            //  fileName は 'venue-supply/...' 相対 path とする)
+            fileName: `venue-supply/${Date.now()}.${ext}`,
+          })
+        } catch (uploadErr) {
+          console.error('[VenueHome][handleSubmitPost][upload]', uploadErr)
+          Alert.alert('エラー', '画像のアップロードに失敗しました')
+          return
+        }
+      }
+
       const post = await addSupplyPost({
         venueId,
         userId,
         cardName: postCard.trim(),
         groupName: postGroup.trim() !== '' ? postGroup.trim() : null,
         wantCard: postWant.trim() !== '' ? postWant.trim() : null,
+        imageUrl: uploadedUrl,
       })
-      setSupplyPosts((prev) => [post, ...prev])
+      // 当日掲示板は他人 post のみ表示 (PR #30) のため、自分の新規 post は
+      // ローカル一覧に追加しない。代わりに /venue/my-posts で確認可能。
+      // ただし投稿者本人へのフィードバックとして form は閉じてリセット。
+      // 既に他人 post が見えている画面上で post 数の見た目は変わらない。
       setPostCard('')
       setPostGroup('')
       setPostWant('')
+      setPostImageUri(null)
       setShowPostForm(false)
+      Alert.alert(
+        '投稿しました',
+        '自分の会場投稿は「自分の会場投稿を管理」から確認できます。'
+      )
+      // 後方互換: 既存呼出側で setSupplyPosts に依存している箇所はないため変更なし
+      void post
     } catch (error) {
       console.error('[VenueHome][handleSubmitPost]', error)
       Alert.alert('エラー', '投稿に失敗しました')
@@ -231,7 +295,7 @@ export default function VenueHomeScreen() {
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 
@@ -278,6 +342,47 @@ export default function VenueHomeScreen() {
               {showPostForm && (
                 <View style={styles.formCard}>
                   <Text style={styles.formTitle}>会場で交換に出す（イベント当日23:59まで有効）</Text>
+
+                  {/* PR3: 画像追加 UI (任意) */}
+                  <View style={styles.fieldBlock}>
+                    <Text style={styles.fieldLabel}>画像（任意）</Text>
+                    {postImageUri != null ? (
+                      <View style={styles.imagePreviewWrap}>
+                        <Image
+                          source={{ uri: postImageUri }}
+                          style={styles.imagePreview}
+                          resizeMode="cover"
+                        />
+                        <View style={styles.imageActions}>
+                          <Pressable
+                            style={styles.imageActionButton}
+                            onPress={handlePickImage}
+                          >
+                            <Text style={styles.imageActionText}>変更</Text>
+                          </Pressable>
+                          <Pressable
+                            style={styles.imageActionButton}
+                            onPress={handleClearImage}
+                          >
+                            <Text style={styles.imageActionText}>削除</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ) : (
+                      <Pressable
+                        style={styles.imagePickerButton}
+                        onPress={handlePickImage}
+                      >
+                        <Ionicons
+                          name="image-outline"
+                          size={20}
+                          color={colors.primary}
+                        />
+                        <Text style={styles.imagePickerText}>画像を選択</Text>
+                      </Pressable>
+                    )}
+                  </View>
+
                   <View style={styles.fieldBlock}>
                     <Text style={styles.fieldLabel}>交換に出すカード名 *</Text>
                     <TextInput
@@ -349,6 +454,14 @@ export default function VenueHomeScreen() {
                       </View>
                       <Text style={styles.expiresText}>{formatVenueTimeLeft(post.expires_at)}</Text>
                     </View>
+                    {/* PR3: 画像表示 (任意、image_url がある場合のみ) */}
+                    {post.image_url != null && (
+                      <Image
+                        source={{ uri: post.image_url }}
+                        style={styles.supplyCardImage}
+                        resizeMode="cover"
+                      />
+                    )}
                     <Text style={styles.supplyCardName}>{post.card_name}</Text>
                     {post.group_name != null && (
                       <Text style={styles.supplyCardGroup}>{post.group_name}</Text>
@@ -652,6 +765,45 @@ const styles = StyleSheet.create({
   },
   submitButtonText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: '#FFFFFF' },
   buttonDisabled: { opacity: 0.5 },
+  // PR3: 画像 picker / preview
+  imagePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    backgroundColor: colors.background,
+    alignSelf: 'flex-start',
+  },
+  imagePickerText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+  },
+  imagePreviewWrap: { gap: spacing.xs },
+  imagePreview: {
+    width: '60%',
+    aspectRatio: 3 / 4,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
+  },
+  imageActions: { flexDirection: 'row', gap: spacing.sm },
+  imageActionButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  imageActionText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
+  },
   supplyCard: {
     backgroundColor: colors.backgroundCard,
     borderRadius: radius.xl,
@@ -664,6 +816,13 @@ const styles = StyleSheet.create({
   posterInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   posterHandle: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textPrimary },
   expiresText: { fontSize: fontSize.xs, color: colors.textTertiary },
+  supplyCardImage: {
+    width: '100%',
+    aspectRatio: 3 / 4,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
+    marginVertical: spacing.xs,
+  },
   supplyCardName: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
   supplyCardGroup: { fontSize: fontSize.xs, color: colors.textTertiary },
   supplyWant: { fontSize: fontSize.sm, color: colors.primary },

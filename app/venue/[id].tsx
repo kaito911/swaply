@@ -11,6 +11,7 @@ import {
   withdrawSupplyPost,
 } from '@/lib/supabase'
 import { computeTrustBadge, VenueSupplyPost } from '@/lib/types'
+import { formatVenueTimeLeft } from '@/lib/venueExpiry'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { TrustBadge } from '@/components/TrustBadge'
@@ -33,13 +34,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 type Lane = 'smart' | 'supply' | 'shelf'
-
-function timeLeft(expiresAt: string): string {
-  const diff = new Date(expiresAt).getTime() - Date.now()
-  if (diff <= 0) return '期限切れ'
-  const mins = Math.floor(diff / 60000)
-  return `あと${mins}分`
-}
 
 function getDisplayName(poster: VenueSupplyPost['poster']): string {
   if (poster == null) return 'ユーザー'
@@ -286,7 +280,7 @@ export default function VenueHomeScreen() {
               <View style={styles.supplyHeader}>
                 <View>
                   <Text style={styles.supplyTitle}>当日供給板</Text>
-                  <Text style={styles.supplySub}>会場でその場交換するための短命投稿・30分で自動失効</Text>
+                  <Text style={styles.supplySub}>イベント当日中の会場交換投稿・イベント終了後まで有効</Text>
                 </View>
                 <Pressable
                   style={[styles.postButton, showPostForm && styles.postButtonActive]}
@@ -301,7 +295,7 @@ export default function VenueHomeScreen() {
 
               {showPostForm && (
                 <View style={styles.formCard}>
-                  <Text style={styles.formTitle}>会場で交換に出す（30分で自動失効）</Text>
+                  <Text style={styles.formTitle}>会場で交換に出す（イベント当日中有効）</Text>
                   <View style={styles.fieldBlock}>
                     <Text style={styles.fieldLabel}>交換に出すカード名 *</Text>
                     <TextInput
@@ -371,7 +365,7 @@ export default function VenueHomeScreen() {
                           />
                         )}
                       </View>
-                      <Text style={styles.expiresText}>{timeLeft(post.expires_at)}</Text>
+                      <Text style={styles.expiresText}>{formatVenueTimeLeft(post.expires_at)}</Text>
                     </View>
                     <Text style={styles.supplyCardName}>{post.card_name}</Text>
                     {post.group_name != null && (
@@ -438,12 +432,12 @@ export default function VenueHomeScreen() {
                 <Text style={styles.modalSentTitle}>Hold申請を送りました</Text>
                 <Text style={styles.modalSentBody}>
                   相手の承認待ちです。{'\n'}
-                  承認されるとHold確定（30分有効）になります。{'\n'}
-                  その後、手渡し場所を決めて交換完了してください。
+                  承認されるとHoldが確定します。{'\n'}
+                  イベント当日中に手渡し場所を決めて交換完了してください。
                 </Text>
                 <View style={styles.holdInfoBox}>
                   <Text style={styles.holdInfoText}>
-                    Venue Holdは30分で自動失効します。無断失効はTrustに記録されます。
+                    Venue Holdはイベント当日中（終演後まで）有効です。
                   </Text>
                 </View>
                 <Pressable
@@ -478,7 +472,7 @@ export default function VenueHomeScreen() {
 
                 <View style={styles.holdInfoBox}>
                   <Text style={styles.holdInfoText}>
-                    申請 → 相手承認 → 30分以内に手渡し で完了。無断失効はTrustに記録されます。
+                    申請 → 相手承認 → イベント当日中に手渡し で完了。
                   </Text>
                 </View>
 

@@ -16,6 +16,7 @@ import {
   withdrawSupplyPost,
 } from '@/lib/supabase'
 import { SupplyPostStatus, VenueSupplyPost } from '@/lib/types'
+import { formatVenueTimeLeft, isVenueExpired } from '@/lib/venueExpiry'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
@@ -31,23 +32,12 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-function timeLeft(expiresAt: string): string {
-  const diff = new Date(expiresAt).getTime() - Date.now()
-  if (diff <= 0) return '期限切れ'
-  const mins = Math.floor(diff / 60000)
-  return `あと${mins}分`
-}
-
-function isExpired(post: VenueSupplyPost): boolean {
-  return new Date(post.expires_at).getTime() < Date.now()
-}
-
 type DisplayStatus = 'active' | 'withdrawn' | 'held' | 'expired'
 
 function displayStatus(post: VenueSupplyPost): DisplayStatus {
   if (post.status === 'withdrawn') return 'withdrawn'
   if (post.status === 'held') return 'held'
-  if (isExpired(post)) return 'expired'
+  if (isVenueExpired(post.expires_at)) return 'expired'
   return 'active'
 }
 
@@ -173,7 +163,7 @@ export default function VenueMyPostsScreen() {
                   </View>
                   {status === 'active' && (
                     <Text style={styles.timeLeft}>
-                      {timeLeft(post.expires_at)}
+                      {formatVenueTimeLeft(post.expires_at)}
                     </Text>
                   )}
                 </View>

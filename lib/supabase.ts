@@ -2198,16 +2198,32 @@ export async function fetchVenueCheckinCount(venueId: string): Promise<number> {
   return count ?? 0
 }
 
-export async function fetchSupplyPosts(venueId: string): Promise<VenueSupplyPost[]> {
+/**
+ * 当日掲示板 (Live Supply Board) に表示する supply_post を取得。
+ *
+ * 当日掲示板は「他人の post を探す場所」として運用するため、`excludeUserId` を
+ * 渡すと自分の post を server-side で除外する (後方互換: 未指定 / null なら除外なし)。
+ * 自分の post 管理は /venue/my-posts (`fetchMySupplyPosts`) に集約する。
+ */
+export async function fetchSupplyPosts(
+  venueId: string,
+  excludeUserId?: string | null
+): Promise<VenueSupplyPost[]> {
   const now = new Date().toISOString()
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('venue_supply_posts')
     .select('*')
     .eq('venue_id', venueId)
     .eq('status', 'active')
     .gt('expires_at', now)
     .order('created_at', { ascending: false })
+
+  if (excludeUserId != null) {
+    query = query.neq('user_id', excludeUserId)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     console.error('[fetchSupplyPosts]', error)

@@ -21,6 +21,9 @@
 --        accept_offer_atomic_v3 で trades 生成時に trades.status='pending' から開始)
 --     ※ 'disputed' (係争中) は Phase 0 外部レビュー指摘で追加 (2026-06-05)。
 --        係争中ユーザーが削除で逃げて相手 / 運営対応が破綻するのを防ぐ。
+--     ※ A-3 (2026-06-13): venue_trades の進行中状態も active 判定対象に追加。
+--        venue_trades.status IN ('pending', 'proposer_confirmed')
+--        現地交換中に削除で逃げて相手手渡しが破綻するのを防ぐ。
 --   - SECURITY DEFINER + search_path public 固定
 --   - 全 step 冪等 (再 invoke 安全)
 --   - auth.users 削除は本 RPC では行わず、Edge Function 側で実施
@@ -37,20 +40,31 @@ set search_path to 'public'
 as $$
 declare
   v_user_id uuid := auth.uid();
-  v_active_count integer;
+  v_active_count integer := 0;
+  v_count integer;
   v_short_id text;
 begin
   -- ─────────────────────────────────────────
-  -- Step 1: 認証チェック + active trade 判定
+  -- Step 1: 認証チェック + active trade 判定 (通常 trade + venue 取引)
   -- ─────────────────────────────────────────
   if v_user_id is null then
     raise exception 'AUTH_REQUIRED';
   end if;
 
-  select count(*) into v_active_count
+  -- 通常 trade
+  select count(*) into v_count
   from public.trades
   where (proposer_user_id = v_user_id or receiver_user_id = v_user_id)
     and status in ('pending', 'in_transit', 'partially_received', 'disputed');
+  v_active_count := v_active_count + v_count;
+
+  -- venue 取引 (A-3、2026-06-13 追加)
+  -- venue_trades.status='completed'/'cancelled' は履歴扱いで active から除外
+  select count(*) into v_count
+  from public.venue_trades
+  where (proposer_id = v_user_id or receiver_id = v_user_id)
+    and status in ('pending', 'proposer_confirmed');
+  v_active_count := v_active_count + v_count;
 
   if v_active_count > 0 then
     -- カウントをエラーメッセージに含めて Edge Function 側でパース可能に

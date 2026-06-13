@@ -25,6 +25,7 @@ import {
   VENUE_HOLD_STATUS_LABELS,
   VenueHoldStatus,
 } from '@/lib/types'
+import { formatVenueTimeLeft, isVenueExpired } from '@/lib/venueExpiry'
 import { TrustBadge } from '@/components/TrustBadge'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
@@ -52,18 +53,10 @@ const HOLD_STATUS_COLORS: Record<VenueHoldStatus, string> = {
   declined: '#6B7280',
 }
 
-function timeLeft(expiresAt: string): string {
-  const diff = new Date(expiresAt).getTime() - Date.now()
-  if (diff <= 0) return '期限切れ'
-  const mins = Math.floor(diff / 60000)
-  return `あと${mins}分`
-}
-
-function isExpired(hold: VenueHoldWithRelations): boolean {
-  return (
-    hold.status === 'pending' &&
-    new Date(hold.expires_at).getTime() < Date.now()
-  )
+// pending hold が期限切れかどうかは「status='pending' かつ expires_at < now()」で判定する。
+// 期限切れ判定そのものは lib/venueExpiry.ts の isVenueExpired に集約。
+function isPendingExpired(hold: VenueHoldWithRelations): boolean {
+  return hold.status === 'pending' && isVenueExpired(hold.expires_at)
 }
 
 function isConvertedLike(hold: VenueHoldWithRelations): boolean {
@@ -126,7 +119,7 @@ export default function VenueHoldsScreen() {
   const handleAccept = (hold: VenueHoldWithRelations) => {
     Alert.alert(
       'Hold申請を承認しますか？',
-      '承認するとHoldが確定し、30分以内に手渡しで交換完了してください。',
+      '承認するとHoldが確定し、イベント当日中に手渡しで交換完了してください。',
       [
         { text: 'キャンセル', style: 'cancel' },
         {
@@ -343,7 +336,7 @@ export default function VenueHoldsScreen() {
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
           {visible.map((hold) => {
-            const expired = isExpired(hold)
+            const expired = isPendingExpired(hold)
             const displayStatus: VenueHoldStatus = expired
               ? 'expired'
               : hold.status
@@ -392,7 +385,7 @@ export default function VenueHoldsScreen() {
                   {(hold.status === 'pending' && !expired) ||
                   hold.status === 'held' ? (
                     <Text style={styles.timeLeft}>
-                      {timeLeft(hold.expires_at)}
+                      {formatVenueTimeLeft(hold.expires_at)}
                     </Text>
                   ) : null}
                 </View>

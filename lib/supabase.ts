@@ -29,6 +29,7 @@ import {
 } from './types'
 import { scoreWantMatchV2 } from './matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { findCharacterIdsByText, findItemTypeIdsByText, getWorkById } from './master' // searchCards 経路 2 の master fuzzy 解決 + 経路 1 work_id legacy fallback の aliases 取得
+import { computeVenueExpiry } from './venueExpiry' // 会場出品 / Hold のイベント当日中有効 expires_at 計算
 import { readAsStringAsync } from 'expo-file-system/legacy'
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''
@@ -2241,7 +2242,16 @@ export async function addSupplyPost(params: {
   groupName: string | null
   wantCard: string | null
 }): Promise<VenueSupplyPost> {
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString()
+  // PR feat/venue-event-day-expiry: 30 分固定失効を廃止し、イベント当日 23:59 (JST)
+  // までの有効期限に変更。event_date のみ参照し、ends_at は使わない (過去 venue の
+  // ends_at が過去にあると作成直後に期限切れになる事象を回避)。
+  const { data: venue, error: venueError } = await supabase
+    .from('venues')
+    .select('event_date')
+    .eq('id', params.venueId)
+    .single()
+  if (venueError) throw venueError
+  const expiresAt = computeVenueExpiry(venue)
 
   const { data, error } = await supabase
     .from('venue_supply_posts')
@@ -2543,7 +2553,16 @@ export async function createVenueHold(params: {
   receiverCard: string
   supplyPostId: string | null
 }): Promise<VenueHold> {
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString()
+  // PR feat/venue-event-day-expiry: 30 分固定失効を廃止し、イベント当日 23:59 (JST)
+  // までの有効期限に変更。申請中 Hold (status='pending') の expires_at は supply_post と
+  // 共通の event_date 23:59:59 JST を使う。承認後 (status='held') 以降は filter 対象外。
+  const { data: venue, error: venueError } = await supabase
+    .from('venues')
+    .select('event_date')
+    .eq('id', params.venueId)
+    .single()
+  if (venueError) throw venueError
+  const expiresAt = computeVenueExpiry(venue)
 
   const { data, error } = await supabase
     .from('venue_holds')

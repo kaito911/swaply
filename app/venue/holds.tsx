@@ -34,6 +34,7 @@ import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -476,6 +477,24 @@ export default function VenueHoldsScreen() {
                   </Text>
                 )}
 
+                {/* PR3: snapshot からの画像表示 (受信者カードのもの、low-risk 拡張)。
+                    accept_venue_hold RPC が wanted_snapshot.image_url に supply_post の
+                    image_url を入れているので、supply_post が後で削除されても残る。 */}
+                {(() => {
+                  const wantedImageUrl =
+                    typeof hold.venue_trade?.wanted_snapshot?.image_url === 'string'
+                      ? (hold.venue_trade.wanted_snapshot.image_url as string)
+                      : null
+                  if (wantedImageUrl == null) return null
+                  return (
+                    <Image
+                      source={{ uri: wantedImageUrl }}
+                      style={styles.snapshotImage}
+                      resizeMode="cover"
+                    />
+                  )
+                })()}
+
                 {/* 譲 / 求 */}
                 <View style={styles.tradeContent}>
                   <View style={styles.cardBox}>
@@ -689,6 +708,15 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textTertiary,
     fontStyle: 'italic',
+  },
+  // PR3: wanted_snapshot.image_url を表示する snapshot 画像 (画面を広げないサイズ感)
+  snapshotImage: {
+    width: '50%',
+    aspectRatio: 3 / 4,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
+    alignSelf: 'center',
+    marginVertical: spacing.xs,
   },
   tradeContent: {
     flexDirection: 'row',

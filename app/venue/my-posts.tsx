@@ -24,6 +24,7 @@ import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -168,6 +169,15 @@ export default function VenueMyPostsScreen() {
                   )}
                 </View>
 
+                {/* PR3: 画像表示 (任意、image_url がある場合のみ) */}
+                {post.image_url != null && (
+                  <Image
+                    source={{ uri: post.image_url }}
+                    style={styles.postImage}
+                    resizeMode="cover"
+                  />
+                )}
+
                 <Text style={styles.cardName}>{post.card_name}</Text>
                 {post.group_name != null && (
                   <Text style={styles.subText}>{post.group_name}</Text>
@@ -257,6 +267,13 @@ const styles = StyleSheet.create({
   },
   statusText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
   timeLeft: { fontSize: fontSize.xs, color: colors.textTertiary },
+  postImage: {
+    width: '100%',
+    aspectRatio: 3 / 4,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
+    marginVertical: spacing.xs,
+  },
   cardName: {
     fontSize: fontSize.base,
     fontWeight: fontWeight.bold,

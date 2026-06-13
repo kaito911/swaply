@@ -23,7 +23,10 @@ import {
   VenueHold,
   VenueSupplyPost,
   VenueTrade,
+  VenueTradeMessage,
+  VenueTradeRead,
   VenueTradeStatus,
+  VenueTradeUnreadCountRow,
   WantedCard,
   WantMatchScore,
 } from './types'
@@ -2709,6 +2712,167 @@ export async function confirmVenueTrade(
     .in('status', ['pending', 'partially_confirmed'])
 
   if (error) throw error
+}
+
+// ─────────────────────────────────────────
+// venue_trade 専用 DM (PR5)
+//
+// 詳細:
+//   - docs/venue_mode_requirements.md §8
+//   - docs/migration_venue_trade_dm_tables.sql (B1: 2 tables + RLS + grants)
+//   - docs/migration_rpc_venue_trade_dm.sql (B2: 4 RPCs)
+//   - docs/migration_trigger_venue_trade_system_message.sql (B3: system message trigger)
+//
+// 設計:
+//   - messages / reads テーブルは SELECT only RLS + テーブル GRANT SELECT のみ。
+//   - 書き込みは send_venue_trade_message / mark_venue_trade_thread_read RPC のみ。
+//   - 送信窓 (P0) は pending / partially_confirmed のみ。RPC が allowlist 判定。
+//   - 未読は kind='user' AND sender_id <> auth.uid() のみ対象。
+// ─────────────────────────────────────────
+
+/**
+ * 指定 trade のメッセージを created_at ASC で取得する。
+ *
+ * RLS で participant 以外は 0 行になる前提。
+ * 上限なしで取得 (β1 段階の取引メッセージは少量、件数膨張は P1 で paging 化検討)。
+ */
+export async function fetchVenueTradeMessages(
+  tradeId: string
+): Promise<VenueTradeMessage[]> {
+  const { data, error } = await supabase
+    .from('venue_trade_messages')
+    .select('id, trade_id, sender_id, kind, body, system_event, created_at')
+    .eq('trade_id', tradeId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    console.error('[fetchVenueTradeMessages]', error)
+    throw error
+  }
+
+  return (data ?? []) as VenueTradeMessage[]
+}
+
+/**
+ * venue_trade DM のユーザ送信。
+ *
+ * RPC は send_venue_trade_message(p_trade_id, p_body)。
+ * 失敗時の raise exception 文字列を Error.message として呼び出し側に伝える:
+ *   - AUTH_REQUIRED, BODY_EMPTY, BODY_TOO_LONG, TRADE_NOT_FOUND,
+ *     NOT_PARTICIPANT, SEND_WINDOW_CLOSED, TRADE_CANCELLED
+ * UI 側はこの文字列で日本語メッセージを切り替える。
+ */
+export async function sendVenueTradeMessage(
+  tradeId: string,
+  body: string
+): Promise<VenueTradeMessage> {
+  const { data, error } = await supabase.rpc('send_venue_trade_message', {
+    p_trade_id: tradeId,
+    p_body: body,
+  })
+
+  if (error) throw error
+  if (data == null) {
+    throw new Error('NO_MESSAGE_RETURNED')
+  }
+
+  return data as VenueTradeMessage
+}
+
+/**
+ * venue_trade DM の既読位置 (last_read_at) を now() で upsert する。
+ *
+ * RPC は mark_venue_trade_thread_read(p_trade_id)。
+ * raise exception:
+ *   - AUTH_REQUIRED, NOT_PARTICIPANT
+ */
+export async function markVenueTradeThreadRead(
+  tradeId: string
+): Promise<VenueTradeRead> {
+  const { data, error } = await supabase.rpc('mark_venue_trade_thread_read', {
+    p_trade_id: tradeId,
+  })
+
+  if (error) throw error
+  if (data == null) {
+    throw new Error('NO_READ_RECORD_RETURNED')
+  }
+
+  return data as VenueTradeRead
+}
+
+/**
+ * 自分が participant の全 venue_trade を合算した未読メッセージ数 (グローバル)。
+ *
+ * RPC は get_venue_trade_unread_count()、未認証で auth.uid() が NULL の場合は 0。
+ * BottomTabBar の会場タブバッジで使用 (受信 Hold 件数と合算)。
+ */
+export async function fetchVenueTradeUnreadCount(): Promise<number> {
+  const { data, error } = await supabase.rpc('get_venue_trade_unread_count')
+
+  if (error) {
+    console.error('[fetchVenueTradeUnreadCount]', error)
+    throw error
+  }
+
+  if (typeof data !== 'number') return 0
+  return data
+}
+
+/**
+ * per-trade 未読数を一括取得 (N+1 回避)。
+ *
+ * RPC は get_venue_trade_unread_counts()、行: (trade_id uuid, unread_count int)。
+ * 戻り値は Map<trade_id, unread_count>。未読 0 件の trade は行が返らないので、
+ * 呼び出し側は map.get(id) ?? 0 で取り回す。
+ */
+export async function fetchVenueTradeUnreadCounts(): Promise<Map<string, number>> {
+  const { data, error } = await supabase.rpc('get_venue_trade_unread_counts')
+
+  if (error) {
+    console.error('[fetchVenueTradeUnreadCounts]', error)
+    throw error
+  }
+
+  const result = new Map<string, number>()
+  for (const row of (data ?? []) as VenueTradeUnreadCountRow[]) {
+    if (row.trade_id != null) {
+      result.set(row.trade_id, Number(row.unread_count) || 0)
+    }
+  }
+  return result
+}
+
+/**
+ * 指定 venue_trade を 1 件取得 (DM 画面の上部詳細用)。
+ *
+ * RLS "Participants can manage their venue trades" (FOR ALL) で
+ * 非 participant は 0 行になる前提。
+ *
+ * 取得列は DM 画面で必要な最小セット:
+ *   id / venue_id / hold_id / proposer_id / receiver_id
+ *   / proposer_card / receiver_card / status
+ *   / proposer_confirmed_at / receiver_confirmed_at
+ *   / completed_at / created_at / updated_at
+ *   / offered_snapshot / wanted_snapshot
+ */
+export async function fetchVenueTradeById(
+  tradeId: string
+): Promise<VenueTrade | null> {
+  const { data, error } = await supabase
+    .from('venue_trades')
+    .select(
+      'id, venue_id, hold_id, proposer_id, receiver_id, proposer_card, receiver_card, status, proposer_confirmed_at, receiver_confirmed_at, completed_at, created_at, updated_at, offered_snapshot, wanted_snapshot'
+    )
+    .eq('id', tradeId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[fetchVenueTradeById]', error)
+    throw error
+  }
+
+  return (data as VenueTrade | null) ?? null
 }
 
 // ─────────────────────────────────────────

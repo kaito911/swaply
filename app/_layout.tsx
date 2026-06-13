@@ -202,6 +202,10 @@ function RootNavigator() {
           }}
         />
         <Stack.Screen
+          name="venue/trade/[id]"
+          options={{ headerShown: false }} // 画面内 ScreenHeader 統一 (3.5a 規約)
+        />
+        <Stack.Screen
           name="legal"
           options={{ headerShown: false }}
         />

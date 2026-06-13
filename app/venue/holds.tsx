@@ -18,6 +18,7 @@ import {
   confirmVenueTrade,
   declineVenueHold,
   fetchVenueHolds,
+  fetchVenueTradeUnreadCounts,
   type VenueHoldWithRelations,
 } from '@/lib/supabase'
 import {
@@ -29,7 +30,7 @@ import { formatVenueTimeLeft, isVenueExpired } from '@/lib/venueExpiry'
 import { TrustBadge } from '@/components/TrustBadge'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
-import { useFocusEffect, useLocalSearchParams } from 'expo-router'
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
@@ -138,12 +139,26 @@ export default function VenueHoldsScreen() {
   const [actingId, setActingId] = useState<string | null>(null)
   // PR4a (B1 修正): venueTrades の in-memory state を廃止。trade は fetchVenueHolds が
   // join 取得した hold.venue_trade を直接利用する (画面再 mount 後も双方が trade に到達可)。
+  // PR5: 成立済タブの per-trade unread badge 用。get_venue_trade_unread_counts() 一括 RPC
+  // を 1 回だけ呼び Map<trade_id, unread_count> を構築 (N+1 回避)。未読 0 の trade は
+  // 行が返らないので map.get(id) ?? 0 で取り回す。
+  const [unreadByTradeId, setUnreadByTradeId] = useState<Map<string, number>>(
+    new Map()
+  )
 
   const reload = useCallback(async () => {
     if (venueId == null || userId == null) return
     setLoading(true)
     const fresh = await fetchVenueHolds(venueId, userId, 'all')
     setHolds(fresh)
+    // unread 取得は失敗しても hold 一覧の表示は止めない (warn のみ)
+    try {
+      const counts = await fetchVenueTradeUnreadCounts()
+      setUnreadByTradeId(counts)
+    } catch (error) {
+      console.warn('[VenueHolds] fetchVenueTradeUnreadCounts', error)
+      setUnreadByTradeId(new Map())
+    }
     setLoading(false)
   }, [venueId, userId])
 
@@ -588,6 +603,33 @@ export default function VenueHoldsScreen() {
                   </Pressable>
                 )}
 
+                {/* PR5: 成立済タブから venue_trade 専用 DM へ遷移。
+                    cancelled trade でも閲覧 (read-only) のため表示する。 */}
+                {tab === 'converted' && trade != null && (() => {
+                  const unread = unreadByTradeId.get(trade.id) ?? 0
+                  return (
+                    <Pressable
+                      style={[
+                        styles.openMessagesButton,
+                        isActing && styles.buttonDisabled,
+                      ]}
+                      onPress={() => router.push(`/venue/trade/${trade.id}`)}
+                      disabled={isActing}
+                    >
+                      <Text style={styles.openMessagesButtonText}>
+                        メッセージを開く
+                      </Text>
+                      {unread > 0 && (
+                        <View style={styles.openMessagesBadge}>
+                          <Text style={styles.openMessagesBadgeText}>
+                            {unread > 99 ? '99+' : String(unread)}
+                          </Text>
+                        </View>
+                      )}
+                    </Pressable>
+                  )
+                })()}
+
                 {/* PR4a: B1 解消後、trade は DB から取得済 (null は理論上発生しない)。
                     万一 null の場合 (RLS / データ欠落) は念のため案内のみ。 */}
                 {tab === 'converted' &&
@@ -792,6 +834,36 @@ const styles = StyleSheet.create({
   },
   confirmButtonText: {
     fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
+  },
+  // PR5: 成立済タブから venue_trade DM へ遷移するボタン (確定ボタンの下に配置)。
+  openMessagesButton: {
+    height: 44,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  openMessagesButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.textPrimary,
+  },
+  openMessagesBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#EF4444',
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  openMessagesBadgeText: {
+    fontSize: 10,
     fontWeight: fontWeight.bold,
     color: '#FFFFFF',
   },

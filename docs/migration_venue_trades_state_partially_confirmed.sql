@@ -1,0 +1,252 @@
+-- ====================================================================
+-- migration_venue_trades_state_partially_confirmed.sql
+-- 作成日: 2026-06-13
+-- 目的  : venue_trades.status の CHECK 制約を再設計し、role 中立の対称確定を可能にする。
+--
+--         旧:  pending / proposer_confirmed / completed / cancelled  (4 値)
+--         新:  pending / partially_confirmed / completed / cancelled (4 値、置換)
+--
+--         同時に既存 'proposer_confirmed' 行を 'partially_confirmed' に移行する。
+--
+--         confirmVenueTrade の実装が `${role}_confirmed` を生成しており、receiver 先行で
+--         CHECK 違反 (Postgres 23514) が発生していた既知バグ (B2、PR #26 実機で実証) を、
+--         status 文字列から role を除去することで構造的に消滅させる。
+--
+--         確定アクションは「自分 role 側の timestamp を書く」だけにし、status は両
+--         timestamp の有無で派生:
+--           proposer_confirmed_at, receiver_confirmed_at 両方 NULL → pending
+--           片方のみ NOT NULL                                       → partially_confirmed
+--           両方 NOT NULL                                            → completed
+--
+-- 関連:
+--   - 仕様: docs/venue_mode_requirements.md §5 / §7 / §12 (PR4a 設計確定)
+--   - 連動 SQL: delete_my_account RPC の active venue_trade 判定を併せて
+--     status in ('pending', 'partially_confirmed') に更新する必要あり。
+--     本 migration 実行後に CREATE OR REPLACE で更新する (別 SQL、Block D 参照)。
+--
+-- 適用前提:
+--   - 本番 venue_trades の status 分布が現行 4 値の範囲内に収まっていること
+--     (Block A ◆ 1 で検証)。
+--   - 'partially_confirmed' 行は本 migration 適用前には存在しないこと (新値)。
+--   - 'proposer_confirmed' 行が存在する場合、本 migration 内で 'partially_confirmed' に
+--     移行される。本番想定: 0 件 (PR #26 実機検証で confirmVenueTrade の UPDATE が
+--     CHECK 違反で失敗、行は 'pending' のまま remain)。
+--     → Block A ◆ 3 で実件数確認。
+--
+-- ====================================================================
+-- ⚠️ 実装連動 (本 migration 単独適用後は一時的にコード不整合):
+--
+--   本 migration を本番適用すると、現コードの confirmVenueTrade が生成する
+--   'proposer_confirmed' が CHECK で reject される (新 CHECK では未許可値)。
+--   PR4a 実装フェーズで lib/supabase.ts confirmVenueTrade を role 中立な
+--   対称確定に書き換えるまでの間、venue_trade 完了確認は引き続き失敗する。
+--   現状 receiver 先行で 23514 → 適用後は proposer 先行でも 23514 になるが、
+--   ユーザー観点では「元々完走できなかった」状態が継続するだけで実害は変わらない。
+--
+--   推奨: 本 migration + 連動 RPC 更新 + コード更新を短時間で順次適用する。
+-- ====================================================================
+
+begin;
+
+-- 1. 既存 CHECK 制約を drop
+alter table public.venue_trades
+  drop constraint venue_trades_status_check;
+
+-- 2. データ移行: 'proposer_confirmed' → 'partially_confirmed'
+--    本番想定 0 件。1 件以上あれば本 UPDATE で partially_confirmed に移行される。
+--    新 CHECK 制約 ADD 前に DROP 済なので、UPDATE 後の新値 'partially_confirmed' は
+--    検証対象外 (旧 CHECK / 新 CHECK のいずれも掛かっていない状態)。
+update public.venue_trades
+   set status = 'partially_confirmed',
+       updated_at = now()
+ where status = 'proposer_confirmed';
+
+-- 3. 新 CHECK 制約を add
+alter table public.venue_trades
+  add constraint venue_trades_status_check
+  check (status in (
+    'pending',
+    'partially_confirmed',
+    'completed',
+    'cancelled'
+  ));
+
+commit;
+
+-- ====================================================================
+-- Block A: 適用前安全確認 (本 migration 実行前に実行推奨)
+-- ====================================================================
+--
+-- ◆ 1. 既存 status 分布確認 (4 値の範囲内であること、partially_confirmed が無いこと)
+--
+--   select status, count(*) as cnt
+--   from public.venue_trades
+--   group by status
+--   order by status;
+--   → 期待: status は pending / proposer_confirmed / completed / cancelled のいずれかのみ
+--           partially_confirmed は 0 行 (新値、適用前は存在しない)
+--           venue_trades の総件数は PR #26 実機検証分が反映されている想定
+--
+-- ◆ 2. 既存 CHECK 制約の確認 (DROP 前提が崩れていないか)
+--
+--   select pg_get_constraintdef(oid) as def
+--   from pg_constraint
+--   where conrelid = 'public.venue_trades'::regclass
+--     and conname = 'venue_trades_status_check';
+--   → 期待: 1 行返り、定義文に partially_confirmed を含まず以下 4 値:
+--     CHECK ((status = ANY (ARRAY['pending'::text, 'proposer_confirmed'::text,
+--                                  'completed'::text, 'cancelled'::text])))
+--
+-- ◆ 3. proposer_confirmed 行の事前件数確認 (データ移行対象)
+--
+--   select count(*) as proposer_confirmed_count
+--   from public.venue_trades
+--   where status = 'proposer_confirmed';
+--   → 期待: 0 件 (PR #26 実機検証で UPDATE 失敗のため remain at pending)
+--           1 件以上の場合、本 migration が UPDATE で partially_confirmed に移行する
+--
+-- ◆ 4. 完了 / キャンセル trade に既存影響がないこと確認
+--
+--   select status, count(*) from public.venue_trades
+--   where status in ('completed', 'cancelled')
+--   group by status;
+--   → 期待: 任意件数。本 migration では completed / cancelled に一切触らない (CHECK の
+--           許可値に変化なし、UPDATE も対象外)
+--
+-- ◆ 5. 想定外 status が存在しないか (旧 CHECK 範囲を逸脱した行が無いことの確認)
+--
+--   select id, status, created_at, updated_at
+--   from public.venue_trades
+--   where status not in ('pending', 'proposer_confirmed', 'completed', 'cancelled');
+--   → 期待: 0 件
+--           1 件以上ある場合、本 migration の旧 CHECK DROP 前提が崩れている (DB 直接
+--           更新等で想定外値が混入)。発見次第、旧 CHECK 範囲に正規化してから再実行。
+--
+-- ◆ 6. timestamp と status の不整合がないか
+--
+--   select id, status, proposer_confirmed_at, receiver_confirmed_at, completed_at,
+--          created_at, updated_at
+--   from public.venue_trades
+--   where
+--     (status = 'completed' and (proposer_confirmed_at is null or receiver_confirmed_at is null))
+--     or
+--     (status <> 'completed' and completed_at is not null)
+--     or
+--     (proposer_confirmed_at is not null and receiver_confirmed_at is not null and status <> 'completed');
+--   → 期待: 0 件
+--           1 件以上ある場合、状態と timestamp が論理的に整合していない行が存在する。
+--           本 migration は status 値の置換のみで timestamp は触らないため、不整合を
+--           解消しない。発見次第、別途 UPDATE で整理してから本 migration を実行。
+--
+-- ====================================================================
+-- Block C: 適用後の検証手順
+-- ====================================================================
+--
+-- ◆ 1. CHECK 制約が新 4 値に再設計されたことの確認
+--
+--   select pg_get_constraintdef(oid) as def
+--   from pg_constraint
+--   where conrelid = 'public.venue_trades'::regclass
+--     and conname = 'venue_trades_status_check';
+--   → 期待: 1 行返り、定義文に partially_confirmed を含み proposer_confirmed を含まない:
+--     CHECK ((status = ANY (ARRAY['pending'::text, 'partially_confirmed'::text,
+--                                  'completed'::text, 'cancelled'::text])))
+--
+-- ◆ 2. データ移行結果の確認
+--
+--   select status, count(*) as cnt
+--   from public.venue_trades
+--   group by status
+--   order by status;
+--   → 期待:
+--     - proposer_confirmed = 0 行 (全件 partially_confirmed に移行済)
+--     - partially_confirmed = Block A ◆ 3 の proposer_confirmed_count と一致
+--     - pending / completed / cancelled は適用前と同件数
+--
+-- ◆ 3. (任意) partially_confirmed 行の timestamp 整合性確認
+--
+--   select id, status, proposer_confirmed_at, receiver_confirmed_at, updated_at
+--   from public.venue_trades
+--   where status = 'partially_confirmed';
+--   → 期待: 旧 proposer_confirmed 行は proposer_confirmed_at NOT NULL、
+--          receiver_confirmed_at は NULL のはず。updated_at は本 migration の now() に
+--          更新されている。
+--
+-- ◆ 4. 想定外 status が新 CHECK 範囲を逸脱していないか
+--
+--   select id, status, created_at, updated_at
+--   from public.venue_trades
+--   where status not in ('pending', 'partially_confirmed', 'completed', 'cancelled');
+--   → 期待: 0 件 (新 CHECK 制約で防がれるため理論上 0、二重防御として確認)
+--
+-- ◆ 5. timestamp と status の不整合がないか (新 enum 込み)
+--
+--   select id, status, proposer_confirmed_at, receiver_confirmed_at, completed_at,
+--          created_at, updated_at
+--   from public.venue_trades
+--   where
+--     -- completed: 両 timestamp + completed_at NOT NULL が必須
+--     (status = 'completed' and (proposer_confirmed_at is null or receiver_confirmed_at is null))
+--     or
+--     -- partially_confirmed: 片方のみ NOT NULL が必須 (両方 NULL も両方 NOT NULL も NG)
+--     (status = 'partially_confirmed' and (
+--       (proposer_confirmed_at is null and receiver_confirmed_at is null)
+--       or
+--       (proposer_confirmed_at is not null and receiver_confirmed_at is not null)
+--     ))
+--     or
+--     -- completed 以外で completed_at がセットされている
+--     (status <> 'completed' and completed_at is not null)
+--     or
+--     -- 両 timestamp NOT NULL かつ status が completed でない
+--     (proposer_confirmed_at is not null and receiver_confirmed_at is not null and status <> 'completed');
+--   → 期待: 0 件
+--           1 件以上ある場合、本 migration のデータ移行 (旧 proposer_confirmed →
+--           partially_confirmed) で timestamp 整合性を満たさない行が混入した可能性
+--           あり (理論上は旧 proposer_confirmed 行は proposer_confirmed_at NOT NULL +
+--           receiver_confirmed_at NULL のはずで、partially_confirmed の整合性を満たす)。
+--           発見次第、個別に調査・整理する。
+--
+-- ====================================================================
+-- Block E: ロールバック (緊急時のみ)
+-- ====================================================================
+-- ※ partially_confirmed 行が存在する場合、まず proposer_confirmed に戻してから
+--    CHECK 制約を旧形に戻す必要がある。
+-- ※ PR4a コード実装後、または partially_confirmed → completed への進行が発生した後は
+--    ロールバック困難 (完了状態に至った行は status='completed' でロールバック範囲外だが、
+--    完了途中の片側確定行が戻せない場合あり)。
+-- ※ 推奨: 本 migration 適用前にバックアップ取得。
+--
+-- ◆ ロールバック前安全確認:
+--
+--   select count(*) as partially_confirmed_count
+--   from public.venue_trades where status = 'partially_confirmed';
+--   → 0 でない場合は逆移行 UPDATE が必要 (下記 a を先に実行)
+--
+-- ◆ ロールバック SQL:
+--
+-- begin;
+--
+-- -- a. partially_confirmed 行を proposer_confirmed に戻す (必要な場合のみ)
+-- update public.venue_trades
+--    set status = 'proposer_confirmed',
+--        updated_at = now()
+--  where status = 'partially_confirmed';
+--
+-- -- b. CHECK 制約を旧 4 値に戻す
+-- alter table public.venue_trades
+--   drop constraint venue_trades_status_check;
+-- alter table public.venue_trades
+--   add constraint venue_trades_status_check
+--   check (status in (
+--     'pending',
+--     'proposer_confirmed',
+--     'completed',
+--     'cancelled'
+--   ));
+--
+-- commit;
+--
+-- ※ ロールバック後、delete_my_account RPC の active 判定も
+--   status in ('pending', 'proposer_confirmed') に戻す必要あり (連動 SQL Block D の
+--   CREATE OR REPLACE を旧定義で再実行)。

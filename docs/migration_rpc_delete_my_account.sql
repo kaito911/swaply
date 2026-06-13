@@ -22,8 +22,11 @@
 --     ※ 'disputed' (係争中) は Phase 0 外部レビュー指摘で追加 (2026-06-05)。
 --        係争中ユーザーが削除で逃げて相手 / 運営対応が破綻するのを防ぐ。
 --     ※ A-3 (2026-06-13): venue_trades の進行中状態も active 判定対象に追加。
---        venue_trades.status IN ('pending', 'proposer_confirmed')
+--        venue_trades.status IN ('pending', 'partially_confirmed')
 --        現地交換中に削除で逃げて相手手渡しが破綻するのを防ぐ。
+--        ※ PR4a (2026-06-13) で 'proposer_confirmed' を 'partially_confirmed' に
+--           再設計。role 中立対称確定で receiver 先行 CHECK 違反 (B2 既知バグ) を解消。
+--           docs/migration_venue_trades_state_partially_confirmed.sql 連動。
 --   - SECURITY DEFINER + search_path public 固定
 --   - 全 step 冪等 (再 invoke 安全)
 --   - auth.users 削除は本 RPC では行わず、Edge Function 側で実施
@@ -58,12 +61,12 @@ begin
     and status in ('pending', 'in_transit', 'partially_received', 'disputed');
   v_active_count := v_active_count + v_count;
 
-  -- venue 取引 (A-3、2026-06-13 追加)
+  -- venue 取引 (A-3、2026-06-13 追加、PR4a で partially_confirmed に再設計)
   -- venue_trades.status='completed'/'cancelled' は履歴扱いで active から除外
   select count(*) into v_count
   from public.venue_trades
   where (proposer_id = v_user_id or receiver_id = v_user_id)
-    and status in ('pending', 'proposer_confirmed');
+    and status in ('pending', 'partially_confirmed');
   v_active_count := v_active_count + v_count;
 
   if v_active_count > 0 then

@@ -2242,11 +2242,12 @@ export async function addSupplyPost(params: {
   groupName: string | null
   wantCard: string | null
 }): Promise<VenueSupplyPost> {
-  // PR feat/venue-event-day-expiry: 30 分固定失効を廃止し、イベント当日中有効に変更。
-  // venue の event_date / ends_at を参照して expires_at を計算する。
+  // PR feat/venue-event-day-expiry: 30 分固定失効を廃止し、イベント当日 23:59 (JST)
+  // までの有効期限に変更。event_date のみ参照し、ends_at は使わない (過去 venue の
+  // ends_at が過去にあると作成直後に期限切れになる事象を回避)。
   const { data: venue, error: venueError } = await supabase
     .from('venues')
-    .select('event_date, ends_at')
+    .select('event_date')
     .eq('id', params.venueId)
     .single()
   if (venueError) throw venueError
@@ -2552,12 +2553,12 @@ export async function createVenueHold(params: {
   receiverCard: string
   supplyPostId: string | null
 }): Promise<VenueHold> {
-  // PR feat/venue-event-day-expiry: 30 分固定失効を廃止し、イベント当日中有効に変更。
-  // 申請中 Hold (status='pending') の expires_at は supply_post と同じ event-day-end を使う。
-  // 承認後 (status='held') 以降は filter 対象外なので expires_at は事実上影響しない。
+  // PR feat/venue-event-day-expiry: 30 分固定失効を廃止し、イベント当日 23:59 (JST)
+  // までの有効期限に変更。申請中 Hold (status='pending') の expires_at は supply_post と
+  // 共通の event_date 23:59:59 JST を使う。承認後 (status='held') 以降は filter 対象外。
   const { data: venue, error: venueError } = await supabase
     .from('venues')
-    .select('event_date, ends_at')
+    .select('event_date')
     .eq('id', params.venueId)
     .single()
   if (venueError) throw venueError

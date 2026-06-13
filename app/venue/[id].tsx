@@ -280,7 +280,7 @@ export default function VenueHomeScreen() {
               <View style={styles.supplyHeader}>
                 <View>
                   <Text style={styles.supplyTitle}>当日供給板</Text>
-                  <Text style={styles.supplySub}>イベント当日中の会場交換投稿・イベント終了後まで有効</Text>
+                  <Text style={styles.supplySub}>イベント当日23:59まで有効</Text>
                 </View>
                 <Pressable
                   style={[styles.postButton, showPostForm && styles.postButtonActive]}
@@ -295,7 +295,7 @@ export default function VenueHomeScreen() {
 
               {showPostForm && (
                 <View style={styles.formCard}>
-                  <Text style={styles.formTitle}>会場で交換に出す（イベント当日中有効）</Text>
+                  <Text style={styles.formTitle}>会場で交換に出す（イベント当日23:59まで有効）</Text>
                   <View style={styles.fieldBlock}>
                     <Text style={styles.fieldLabel}>交換に出すカード名 *</Text>
                     <TextInput
@@ -437,7 +437,7 @@ export default function VenueHomeScreen() {
                 </Text>
                 <View style={styles.holdInfoBox}>
                   <Text style={styles.holdInfoText}>
-                    Venue Holdはイベント当日中（終演後まで）有効です。
+                    Venue Holdはイベント当日23:59まで有効です。
                   </Text>
                 </View>
                 <Pressable

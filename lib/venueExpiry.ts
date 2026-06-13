@@ -4,33 +4,28 @@
 //
 // 設計方針:
 //   - 会場出品 (venue_supply_posts) と申請中 Hold (venue_holds.status='pending') は
-//     30 分固定失効を廃止し、「イベント当日中」有効とする。
-//       venue.ends_at が NOT NULL → ends_at + 3 時間 (公演後の交換タイム想定)
-//       venue.ends_at が NULL     → event_date の JST 23:59:59
+//     30 分固定失効を廃止し、**イベント当日 23:59 (JST) まで有効**とする。
+//     event_date の JST 23:59:59 を UTC ISO に正規化して expires_at に書き込む。
+//     `ends_at` は本期限計算では使用しない (過去 venue の ends_at が過去にあると
+//     作成直後に期限切れになる事象を回避)。
 //   - 承認済 (status='held') / 取引化済 (status='converted') hold および venue_trades は
 //     expires_at による自動失効をしない (DB filter 対象外、本ユーティリティの守備範囲外)。
 //   - expires_at 列自体は将来の cleanup / 非表示判定のために残す。
 //
 // 関連: docs/venue_mode_requirements.md §5 / §10
 
-// 公演後の交換タイムを許容する終演バッファ。1〜6h 程度の範囲で再検討余地あり。
-const POST_END_BUFFER_MS = 3 * 60 * 60 * 1000
-
 /**
  * venue 情報から venue_supply_posts / venue_holds に書き込む expires_at を計算する。
  *
- *   - venue.ends_at が NOT NULL → ends_at + 3 時間 (POST_END_BUFFER_MS)
- *   - venue.ends_at が NULL     → event_date の JST 23:59:59 (UTC ISO に正規化)
+ * 仕様: event_date の JST 23:59:59 を UTC ISO に正規化して返す。
+ * 例: event_date='2026-06-13' → '2026-06-13T23:59:59+09:00' → UTC '2026-06-13T14:59:59Z'
+ *
+ * 注:
+ *   - 過去日 venue の場合は計算結果が過去になる → 直ちに期限切れ表示。これは仕様
+ *     (過去日の event には投稿しない想定)。
+ *   - 未来日 venue の場合は計算結果が未来。前日までの事前投稿でも当日中は有効。
  */
-export function computeVenueExpiry(venue: {
-  event_date: string
-  ends_at: string | null
-}): string {
-  if (venue.ends_at != null) {
-    return new Date(
-      new Date(venue.ends_at).getTime() + POST_END_BUFFER_MS
-    ).toISOString()
-  }
+export function computeVenueExpiry(venue: { event_date: string }): string {
   // event_date は date 型 ("YYYY-MM-DD") を想定。JST 末尾の +09:00 を付けて UTC に正規化。
   return new Date(`${venue.event_date}T23:59:59+09:00`).toISOString()
 }

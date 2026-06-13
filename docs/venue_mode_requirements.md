@@ -127,9 +127,9 @@
 - **[確定]** status: `active` / `withdrawn` / `held`、expires_at あり、cron なし、読取時に `active AND expires_at > now()` でフィルタ、DB 上は期限切れも active のまま。`held` は定義のみで書き込み経路なし。画像カラムなし。
 - 変更方針: `image_path`（text, nullable）を追加する (PR3 範囲)。
 - 変更方針: `held` への書き込み経路を持たせる（承認時のロック先、PR4b 範囲）。
-- **[適用済 2026-06-13]** `expires_at` を「イベント当日中有効」で設定する。30 分固定失効は廃止。
-  - `venue.ends_at` が NOT NULL → ends_at + 3 時間 (公演後の交換タイム想定)
-  - `venue.ends_at` が NULL     → event_date の JST 23:59:59
+- **[適用済 2026-06-13]** `expires_at` を「イベント当日 23:59 (JST) まで有効」で設定する。30 分固定失効は廃止。
+  - `venue.event_date` の JST 23:59:59 を UTC ISO に正規化して書き込む。
+  - `ends_at` は使わない (過去 venue の ends_at が過去にあると作成直後に期限切れになる事象を回避)。
   - 詳細: `lib/venueExpiry.ts` `computeVenueExpiry`
 - 方針: `expired` status は追加しない（enum に無く、expires_at 派生で処理する）。post 期限は板の表示可否のみを支配し、pending Hold の生存には影響させない（§10 参照）。
 
@@ -320,8 +320,8 @@ pending / partially_confirmed ──当事者が取消──▶ cancelled
 
 | 種別 | 対象 | 値 | 実装メモ |
 |---|---|---|---|
-| 供給板表示期限 | `venue_supply_posts` | **イベント当日中** (ends_at+3h or event_date JST 23:59:59) | `expires_at`。`lib/venueExpiry.ts` `computeVenueExpiry` で計算。板表示可否のみ支配 |
-| Hold 申請中期限 | `venue_holds` (status='pending') | **イベント当日中** (supply_post と同じ計算) | 同上。承認後 (`held` 以降) は filter 対象外で実質影響しない |
+| 供給板表示期限 | `venue_supply_posts` | **イベント当日 23:59 (JST)** (event_date JST 23:59:59) | `expires_at`。`lib/venueExpiry.ts` `computeVenueExpiry` で計算。`ends_at` は使わない。板表示可否のみ支配 |
+| Hold 申請中期限 | `venue_holds` (status='pending') | **イベント当日 23:59 (JST)** (supply_post と同じ計算) | 同上。承認後 (`held` 以降) は filter 対象外で実質影響しない |
 | 合流猶予（completed 前） | `venue_trades` | 完了 / キャンセルまで保持 (自動失効しない) | `partially_confirmed` も含めて自動失効なし |
 | DM 送信猶予（completed 後） | `venue_trade_messages` | `completed_at + 48h`（24h でも可） | 取引単位。複数日でも過長にならない |
 

@@ -24,7 +24,6 @@ import {
   computeTrustBadge,
   VENUE_HOLD_STATUS_LABELS,
   VenueHoldStatus,
-  VenueTrade,
 } from '@/lib/types'
 import { TrustBadge } from '@/components/TrustBadge'
 import { useAuthContext } from '@/providers/AuthProvider'
@@ -93,7 +92,8 @@ export default function VenueHoldsScreen() {
   const [holds, setHolds] = useState<VenueHoldWithRelations[]>([])
   const [loading, setLoading] = useState(true)
   const [actingId, setActingId] = useState<string | null>(null)
-  const [venueTrades, setVenueTrades] = useState<Record<string, VenueTrade>>({})
+  // PR4a (B1 修正): venueTrades の in-memory state を廃止。trade は fetchVenueHolds が
+  // join 取得した hold.venue_trade を直接利用する (画面再 mount 後も双方が trade に到達可)。
 
   const reload = useCallback(async () => {
     if (venueId == null || userId == null) return
@@ -135,10 +135,13 @@ export default function VenueHoldsScreen() {
             try {
               setActingId(hold.id)
               const trade = await acceptVenueHold(hold.id)
-              setVenueTrades((prev) => ({ ...prev, [hold.id]: trade }))
+              // PR4a: 戻り値の trade を hold オブジェクトに埋め込む (再 fetch なしで
+              // 即座に成立済タブの「手渡し完了確認」ボタンへ到達可能にする)
               setHolds((prev) =>
                 prev.map((h) =>
-                  h.id === hold.id ? { ...h, status: 'held' } : h
+                  h.id === hold.id
+                    ? { ...h, status: 'held', venue_trade: trade }
+                    : h
                 )
               )
               // accept 後は成立済タブへ自動切替
@@ -218,7 +221,8 @@ export default function VenueHoldsScreen() {
   }
 
   const handleConfirmTrade = async (hold: VenueHoldWithRelations) => {
-    const trade = venueTrades[hold.id]
+    // PR4a: trade は hold.venue_trade から取得 (fetchVenueHolds で join 取得済)
+    const trade = hold.venue_trade
     if (trade == null || userId == null) return
 
     const role = hold.proposer_id === userId ? 'proposer' : 'receiver'
@@ -240,10 +244,40 @@ export default function VenueHoldsScreen() {
                   ? '相手の確認待ちです。'
                   : '双方確認完了！取引が完了しました。'
               )
+              // PR4a: completed への遷移は両者確認時のみ。partially_confirmed の
+              // 場合は status='held' のまま (venue_trade.status のみ更新済)。
+              // hold.venue_trade を最新化して以降の判定を正しく動かす。
+              const otherTimestamp =
+                role === 'proposer'
+                  ? trade.receiver_confirmed_at
+                  : trade.proposer_confirmed_at
+              const becameCompleted = otherTimestamp != null
               setHolds((prev) =>
-                prev.map((h) =>
-                  h.id === hold.id ? { ...h, status: 'converted' } : h
-                )
+                prev.map((h) => {
+                  if (h.id !== hold.id) return h
+                  const updatedTrade = {
+                    ...trade,
+                    proposer_confirmed_at:
+                      role === 'proposer'
+                        ? new Date().toISOString()
+                        : trade.proposer_confirmed_at,
+                    receiver_confirmed_at:
+                      role === 'receiver'
+                        ? new Date().toISOString()
+                        : trade.receiver_confirmed_at,
+                    status: becameCompleted
+                      ? ('completed' as const)
+                      : ('partially_confirmed' as const),
+                    completed_at: becameCompleted
+                      ? new Date().toISOString()
+                      : trade.completed_at,
+                  }
+                  return {
+                    ...h,
+                    status: becameCompleted ? 'converted' : h.status,
+                    venue_trade: updatedTrade,
+                  }
+                })
               )
             } catch (error) {
               console.error('[VenueHolds][handleConfirmTrade]', error)
@@ -318,15 +352,27 @@ export default function VenueHoldsScreen() {
             const counterpart =
               tab === 'received' ? hold.proposer_profile : hold.receiver_profile
             const isActing = actingId === hold.id
-            const trade = venueTrades[hold.id]
+            const trade = hold.venue_trade
 
             const showAccept =
               tab === 'received' && hold.status === 'pending' && !expired
             const showDecline = showAccept
             const showCancel =
               tab === 'sent' && hold.status === 'pending' && !expired
+            // PR4a: held / converted どちらでも、まだ自分側が未確認の trade があれば
+            // ボタンを出す。trade.status が 'completed' になっていれば自分の側も完了済。
+            const myConfirmed =
+              trade != null
+                ? (hold.proposer_id === userId
+                    ? trade.proposer_confirmed_at != null
+                    : trade.receiver_confirmed_at != null)
+                : false
             const showConfirmTrade =
-              tab === 'converted' && hold.status === 'held' && trade != null
+              tab === 'converted' &&
+              trade != null &&
+              trade.status !== 'completed' &&
+              trade.status !== 'cancelled' &&
+              !myConfirmed
 
             return (
               <View key={hold.id} style={styles.holdCard}>
@@ -470,11 +516,32 @@ export default function VenueHoldsScreen() {
                   </Pressable>
                 )}
 
+                {/* PR4a: B1 解消後、trade は DB から取得済 (null は理論上発生しない)。
+                    万一 null の場合 (RLS / データ欠落) は念のため案内のみ。 */}
                 {tab === 'converted' &&
                   hold.status === 'held' &&
                   trade == null && (
                     <Text style={styles.legacyNote}>
-                      ※ 手渡し完了確認は再設計予定。一度この画面を離れて戻ると一時的に押せなくなることがあります（PR4で対応予定）。
+                      ※ 取引情報を取得できませんでした。一度この画面を離れて戻ると再試行できます。
+                    </Text>
+                  )}
+
+                {/* PR4a: 自分の確認は完了済、相手の確認待ち */}
+                {tab === 'converted' &&
+                  trade != null &&
+                  trade.status === 'partially_confirmed' &&
+                  myConfirmed && (
+                    <Text style={styles.partiallyHint}>
+                      ✓ あなたの手渡し完了確認は記録されました。相手の確認待ちです。
+                    </Text>
+                  )}
+
+                {/* PR4a: 完了済 trade */}
+                {tab === 'converted' &&
+                  trade != null &&
+                  trade.status === 'completed' && (
+                    <Text style={styles.completedHint}>
+                      ✓ 取引完了。双方が手渡し完了を確認しました。
                     </Text>
                   )}
 
@@ -652,6 +719,16 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textTertiary,
     fontStyle: 'italic',
+  },
+  partiallyHint: {
+    fontSize: fontSize.xs,
+    color: '#059669',
+    fontWeight: fontWeight.semibold,
+  },
+  completedHint: {
+    fontSize: fontSize.xs,
+    color: '#4F46E5',
+    fontWeight: fontWeight.semibold,
   },
   expiredHint: {
     fontSize: fontSize.xs,

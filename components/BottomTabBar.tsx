@@ -51,7 +51,7 @@ const TABS: VisibleTab[] = [
 
 export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const { bottom: insetBottom } = useSafeAreaInsets()
-  const { pendingOfferCount } = useBadge()
+  const { pendingOfferCount, receivedHoldCount } = useBadge()
   const currentRouteName = state.routes[state.index]?.name ?? ''
 
   const renderTab = (tab: VisibleTab) => {
@@ -72,7 +72,14 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
       }
     }
 
-    const showBadge = tab.name === 'trades' && pendingOfferCount > 0
+    // PR2: trades タブは pending offer、venue タブは受信 Hold をそれぞれ表示
+    const badgeCount =
+      tab.name === 'trades'
+        ? pendingOfferCount
+        : tab.name === 'venue-tab'
+        ? receivedHoldCount
+        : 0
+    const showBadge = badgeCount > 0
 
     return (
       <Pressable
@@ -93,7 +100,7 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
           {showBadge && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>
-                {pendingOfferCount > 99 ? '99+' : String(pendingOfferCount)}
+                {badgeCount > 99 ? '99+' : String(badgeCount)}
               </Text>
             </View>
           )}

@@ -8,6 +8,7 @@ import {
     Alert,
     KeyboardAvoidingView,
     Platform,
+    Pressable,
     ScrollView,
     StyleSheet,
     Text,
@@ -22,11 +23,23 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  // β1 D-1: 利用規約・プライバシーポリシー同意。未チェックでアカウント作成不可。
+  // canSubmit (email/password 完備判定) からは意図的に外している。
+  // 理由: 入力途中の dim 表現は維持しつつ、未チェックで押した場合は明示 Alert で
+  //       「規約同意が必要」と教える方が初見ユーザーに伝わるため。
+  const [agreedToTerms, setAgreedToTerms] = useState(false)
 
   const canSubmit = email.trim().length > 0 && password.length >= 6
 
   const handleSignUp = async () => {
     if (!canSubmit) return
+    if (!agreedToTerms) {
+      Alert.alert(
+        '同意が必要です',
+        '利用規約とプライバシーポリシーをご確認のうえ、同意にチェックを入れてください。'
+      )
+      return
+    }
     setLoading(true)
     const { error } = await signUp(email.trim(), password)
     setLoading(false)
@@ -142,6 +155,40 @@ export default function SignUpScreen() {
               />
               <Text style={styles.safetyText}>
                 交換成立後まで住所・電話番号は相手に表示されません
+              </Text>
+            </View>
+
+            {/* β1 D-1: 利用規約 / プライバシーポリシー同意導線 */}
+            <View style={styles.consentRow}>
+              <Pressable
+                onPress={() => setAgreedToTerms((v) => !v)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.consentCheckbox}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: agreedToTerms }}
+                accessibilityLabel="利用規約とプライバシーポリシーに同意"
+              >
+                <Ionicons
+                  name={agreedToTerms ? 'checkbox' : 'square-outline'}
+                  size={22}
+                  color={agreedToTerms ? colors.primary : colors.textTertiary}
+                />
+              </Pressable>
+              <Text style={styles.consentText}>
+                <Text
+                  style={styles.consentLink}
+                  onPress={() => router.push('/legal/terms' as never)}
+                >
+                  利用規約
+                </Text>
+                <Text>と</Text>
+                <Text
+                  style={styles.consentLink}
+                  onPress={() => router.push('/legal/privacy' as never)}
+                >
+                  プライバシーポリシー
+                </Text>
+                <Text>に同意します</Text>
               </Text>
             </View>
 
@@ -289,6 +336,27 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  // β1 D-1: 同意行 (CTA 直前)
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  consentCheckbox: {
+    paddingTop: 1,
+  },
+  consentText: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    lineHeight: 22,
+  },
+  consentLink: {
+    color: colors.primary,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   ctaWrap: {
     borderRadius: radius.xl,

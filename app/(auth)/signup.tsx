@@ -28,6 +28,10 @@ export default function SignUpScreen() {
   // 理由: 入力途中の dim 表現は維持しつつ、未チェックで押した場合は明示 Alert で
   //       「規約同意が必要」と教える方が初見ユーザーに伝わるため。
   const [agreedToTerms, setAgreedToTerms] = useState(false)
+  // β1 D-3: 13 歳以上の年齢確認。利用規約第 3 条 5 項で 13 歳未満不可と定めているため、
+  // signup 段階で当該年齢の自己申告を取る。D-1 と同じ理由 (Alert で教える) で
+  // canSubmit には含めない。state は D-1 とは独立 (利用規約同意と年齢確認は別概念)。
+  const [confirmedAge, setConfirmedAge] = useState(false)
 
   const canSubmit = email.trim().length > 0 && password.length >= 6
 
@@ -37,6 +41,13 @@ export default function SignUpScreen() {
       Alert.alert(
         '同意が必要です',
         '利用規約とプライバシーポリシーをご確認のうえ、同意にチェックを入れてください。'
+      )
+      return
+    }
+    if (!confirmedAge) {
+      Alert.alert(
+        '年齢確認が必要です',
+        'Swaplyは13歳以上の方を対象としています。13歳以上であることを確認してください。'
       )
       return
     }
@@ -190,6 +201,25 @@ export default function SignUpScreen() {
                 </Text>
                 <Text>に同意します</Text>
               </Text>
+            </View>
+
+            {/* β1 D-3: 年齢確認 (13 歳以上) */}
+            <View style={styles.consentRow}>
+              <Pressable
+                onPress={() => setConfirmedAge((v) => !v)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.consentCheckbox}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: confirmedAge }}
+                accessibilityLabel="13歳以上であることを確認"
+              >
+                <Ionicons
+                  name={confirmedAge ? 'checkbox' : 'square-outline'}
+                  size={22}
+                  color={confirmedAge ? colors.primary : colors.textTertiary}
+                />
+              </Pressable>
+              <Text style={styles.consentText}>私は13歳以上です</Text>
             </View>
 
             {/* 登録CTA */}

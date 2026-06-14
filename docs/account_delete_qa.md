@@ -443,7 +443,11 @@ PR #22 で trade 系 6 FK を `profiles(id) ON DELETE CASCADE` に張り替え�
 
 - A-3 venue 系 FK の張り替え (`venue_holds` / `venue_trades` / `venue_checkins` / `venue_supply_posts` 等は依然 `auth.users(id)` 参照) → §7 で進捗更新
 - その他 `auth.users(id)` 参照のまま残るテーブル (`wanted_cards` / `reports` / `user_blocks` / `shelf_items` / `user_oshi` / `user_keyword_history` / `pioneer_program_applications`) の処置方針確定
-- 普通郵便・ミニレター時の発送通知失敗の調査
+- ~~普通郵便・ミニレター時の発送通知失敗の調査~~ → **[解決済 2026-06-14]** PR #23 (`7eca046`) で 3 層対応済。
+  - DB: `shipments_tracking_required_when_shipped_chk` を 3 OR 化 (`docs/migration_shipments_tracking_chk_relax_for_postal.sql`、`b8b982a`)。本番 DB 適用済を `pg_constraint` + `pg_proc` 直接確認 SQL で PASS 確認。
+  - RPC: `submit_trade_shipment` を `p_shipping_method` 必須化の 4 引数版に拡張 (`docs/migration_rpc_submit_trade_shipment.sql`)、postal 時のみ `TRACKING_NUMBER_REQUIRED` を skip。
+  - UI: `app/trade/[offerId].tsx` で `SHIPPING_METHOD_OPTIONS` に postal: `hasTracking=false` を追加、PostgrestError の `.message` を Alert 表示 (`6cba6db`)。
+  - 実機スモーク (2026-06-14): 通常交換で「普通郵便・ミニレター」選択 + 追跡番号 / 配送業者なしで発送通知が成功することを確認。
 
 ---
 
@@ -495,3 +499,6 @@ PR #22 で trade 系 6 FK を `profiles(id) ON DELETE CASCADE` に張り替え�
   - PR4a で「venue_trade 生成後の状態遷移」解消 (`partially_confirmed` 再設計 + B1 修正)
   - 残 blocker: 会場取引履歴表示 / venue_trade 専用 DM
   - A-3 final close は PR8 統合 QA で判断する方針を明記
+- **v5 (2026-06-14)**: §6.6 の残課題 1 件を消し込み。
+  - 「普通郵便・ミニレター時の発送通知失敗の調査」を [解決済 2026-06-14] として PR #23 で 3 層対応済 (DB CHECK 緩和 / RPC 4 引数化 / UI 配送方法選択 + エラー表示) を記録
+  - 本番 DB 適用確認 SQL (PR5 配送タスク完了確認) + 通常交換 postal 実機スモーク (2026-06-14) でいずれも PASS

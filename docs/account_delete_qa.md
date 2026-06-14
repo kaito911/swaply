@@ -441,7 +441,7 @@ PR #22 で trade 系 6 FK を `profiles(id) ON DELETE CASCADE` に張り替え�
 
 ### 6.6 残課題 (2026-06-10 時点、その後の進捗は §7 参照)
 
-- A-3 venue 系 FK の張り替え (`venue_holds` / `venue_trades` / `venue_checkins` / `venue_supply_posts` 等は依然 `auth.users(id)` 参照) → §7 で進捗更新
+- ~~A-3 venue 系 FK の張り替え (`venue_holds` / `venue_trades` / `venue_checkins` / `venue_supply_posts` 等は依然 `auth.users(id)` 参照) → §7 で進捗更新~~ → **[完了 2026-06-14]** §7.5 参照。会場関連データあり + 会場交換完了済ユーザーの実機 `delete_my_account` PASS により、venue FK が退会をブロックしないことを最終確認。
 - その他 `auth.users(id)` 参照のまま残るテーブル (`wanted_cards` / `reports` / `user_blocks` / `shelf_items` / `user_oshi` / `user_keyword_history` / `pioneer_program_applications`) の処置方針確定
 - ~~普通郵便・ミニレター時の発送通知失敗の調査~~ → **[解決済 2026-06-14]** PR #23 (`7eca046`) で 3 層対応済。
   - DB: `shipments_tracking_required_when_shipped_chk` を 3 OR 化 (`docs/migration_shipments_tracking_chk_relax_for_postal.sql`、`b8b982a`)。本番 DB 適用済を `pg_constraint` + `pg_proc` 直接確認 SQL で PASS 確認。
@@ -476,6 +476,15 @@ PR #22 で trade 系 6 FK を `profiles(id) ON DELETE CASCADE` に張り替え�
   - 手動 DELETE は禁止運用とし、将来的に DB 防御を検討する。
 - 関連: 会場モード刷新の P0 / P1 / P2 仕様および A-3 再開条件は `docs/venue_mode_requirements.md` 参照。
 
+### 7.5 A-3 / D-7 venue FK final close (2026-06-14)
+
+- **実機確認結果** (2026-06-14、実機 QA):
+  - 会場関連データがあるユーザーで `delete_my_account` を実行 → **成功**
+  - 会場交換を完了させたユーザーで同じく `delete_my_account` を実行 → **成功**
+- **判定**: PR #24 で張り替えた venue FK が `delete_my_account` をブロックしないことを実機で最終確認。tombstone 設計どおり `profiles.id` は維持され、相手側履歴は「削除済みユーザー」表示で保たれる。
+- **A-3 / D-7 final close**: 本記録をもって、`§6.6` 先頭の `A-3 venue 系 FK の張り替え` 項目および棚卸し D-7「A-3 退会 E2E final close」を **完了扱い**。
+- **スコープ限定**: 本 close は「venue FK が `delete_my_account` をブロックしないこと」に限定。**C-1 PR8 venue 統合 QA (会場モードフル E2E、取引履歴表示、venue_trade 専用 DM の通しシナリオ等)** は別タスクとして引き続き open。未確認の通しシナリオが残るため、本記録で C-1 全体を close しない。
+
 ---
 
 ## 8. 改訂履歴
@@ -502,3 +511,8 @@ PR #22 で trade 系 6 FK を `profiles(id) ON DELETE CASCADE` に張り替え�
 - **v5 (2026-06-14)**: §6.6 の残課題 1 件を消し込み。
   - 「普通郵便・ミニレター時の発送通知失敗の調査」を [解決済 2026-06-14] として PR #23 で 3 層対応済 (DB CHECK 緩和 / RPC 4 引数化 / UI 配送方法選択 + エラー表示) を記録
   - 本番 DB 適用確認 SQL (PR5 配送タスク完了確認) + 通常交換 postal 実機スモーク (2026-06-14) でいずれも PASS
+- **v6 (2026-06-14)**: §7.5 を追加、A-3 / D-7 final close を記録。
+  - 会場関連データありユーザー + 会場交換完了済ユーザーの `delete_my_account` 実機 PASS
+  - PR #24 で張り替えた venue FK が退会をブロックしないことを最終確認
+  - §6.6 の `A-3 venue 系 FK の張り替え` 項目を完了マーカーに置換
+  - **C-1 PR8 venue 統合 QA (フル E2E / 取引履歴 / DM 通し) は別タスクとして引き続き open**、本 v6 で C-1 全体を close しない方針を明記

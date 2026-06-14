@@ -507,6 +507,33 @@ A-3 退会 E2E は **DM の完成を待たずに**実施できる。trade 生成
 - 複数日イベント（TREASURE 想定）: イベントが `starts_at..ends_at` をまたいで板 open になる。Day1 成立取引の DM 窓は `completed_at` 基準で、`ends_at` に引きずられない。
 - 横展開耐性: TREASURE seed でマッチング / マスタが機能し、構造としてアニメ系・他 K-POP を追加できる（ジャンル決め打ちのハードコードがない）。
 
+### PR8 final close (2026-06-14)
+
+- **実機 QA 結果**: 以下 12 項目の通し動作を実機で確認、すべて PASS。
+  1. 会場一覧に open 会場が表示される
+  2. 別ユーザーから会場投稿が見える
+  3. 会場に入場できる
+  4. 会場で交換に出せる
+  5. Hold 申請できる
+  6. Hold 承認できる
+  7. `venue_trade` が生成される
+  8. 会場 DM が使える（送受信 / 既読化 / system message）
+  9. 未読バッジ / 通知まわりが破綻しない
+  10. 会場交換を完了できる
+  11. 完了後の履歴 / 表示が壊れない
+  12. A-3 / D-7 退会 FK 検証と切り分け済み（`docs/account_delete_qa.md §7.5` 参照）
+- **判定**: 棚卸し C-1「PR8 venue 統合 QA」を core loop 範囲で **完了扱い**。
+- **A-3 / D-7 との切り分け**: 退会 FK 視点（`delete_my_account` をブロックしないこと）は `docs/account_delete_qa.md §7.5` で別途 close 済。本 close は会場モード coreloop の通し動作に限定。
+- **スコープ限定 / P1 backlog 候補**: 本 close は「会場モード coreloop 12 項目」に限定。下記エッジ / 回帰系は本 close でカバーせず、β1 運用中の発生状況を見ながら、必要に応じて P1 follow-up QA / backlog として扱う:
+  - DM tombstone 表示（相手退会後の「削除済みユーザー」表示と本文の証跡保持）
+  - 複数 Hold 並行承認の競合 → 二重成立しない（DB レベル PR #29 で確認済、実機並行は未）
+  - Hold 承認待ち期限切れの承認不可（実機動線は未）
+  - 供給板 post 期限切れと pending Hold 生存の独立性
+  - `cancelled` trade の DM は閲覧のみ（`completed` read-only は本 close でカバー）
+  - `supply_post` SET NULL 時の「投稿は削除されました」表示
+  - 画像アップロード失敗時の入力保持・リトライ・画像なし投稿
+- **関連**: `docs/account_delete_qa.md §7.5`（A-3 / D-7 final close）と本記録で β1 venue core loop QA + 退会連動 QA は一通り close。
+
 ### 現場検証（観察者前提の注意）
 
 - 7 月の TREASURE ライブは会場モードの実地検証（ファンとしてではなく運営者として）。

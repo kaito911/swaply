@@ -492,6 +492,21 @@ export default function VenueHoldsScreen() {
                   </Text>
                 )}
 
+                {/* 申請者 (proposer) 側商品画像 (任意): 受信タブで承認者が
+                    「相手が出してくれる商品」を承認前に画像で確認できる。
+                    申請モーダルで添付された画像が venue_holds.proposer_image_url に
+                    保存され、tab を問わずどちらにも有用なため両 tab で表示する。
+                    承認後 (status='held' / 'converted') は accept_venue_hold RPC が
+                    offered_snapshot.image_url に同値をコピーするため、hold 行が
+                    後で消えても venue_trade 画面で参照可能。 */}
+                {hold.proposer_image_url != null && (
+                  <Image
+                    source={{ uri: hold.proposer_image_url }}
+                    style={styles.snapshotImage}
+                    resizeMode="cover"
+                  />
+                )}
+
                 {/* PR3: snapshot からの画像表示 (受信者カードのもの、low-risk 拡張)。
                     accept_venue_hold RPC が wanted_snapshot.image_url に supply_post の
                     image_url を入れているので、supply_post が後で削除されても残る。 */}

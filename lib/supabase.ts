@@ -2575,10 +2575,11 @@ export async function createVenueHold(params: {
   proposerCard: string
   receiverCard: string
   supplyPostId: string | null
+  // 申請者 (proposer) が添付した「自分が出す商品」画像の publicUrl (任意)。
+  // 画像なしの従来挙動は proposerImageUrl 省略 / null で維持される。
+  // 詳細: docs/migration_venue_holds_add_proposer_image_url.sql
+  proposerImageUrl?: string | null
 }): Promise<VenueHold> {
-  // PR feat/venue-event-day-expiry: 30 分固定失効を廃止し、イベント当日 23:59 (JST)
-  // までの有効期限に変更。申請中 Hold (status='pending') の expires_at は supply_post と
-  // 共通の event_date 23:59:59 JST を使う。承認後 (status='held') 以降は filter 対象外。
   const { data: venue, error: venueError } = await supabase
     .from('venues')
     .select('event_date')
@@ -2596,6 +2597,7 @@ export async function createVenueHold(params: {
       proposer_card: params.proposerCard,
       receiver_card: params.receiverCard,
       supply_post_id: params.supplyPostId,
+      proposer_image_url: params.proposerImageUrl ?? null,
       expires_at: expiresAt,
     })
     .select()

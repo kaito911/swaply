@@ -169,21 +169,48 @@ export default function VenueMyPostsScreen() {
                   )}
                 </View>
 
-                {/* PR3: 画像表示 (任意、image_url がある場合のみ) */}
-                {post.image_url != null && (
-                  <Image
-                    source={{ uri: post.image_url }}
-                    style={styles.postImage}
-                    resizeMode="cover"
-                  />
-                )}
-
-                <Text style={styles.cardName}>{post.card_name}</Text>
-                {post.group_name != null && (
-                  <Text style={styles.subText}>{post.group_name}</Text>
-                )}
-                {post.want_card != null && (
-                  <Text style={styles.wantText}>求: {post.want_card}</Text>
+                {/* 一覧性優先: 画像ありは横型 (左サムネ + 右テキスト) で
+                    カード縦幅を圧縮。商品名は画像と同じ高さでまとまりよく見えるよう
+                    フォント拡大。画像なしは既存の縦並びを温存。 */}
+                {post.image_url != null ? (
+                  <View style={styles.postBodyRow}>
+                    <Image
+                      source={{ uri: post.image_url }}
+                      style={styles.postThumb}
+                      resizeMode="cover"
+                    />
+                    {/* 右詳細: venue/[id].tsx 当日供給板と同じ思想で「譲：name →
+                        group → 求：want」順に並べる。自分の投稿一覧なので Hold
+                        申請ボタンは無く、下段 holdCountRow + withdrawButton で管理。 */}
+                    <View style={styles.postBodyText}>
+                      <Text style={styles.cardNameInline} numberOfLines={2}>
+                        譲：{post.card_name}
+                      </Text>
+                      {post.group_name != null && (
+                        <Text style={styles.subText} numberOfLines={1}>
+                          {post.group_name}
+                        </Text>
+                      )}
+                      {post.want_card != null && (
+                        <Text
+                          style={[styles.wantText, styles.wantTextInline]}
+                          numberOfLines={2}
+                        >
+                          求：{post.want_card}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={styles.cardName}>{post.card_name}</Text>
+                    {post.group_name != null && (
+                      <Text style={styles.subText}>{post.group_name}</Text>
+                    )}
+                    {post.want_card != null && (
+                      <Text style={styles.wantText}>求: {post.want_card}</Text>
+                    )}
+                  </>
                 )}
 
                 {count > 0 && (
@@ -267,6 +294,7 @@ const styles = StyleSheet.create({
   },
   statusText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
   timeLeft: { fontSize: fontSize.xs, color: colors.textTertiary },
+  // 旧 postImage は image-only branch を分岐化したため未使用、後方互換のため残置。
   postImage: {
     width: '100%',
     aspectRatio: 3 / 4,
@@ -274,13 +302,51 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundMuted,
     marginVertical: spacing.xs,
   },
+  // 画像あり投稿の横型レイアウト (左サムネ + 右テキスト)。一覧で縦幅を抑える。
+  postBodyRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'flex-start',
+    marginVertical: spacing.xs,
+  },
+  // 画像サイズは venue/[id].tsx の supplyCardThumb と揃える (88 × 117)。
+  postThumb: {
+    width: 88,
+    aspectRatio: 3 / 4,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
+  },
+  // 行間 gap も venue/[id].tsx supplyCardTextStack と揃える (6)。
+  // my-posts は Hold 申請ボタンを右カラム内に持たないため、テキスト stack の
+  // 自然サイズで上に詰まり、画像が下に少し残る視覚 (acceptable)。
+  postBodyText: {
+    flex: 1,
+    gap: 6,
+  },
+  // 画像あり時の商品名はフォント拡大して情報の核として強調。
+  // 求 (wantTextInline) と同じ size / weight で対の関係を保つ。
+  cardNameInline: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    lineHeight: 22,
+  },
+  // 画像あり時の求 (wantTextInline) は譲 (cardNameInline) と同じ視覚レベルに揃え、
+  // primary 色で交換情報の対として読みやすくする。image-less 経路は wantText 既定値。
+  wantTextInline: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.bold,
+    lineHeight: 22,
+  },
   cardName: {
     fontSize: fontSize.base,
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
   },
-  subText: { fontSize: fontSize.xs, color: colors.textTertiary },
-  wantText: { fontSize: fontSize.sm, color: colors.primary },
+  // 画像あり時の右詳細で可読性を上げるため font 拡大 (画像なし時にも適用、
+  // 既存縦並びでも自然に読める範囲)。
+  subText: { fontSize: fontSize.sm, color: colors.textTertiary },
+  wantText: { fontSize: fontSize.base, color: colors.primary, fontWeight: fontWeight.semibold },
   holdCountRow: {
     flexDirection: 'row',
     alignItems: 'center',

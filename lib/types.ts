@@ -422,6 +422,12 @@ export interface VenueHold {
   expires_at: string
   created_at: string
   updated_at: string
+  // 申請者 (proposer) が「自分が出す商品」に添付した画像 URL (任意)。
+  // bucket は既存 'card-images' を流用、path 規約: `${userId}/venue-hold/${ts}.${ext}`。
+  // 既存 hold は NULL のまま、新規 hold で添付した場合のみ値が入る。
+  // 詳細: docs/migration_venue_holds_add_proposer_image_url.sql
+  //       docs/migration_rpc_accept_venue_hold_with_proposer_image.sql
+  proposer_image_url: string | null
 }
 
 export interface VenueTrade {

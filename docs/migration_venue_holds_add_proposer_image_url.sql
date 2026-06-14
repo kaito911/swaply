@@ -1,0 +1,83 @@
+-- ====================================================================
+-- migration_venue_holds_add_proposer_image_url.sql
+-- 作成日: 2026-06-14
+-- 目的  : venue_holds に proposer_image_url (text, nullable) 列を追加。
+--
+--         Hold 申請時、申請者 (proposer) が「自分が出す商品」の画像を添付し、
+--         受信者 (supply_post 投稿者 = 承認者) が承認前に画像で確認できるように
+--         する。会場現地交換では、相手が何を出してくれるのかを画像で確認できる
+--         ことが重要 (テキストだけだと取り違えリスク)。
+--
+--         命名規約は以下と揃え、中身は Supabase Storage の publicUrl 文字列
+--         (uploadCardImage 戻り値) をそのまま格納する設計:
+--           - cards.image_url
+--           - wanted_cards.image_url
+--           - venue_supply_posts.image_url (PR3 / PR #31 で追加済)
+--
+--         将来 storage 構成変更があれば backfill で対応する。
+--
+-- 関連:
+--   - bucket: 既存 'card-images' を流用 (path 規約: {userId}/venue-hold/{ts}.{ext})
+--   - upload helper: lib/supabase.ts uploadCardImage をそのまま流用
+--   - storage INSERT policy (PR3 で hardening 済):
+--       bucket_id = 'card-images'
+--       AND auth.role() = 'authenticated'
+--       AND (storage.foldername(name))[1] = auth.uid()::text
+--     → 第 1 階層 folder が userId であれば通る。venue-hold は第 2 階層なので
+--       storage policy 改変は不要。
+--   - 連動 RPC 更新: 同 PR の B2
+--     (docs/migration_rpc_accept_venue_hold_with_proposer_image.sql) で
+--     offered_snapshot.image_url を含めるよう CREATE OR REPLACE で更新
+-- ====================================================================
+--
+-- 適用前提:
+--   - 既存 venue_holds には proposer 側画像列が無いこと (Block A1 で確認)
+--   - cards.image_url / wanted_cards.image_url / venue_supply_posts.image_url と
+--     同じ「publicUrl 格納」流儀を踏襲
+--   - β1 は任意項目 (NULL 許容)、既存行のバックフィル不要
+--   - 既存 RLS / FK / CHECK 制約は一切触らない
+--
+-- ====================================================================
+
+begin;
+
+alter table public.venue_holds
+  add column proposer_image_url text;
+
+commit;
+
+-- ====================================================================
+-- 適用後確認 (Block C 相当、本ファイル単独でも実行可)
+-- ====================================================================
+--
+-- ◆ C1: 列追加確認
+--   select column_name, data_type, is_nullable
+--   from information_schema.columns
+--   where table_schema = 'public' and table_name = 'venue_holds'
+--     and column_name = 'proposer_image_url';
+--   → 期待: 1 行、data_type='text'、is_nullable='YES'
+--
+-- ◆ C2: 既存行の proposer_image_url 全件 NULL 確認 (バックフィルなしで足りること)
+--   select count(*) as total, count(proposer_image_url) as with_image
+--   from public.venue_holds;
+--   → 期待: total=既存件数、with_image=0
+--
+-- ◆ C3: 既存制約・index に影響がないこと
+--   select conname, pg_get_constraintdef(oid)
+--   from pg_constraint
+--   where conrelid = 'public.venue_holds'::regclass
+--   order by conname;
+--   → 期待: venue_holds_pkey / venue_holds_status_check / 既存 FK 群が全て残存
+--           本 migration で削減 / 改変された制約は無し
+--
+-- ====================================================================
+-- ロールバック (緊急時、proposer_image_url の値は消失する)
+-- ====================================================================
+-- ※ proposer_image_url に値が入った後の rollback は画像参照消失あり。
+--   Storage 上の実ファイルは残るが DB から参照不能になる。
+--   コード実装前 / 実機検証前のみ即時可。
+--   ロールバック前に必ず連動 RPC (accept_venue_hold) を旧版 (offered_snapshot に
+--   image_url を含めない形) に CREATE OR REPLACE で戻すこと。
+--   新 RPC が新列を参照したまま列を DROP すると次回 hold 承認時にエラーになる。
+--
+-- alter table public.venue_holds drop column if exists proposer_image_url;

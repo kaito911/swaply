@@ -107,7 +107,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
               <Text style={styles.logoMarkText}>S</Text>
             </View>
             <Text style={styles.logoText}>Swaply</Text>
-            <Text style={styles.tagline}>交換を、もっと安全に。</Text>
+            <Text style={styles.tagline}>交換を、もっとスムーズに。</Text>
           </View>
 
           <View style={styles.featureList}>
@@ -117,7 +117,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
             />
             <FeatureRow
               icon="swap-horizontal-outline"
-              text="交換成立後に住所が開示される安全設計"
+              text="住所は交換成立後にだけ共有される設計"
             />
             <FeatureRow
               icon="trending-up-outline"

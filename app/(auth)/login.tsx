@@ -73,7 +73,7 @@ export default function LoginScreen() {
             </View>
 
             <Text style={styles.logoText}>Swaply</Text>
-            <Text style={styles.tagline}>交換を、もっと安全に。</Text>
+            <Text style={styles.tagline}>交換を、もっとスムーズに。</Text>
           </View>
 
           <View style={styles.form}>

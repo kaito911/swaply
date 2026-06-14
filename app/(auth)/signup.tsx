@@ -63,7 +63,7 @@ export default function SignUpScreen() {
               <Text style={styles.logoMarkText}>S</Text>
             </View>
             <Text style={styles.logoText}>Swaply</Text>
-            <Text style={styles.tagline}>交換を、もっと安全に。</Text>
+            <Text style={styles.tagline}>交換を、もっとスムーズに。</Text>
           </View>
 
           {/* ─ フォーム ─ */}
@@ -133,7 +133,7 @@ export default function SignUpScreen() {
               )}
             </View>
 
-            {/* 安全性の説明 */}
+            {/* 仕組みの説明 */}
             <View style={styles.safetyNote}>
               <Ionicons
                 name="shield-checkmark-outline"

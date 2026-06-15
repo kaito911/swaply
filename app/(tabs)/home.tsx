@@ -19,6 +19,7 @@ import { EmptyHomeState } from '@/components/EmptyHomeState'
 import { HeaderActions } from '@/components/HeaderActions'
 import { HomeLargeCard } from '@/components/HomeLargeCard'
 import { LaneSectionLabel } from '@/components/LaneSectionLabel'
+import { PushPermissionPrePrompt } from '@/components/PushPermissionPrePrompt'
 import { SearchBar } from '@/components/SearchBar'
 import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
 import { Card, WantedCard } from '@/lib/types'
@@ -320,6 +321,10 @@ export default function HomeScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* Push 通知 PR2: ホーム初回到達時に通知許可 pre-prompt を表示。
+          AsyncStorage で 1 回のみ。Modal は ScrollView 兄弟として配置 (描画位置は絶対). */}
+      <PushPermissionPrePrompt userId={user?.id ?? null} />
     </SafeAreaView>
   )
 }

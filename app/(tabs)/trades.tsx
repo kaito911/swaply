@@ -9,6 +9,7 @@ import React, { useCallback, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -277,19 +278,19 @@ export default function ProposeScreen() {
     if (activeTab === 'proposal') {
       if (proposalSubTab === 'received') {
         return {
-          title: '届いた提案はまだありません',
-          body: '相手から提案が届くとここに表示されます。',
+          title: '相手からの申請はまだありません',
+          body: '相手から申請が届くとここに表示されます。',
         }
       }
       return {
-        title: '送信した提案はまだありません',
-        body: '提案を送るとここで状態を確認できます。',
+        title: '自分からの申請はまだありません',
+        body: 'あなたが送った申請はここで確認できます。',
       }
     }
 
     return {
-      title: '取引中の交換はまだありません',
-      body: '承認された提案がここに表示されます。',
+      title: '進行中の取引はまだありません',
+      body: '承認された申請がここに表示されます。',
     }
   }
 
@@ -341,7 +342,7 @@ export default function ProposeScreen() {
         for (const o of priorityOffers) items.push({ kind: 'offer', offer: o })
       }
       if (remainingOffers.length > 0) {
-        items.push({ kind: 'header', title: 'すべての提案' })
+        items.push({ kind: 'header', title: 'すべての申請' })
         for (const o of remainingOffers) items.push({ kind: 'offer', offer: o })
       }
     } else {
@@ -401,16 +402,16 @@ export default function ProposeScreen() {
               <View style={styles.cardHeader}>
                 <View style={styles.cardHeaderLeft}>
                   <Text style={styles.cardTitle}>
-                    {isReceived ? '受信した提案' : '送信した提案'}
+                    {/* 申請タブ: サブタブと冗長にならないシンプルな分類見出し。
+                        進行中タブ: もう「提案」ではないので「進行中の取引」一律。
+                        役割 (あなたが提案 / 受信) のバッジは進行中で意味が薄いため削除。 */}
+                    {activeTab === 'proposal'
+                      ? isReceived
+                        ? '相手からの申請'
+                        : '自分からの申請'
+                      : '進行中の取引'}
                   </Text>
                   <Text style={styles.cardDate}>{formatDate(offer.created_at)}</Text>
-                  {activeTab === 'inProgress' && (
-                    <View style={styles.roleBadge}>
-                      <Text style={styles.roleBadgeText}>
-                        {isReceived ? 'あなたが受信' : 'あなたが提案'}
-                      </Text>
-                    </View>
-                  )}
                 </View>
 
                 <View
@@ -450,23 +451,68 @@ export default function ProposeScreen() {
                 return <TrustSummaryRow profile={counterProfile} />
               })()}
 
-              <View style={styles.tradeRow}>
-                <View style={styles.tradeCardBox}>
-                  <Text style={styles.tradeLabel}>あなたが出すグッズ</Text>
-                  <Text style={styles.tradeValue}>
-                    {(isReceived ? receiverCardNames : proposerCardNames).join('\n')}
-                  </Text>
-                </View>
+              {/* 画像 URL 選定: 自分が受信側 (target_card 所有者) なら、
+                  「出すグッズ」= target_card.image_url、「受け取るグッズ」= items 側の image。
+                  自分が送信側 (提案者) なら逆 (「出すグッズ」= items 側、「受け取るグッズ」= target_card)。
+                  fetchMyOffers の SELECT で既に取得済、追加 fetch 不要。 */}
+              {(() => {
+                const proposerImage = getProposerCardImage(offer)
+                const receiverImage = getReceiverCardImage(offer)
+                const yourGiveImage = isReceived ? receiverImage : proposerImage
+                const yourGetImage = isReceived ? proposerImage : receiverImage
+                const yourGiveNames = isReceived ? receiverCardNames : proposerCardNames
+                const yourGetNames = isReceived ? proposerCardNames : receiverCardNames
 
-                <Text style={styles.tradeArrow}>⇄</Text>
+                return (
+                  <View style={styles.tradeRow}>
+                    <View style={styles.tradeCardBox}>
+                      <Text style={styles.tradeLabel}>あなたが出すグッズ</Text>
+                      <View style={styles.tradeCardInner}>
+                        {yourGiveImage != null ? (
+                          <Image
+                            source={{ uri: yourGiveImage }}
+                            style={styles.tradeCardThumb}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.tradeCardThumbFallback}>
+                            <Text style={styles.tradeCardThumbFallbackText}>
+                              NO IMAGE
+                            </Text>
+                          </View>
+                        )}
+                        <Text style={styles.tradeValue} numberOfLines={3}>
+                          {yourGiveNames.join('\n')}
+                        </Text>
+                      </View>
+                    </View>
 
-                <View style={styles.tradeCardBox}>
-                  <Text style={styles.tradeLabel}>あなたが受け取るグッズ</Text>
-                  <Text style={styles.tradeValue}>
-                    {(isReceived ? proposerCardNames : receiverCardNames).join('\n')}
-                  </Text>
-                </View>
-              </View>
+                    <Text style={styles.tradeArrow}>⇄</Text>
+
+                    <View style={styles.tradeCardBox}>
+                      <Text style={styles.tradeLabel}>あなたが受け取るグッズ</Text>
+                      <View style={styles.tradeCardInner}>
+                        {yourGetImage != null ? (
+                          <Image
+                            source={{ uri: yourGetImage }}
+                            style={styles.tradeCardThumb}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.tradeCardThumbFallback}>
+                            <Text style={styles.tradeCardThumbFallbackText}>
+                              NO IMAGE
+                            </Text>
+                          </View>
+                        )}
+                        <Text style={styles.tradeValue} numberOfLines={3}>
+                          {yourGetNames.join('\n')}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                )
+              })()}
 
               {offer.message ? (
                 <View style={styles.messageBox}>
@@ -590,7 +636,7 @@ export default function ProposeScreen() {
                 activeTab === 'proposal' && styles.activeTabText,
               ]}
             >
-              提案
+              申請
             </Text>
           </Pressable>
 
@@ -604,7 +650,7 @@ export default function ProposeScreen() {
                 activeTab === 'inProgress' && styles.activeTabText,
               ]}
             >
-              取引中
+              進行中
             </Text>
           </Pressable>
         </View>
@@ -621,7 +667,7 @@ export default function ProposeScreen() {
                   proposalSubTab === 'received' && styles.activeTabText,
                 ]}
               >
-                届いた提案{receivedOffers.length > 0 ? ` (${receivedOffers.length})` : ''}
+                相手から{receivedOffers.length > 0 ? ` (${receivedOffers.length})` : ''}
               </Text>
             </Pressable>
 
@@ -635,7 +681,7 @@ export default function ProposeScreen() {
                   proposalSubTab === 'sent' && styles.activeTabText,
                 ]}
               >
-                送信した提案
+                自分から
               </Text>
             </Pressable>
           </View>
@@ -700,6 +746,25 @@ function getReceiverCardNames(offer: Offer): string[] {
   }
 
   return ['グッズ情報なし']
+}
+
+// 取引カード一覧用の小さなサムネイル URL を抽出する helper。
+// fetchMyOffers は target_card:cards(*) と items:offer_items(*, card:cards(*)) を
+// SELECT 済なので、image_url は追加 fetch なしで参照可能。
+// 複数枚提案 (items が複数) の場合は target_card 以外の先頭 1 件の card.image_url を採用。
+
+// 提案者 (proposer) 側商品: items の中で target_card 以外の最初の card.image_url
+function getProposerCardImage(offer: Offer): string | null {
+  const targetCardId = offer.target_card?.id
+  const proposerItem = offer.items?.find(
+    (item) => item.card_id !== targetCardId
+  )
+  return proposerItem?.card?.image_url ?? null
+}
+
+// 受信者 (receiver / target) 側商品: target_card.image_url
+function getReceiverCardImage(offer: Offer): string | null {
+  return offer.target_card?.image_url ?? null
 }
 
 function formatDate(value: string): string {
@@ -1072,12 +1137,39 @@ const styles = StyleSheet.create({
     padding: 12,
     justifyContent: 'center',
   },
+  // tradeCardBox 内のサムネ + 商品名を横並びで配置。
+  // 小さなサムネ (40 × 53、3:4 aspect) + 残り全幅をテキストに割り当てる。
+  tradeCardInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  tradeCardThumb: {
+    width: 40,
+    aspectRatio: 3 / 4,
+    borderRadius: 6,
+    backgroundColor: '#EEE',
+  },
+  tradeCardThumbFallback: {
+    width: 40,
+    aspectRatio: 3 / 4,
+    borderRadius: 6,
+    backgroundColor: '#EEE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tradeCardThumbFallbackText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#9A9AA8',
+  },
   tradeLabel: {
     fontSize: 12,
     color: '#8A8499',
   },
   tradeValue: {
-    marginTop: 6,
+    flex: 1,
     fontSize: 14,
     fontWeight: '600',
     lineHeight: 20,

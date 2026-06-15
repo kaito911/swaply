@@ -124,10 +124,8 @@ function RootNavigator() {
           options={{ headerShown: false }} // ★ updated (3.5a): タブ内 search は画面内 ScreenHeader、root Stack の search は dead config だが整合性のため false に
         />
 
-        <Stack.Screen
-          name="wants"
-          options={{ headerShown: false }} // ★ updated
-        />
+        {/* wants は app/(tabs)/wants.tsx に移動して下部タブ化したため、
+            この root Stack.Screen 登録は不要 (expo-router が (tabs) group 経由で /wants を解決)。 */}
 
         <Stack.Screen
           name="notifications"

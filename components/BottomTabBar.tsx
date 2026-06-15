@@ -2,7 +2,6 @@
 import { colors, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs'
-import { router } from 'expo-router'
 import React from 'react'
 import {
   Pressable,
@@ -14,14 +13,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useBadge } from '@/providers/BadgeProvider'
 
 type VisibleTab = {
-  name: 'index' | 'trades' | 'search' | 'venue-tab'
+  name: 'index' | 'trades' | 'search' | 'venue-tab' | 'wants'
   icon: keyof typeof Ionicons.glyphMap
   iconActive: keyof typeof Ionicons.glyphMap
   label: string
 }
 
-// 案 E5 確定 (refactor_plan §3.14-5): ホーム / 検索 / + / 取引 / 会場 の 5 スロット。
-// マイページはボトム外 — 右上 HeaderActions のアバターからのみ到達可能。
+// 確定タブ構成: ホーム / 検索 / 求リスト / 取引 / 会場 の 5 スロット (均等配置)。
+// 出品は下部タブから外し、右下 FAB (SubmitFab) に移動。
+// マイページはボトム外、右上 HeaderActions のアバターからのみ到達可能。
 const TABS: VisibleTab[] = [
   {
     name: 'index',
@@ -34,6 +34,12 @@ const TABS: VisibleTab[] = [
     icon: 'search-outline',
     iconActive: 'search',
     label: '検索',
+  },
+  {
+    name: 'wants',
+    icon: 'bookmark-outline',
+    iconActive: 'bookmark',
+    label: '求リスト',
   },
   {
     name: 'trades',
@@ -117,25 +123,7 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   return (
     <View style={[styles.wrap, { paddingBottom: insetBottom }]}>
       <View style={styles.bar}>
-        {renderTab(TABS[0])}
-        {renderTab(TABS[1])}
-        <Pressable
-          onPress={() => router.push('/listing/new/image' as never)}
-          style={({ pressed }) => [
-            styles.tabItem,
-            pressed && styles.tabItemPressed,
-          ]}
-          hitSlop={12}
-        >
-          <Ionicons
-            name="add-circle-outline"
-            size={22}
-            color={colors.textTertiary}
-          />
-          <Text style={styles.tabLabel}>出品</Text>
-        </Pressable>
-        {renderTab(TABS[2])}
-        {renderTab(TABS[3])}
+        {TABS.map(renderTab)}
       </View>
     </View>
   )

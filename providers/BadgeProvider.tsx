@@ -20,6 +20,10 @@ interface BadgeContextValue {
   pendingOfferCount: number
   receivedHoldCount: number
   venueTradeUnreadCount: number
+  // 通知ベル / 通知画面で使う合算カウント。
+  // 「今対応が必要なこと」の総数として 3 軸を合計した派生値。
+  // 新規 fetcher は追加せず、既存 state からのみ算出。
+  totalNotificationCount: number
   refreshBadge: () => Promise<void>
 }
 
@@ -27,6 +31,7 @@ const BadgeContext = createContext<BadgeContextValue>({
   pendingOfferCount: 0,
   receivedHoldCount: 0,
   venueTradeUnreadCount: 0,
+  totalNotificationCount: 0,
   refreshBadge: async () => {},
 })
 
@@ -114,12 +119,17 @@ export function BadgeProvider({ children }: { children: ReactNode }) {
     return () => subscription.remove()
   }, [fetchCount])
 
+  // 「対応が必要な件数」合算 — 通知ベル / 通知画面で利用。
+  const totalNotificationCount =
+    pendingOfferCount + receivedHoldCount + venueTradeUnreadCount
+
   return (
     <BadgeContext.Provider
       value={{
         pendingOfferCount,
         receivedHoldCount,
         venueTradeUnreadCount,
+        totalNotificationCount,
         refreshBadge: fetchCount,
       }}
     >

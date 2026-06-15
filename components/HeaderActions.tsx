@@ -14,13 +14,18 @@ import { colors, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
 import { router, usePathname } from 'expo-router'
 import React from 'react'
-import { Pressable, StyleSheet, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { useBadge } from '@/providers/BadgeProvider'
 
 export function HeaderActions() {
   // (tabs) などの route group は pathname から strip されるため、
   // mypage screen の pathname は '/mypage' 固定。href: null で hidden tab 化しても変化なし。
   const pathname = usePathname()
   const isMypageActive = pathname === '/mypage'
+  // 通知ベルバッジ: 「対応が必要なこと」の合算 (pending offer + 受信 Hold +
+  // venue DM 未読)。0 件なら非表示、99 超は 99+ 表示。
+  const { totalNotificationCount } = useBadge()
+  const showBellBadge = totalNotificationCount > 0
 
   return (
     <View style={styles.wrap}>
@@ -30,6 +35,13 @@ export function HeaderActions() {
         style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
       >
         <Ionicons name="notifications-outline" size={22} color={colors.textPrimary} />
+        {showBellBadge && (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>
+              {totalNotificationCount > 99 ? '99+' : String(totalNotificationCount)}
+            </Text>
+          </View>
+        )}
       </Pressable>
 
       <Pressable
@@ -71,5 +83,23 @@ const styles = StyleSheet.create({
   },
   iconBtnPressed: {
     backgroundColor: colors.backgroundMuted,
+  },
+  // 通知ベル赤丸バッジ。BottomTabBar のバッジと視覚を揃える。
+  badge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 })

@@ -14,6 +14,7 @@ import { computeTrustBadge, VenueSupplyPost } from '@/lib/types'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { SubmitFab } from '@/components/SubmitFab'
 import { TrustBadge } from '@/components/TrustBadge'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
@@ -278,6 +279,13 @@ export default function VenueHomeScreen() {
     { key: 'supply', label: '当日供給板' },
     { key: 'shelf', label: '会場商品棚' },
   ]
+
+  // 右下 FAB「＋ この会場で出す」押下時: 供給板レーンに切り替えて出品 form を開く。
+  // どのレーンからでも 1 タップで会場出品動線に入れるようにする。
+  const handleOpenVenuePostForm = () => {
+    setLane('supply')
+    setShowPostForm(true)
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -612,6 +620,23 @@ export default function VenueHomeScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* 右下 FAB「＋ この会場で出す」: 会場詳細は (tabs) の外で通常 FAB が
+          表示されないため、本画面専用に配置。供給板レーンの「＋ 会場で交換に出す」
+          ボタンと役割が一部重複するが、レーン切替を含めて 1 タップで form を開ける
+          補助動線として機能。
+          表示条件:
+            - Hold 申請モーダル open 中は非表示 (overlay 競合防止)
+            - 会場出品フォーム open 中は非表示 (form が画面に出ているので
+              FAB 重複が無意味、閉じたら再表示) */}
+      {holdTarget == null && !showPostForm && (
+        <SubmitFab
+          label="この会場で出す"
+          onPress={handleOpenVenuePostForm}
+          hasTabBar={false}
+          accessibilityLabel="この会場の当日供給板に出品"
+        />
+      )}
 
       {/* Hold申請モーダル */}
       <Modal

@@ -259,6 +259,118 @@ retry が発生すると同じ INSERT イベントで Push が複数回飛ぶ可
 
 問題が起きた場合は Dashboard で Webhook 2 件を **Disable** する。Edge Function 自体は残したままでも、Webhook が無効なら送信経路が断たれる。コードを完全に剥がすには `supabase functions delete notify-on-event` で削除可能だが、通常は Webhook の Disable で十分。
 
+## 9. PR4-b 運用反映結果 (2026-06-17)
+
+PR4-a で main 入りした `notify-on-event` について、手元で deploy / Webhook 設定 / 模擬 payload テスト / 実 Webhook 経由の E2E (dummy token cleanup) を実施した。サーバ側経路は完了として close。実機 Push 受信確認・tap deep-link は別 PR。
+
+### 9-1. deploy 完了
+
+```powershell
+npx supabase functions deploy notify-on-event --no-verify-jwt
+```
+
+- 結果: `Deployed Functions on project tayrdjuizpyrxohduspe: notify-on-event` で成功。
+- Docker 関連 warning は出たが deploy 自体は完了。
+- URL: `https://tayrdjuizpyrxohduspe.functions.supabase.co/notify-on-event`
+
+### 9-2. 模擬 payload 疎通テスト
+
+| ケース | 結果 | 判定 |
+|---|---|---|
+| secret なし `Invoke-RestMethod` | 401 Unauthorized | ✅ |
+| secret あり + `unknown_table` payload | `ok=True, skipped=UNKNOWN_TABLE` | ✅ |
+| secret あり + `venue_holds` 模擬 payload (token 0 件 receiver) | `ok=True, source=venue_holds, send_push.ok=True, send_push.sent=0` | ✅ (notify-on-event → send-push 内部呼び出し確認) |
+| secret あり + `venue_trade_messages` kind='system' | `ok=True, skipped=KIND_NOT_USER` | ✅ (system message を skip) |
+
+### 9-3. Database Webhook 2 件作成済み
+
+| Webhook 名 | table | event | URL | header |
+|---|---|---|---|---|
+| `notify_on_venue_hold_insert` | `venue_holds` | INSERT | `https://tayrdjuizpyrxohduspe.functions.supabase.co/notify-on-event` | `x-send-push-secret` 設定済、`Content-type: application/json` |
+| `notify_on_venue_trade_message_insert` | `venue_trade_messages` | INSERT | (同) | (同) |
+
+### 9-4. テスト用会場の追加
+
+E2E 検証用に Supabase Dashboard 経由で会場 1 件を追加:
+
+| 項目 | 値 |
+|---|---|
+| venue_id | `234b380f-1a72-4754-b0ee-c60e6c4484ef` |
+| title | Push通知テスト |
+| venue_name | Swaplyテスト会場 2026/06/17 |
+| event_date | 2026-06-17 |
+| status | open |
+
+アプリの会場一覧に表示確認済。
+
+### 9-5. 会場 Hold Push サーバ側 E2E ✅
+
+流れ:
+1. アプリで会場投稿作成 → 別ユーザーから Hold 申請
+2. `venue_holds` INSERT → Database Webhook 発火 → `notify-on-event` 起動
+3. receiver 側に dummy token を入れた状態で再度 Hold 発火
+4. `send-push` 経由で Expo Push API → dummy token は `DeviceNotRegistered` ticket
+5. PR3 cleanup ロジックで `push_tokens` から自動削除
+
+確認 SQL:
+
+```sql
+select *
+from public.push_tokens
+where expo_push_token = 'ExponentPushToken[__dummy_token_for_test__]';
+```
+
+結果: `No rows returned` → **会場 Hold Push サーバ側 E2E OK**。
+
+### 9-6. 会場 DM Push サーバ側 E2E ✅
+
+対象 venue_trade:
+
+| 項目 | 値 |
+|---|---|
+| venue_trade_id | `df76bf24-2f00-4dd9-a0e4-21ac2fa0c635` |
+| proposer_id | `d485c203-f4ec-437d-b46d-d8db7a1c0b9f` |
+| receiver_id | `3eca930e-6740-4c31-b8e0-03234a2023a3` |
+
+流れ:
+1. 受信側 user に dummy token を追加
+2. 会場 DM を 1 通送信 (`send_venue_trade_message` RPC 経由)
+3. `venue_trade_messages` INSERT (kind='user') → Database Webhook → `notify-on-event`
+4. service_role で `venue_trades` を SELECT し、sender 以外の participant を recipient に決定
+5. `send-push` 経由 → dummy token が `DeviceNotRegistered` ticket
+6. PR3 cleanup ロジックで自動削除
+
+確認 SQL:
+
+```sql
+select *
+from public.push_tokens
+where expo_push_token = 'ExponentPushToken[__dummy_token_for_dm_test__]';
+```
+
+結果: `No rows returned` → **会場 DM Push サーバ側 E2E OK**。
+
+### 9-7. 残課題 / 未実施
+
+- **実機 Push 受信確認は未実施**: iOS / Android dev build + APNs Key / FCM credentials / EAS credentials が未整備のため、端末でのバナー / サウンド / 通知タップは未検証。別 PR (PR4-d 系) で対応する。
+- **tap deep-link listener は未実装**: `data.route` に従って画面遷移する `Notifications.addNotificationResponseReceivedListener` は app 側未配線。送信される Push は `data.route` (`/venue-tab` / `/venue/trade/<id>`) を含むが、現状 app は受信しても何もしない。別 PR (PR4-c 系) で対応する。
+- **dedupe / notifications テーブル**: Webhook retry に伴う重複 Push の dedupe は PR4-a/b スコープ外。実害が見えた段階で別 PR で検討。
+
+### 9-8. ⚠️ `SEND_PUSH_SECRET` ローテーション推奨
+
+PR4-b 検証中に `SEND_PUSH_SECRET` の値が一部画面に映る運用上のミスがあった。検証は完遂したがセキュリティ衛生として以下を推奨:
+
+1. 新しいランダム値を生成 (例: `openssl rand -hex 32` 等で 32〜64 byte)
+2. Supabase secrets を新値で上書き: `npx supabase secrets set SEND_PUSH_SECRET=<新しい値>`
+3. Dashboard の Database Webhook 2 件 (`notify_on_venue_hold_insert` / `notify_on_venue_trade_message_insert`) の `x-send-push-secret` header を新値に更新
+4. 旧値で疎通テストして 401 が返ることを確認
+
+ローテーション中は短時間ながら Webhook と Edge Function の secret 不一致による 401 が発生し、Push が送られない時間帯が生まれる点に注意。アプリ稼働への影響は Push 通知のみで、取引・DM 等の core 機能には影響しない。
+
+---
+
+PR4-b (運用反映) はこれで close。残るは PR4-c (app 側 tap listener) / PR4-d (dev build + 実機受信確認) 系。
+
 ## 関連
 
 - PR1: `docs/migration_push_tokens_table.sql` / `lib/pushNotifications.ts`

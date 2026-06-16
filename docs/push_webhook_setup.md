@@ -367,6 +367,58 @@ PR4-b 検証中に `SEND_PUSH_SECRET` の値が一部画面に映る運用上の
 
 ローテーション中は短時間ながら Webhook と Edge Function の secret 不一致による 401 が発生し、Push が送られない時間帯が生まれる点に注意。アプリ稼働への影響は Push 通知のみで、取引・DM 等の core 機能には影響しない。
 
+### 9-9. ✅ `SEND_PUSH_SECRET` ローテーション完了 (2026-06-17)
+
+§9-8 で推奨した `SEND_PUSH_SECRET` のローテーションを実施し、Edge Function / Dashboard Webhook の両側で新値への切替を完了した。本ドキュメントには新旧いずれの secret 値も記載しない (placeholder のみ)。
+
+#### 完了手順
+
+1. 旧 `SEND_PUSH_SECRET` を破棄扱いとし、新しいランダム値を生成
+2. `npx supabase secrets set SEND_PUSH_SECRET=<新値>` で Supabase secrets を上書き
+3. `send-push` を `--no-verify-jwt` で再 deploy
+4. `notify-on-event` を `--no-verify-jwt` で再 deploy
+5. Dashboard の Webhook 2 件 (`notify_on_venue_hold_insert` / `notify_on_venue_trade_message_insert`) の `x-send-push-secret` header を新値に貼り替え
+
+#### 検証結果
+
+| 確認項目 | 結果 | 判定 |
+|---|---|---|
+| 旧 secret で `notify-on-event` 疎通 | `401 Unauthorized` | ✅ (旧値が完全に無効化) |
+| 新 secret で `notify-on-event` 疎通 (`unknown_table` payload) | `ok=True, skipped=UNKNOWN_TABLE` | ✅ (新値が有効) |
+| 新 secret 経路での Webhook E2E (会場 Hold) | dummy token cleanup OK | ✅ |
+
+#### Webhook E2E 詳細
+
+流れ:
+1. receiver 側 user に dummy token `ExponentPushToken[__dummy_token_for_rotation_test__]` を追加
+2. アプリで Hold 申請を発生
+3. `venue_holds` INSERT → Database Webhook (新 header 値で送信) → `notify-on-event` → `send-push` → Expo Push API
+4. dummy token は `DeviceNotRegistered` ticket
+5. PR3 cleanup ロジックで `push_tokens` から自動削除
+
+確認 SQL:
+
+```sql
+select *
+from public.push_tokens
+where expo_push_token = 'ExponentPushToken[__dummy_token_for_rotation_test__]';
+```
+
+結果: `No rows returned` → **ローテーション後も Push 経路 (Webhook → notify-on-event → send-push → Expo → cleanup) が維持されていることを確認**。
+
+#### 残課題 (ローテーション完了後も §9-7 と同じく未実施)
+
+- **実機 Push 受信確認は未実施** — dev build / Apple Developer / Firebase / EAS credentials 整備後に PR4-d 系で対応。
+- **tap deep-link listener は未実装** — app 側 `Notifications.addNotificationResponseReceivedListener` は PR4-c 系で対応。
+
+#### 結論
+
+- `SEND_PUSH_SECRET` の値は完全に新値へ移行済み (旧値は無効、401 で拒否されることを確認)
+- Edge Function (`send-push` / `notify-on-event`) 側に新 secret 反映 OK
+- Dashboard Webhook 2 件に新 secret 反映 OK
+- 会場 Hold Push サーバ側経路はローテーション後も維持確認 OK
+- §9-8 のリスク (検証中の secret 露出) は本ローテーションで解消
+
 ---
 
 PR4-b (運用反映) はこれで close。残るは PR4-c (app 側 tap listener) / PR4-d (dev build + 実機受信確認) 系。

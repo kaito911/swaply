@@ -15,7 +15,11 @@ PR4-c までで Push 通知のサーバ側経路と app 側 tap deep-link listen
 - Push サーバ側 E2E (会場 Hold / 会場 DM、dummy token cleanup) は PR4-b までで確認済み
 - `SEND_PUSH_SECRET` は新値運用 (PR4-b ローテーション済み)
 - **Apple Developer Program は加入済み**
-- bundle identifier: `com.swaply.app`
+- iOS bundle identifier: `com.swaply.jp` (`com.swaply.app` は Apple Developer 側で利用不可だったため `.jp` に変更)
+- Android package: `com.swaply.app` のまま (Android / Firebase は後段、本 PR では変更しない)
+- **Apple Developer 側 App ID `com.swaply.jp` 作成済 (description: スワップリー)**
+- **Push Notifications capability ON 確認済 (証明書方式ではなく、後段で APNs Key 方式を採用するため証明書数 0 で問題なし)**
+- **APNs Key は本ドキュメント §4 で作成 (まだ未作成)**
 - EAS projectId: `c4601014-cc59-4ecb-9df8-f30596856c26`
 - 検証機: iPhone 実機 (Simulator / Expo Go は Push token 発行不可のため不可)
 
@@ -48,11 +52,11 @@ PR4-c までで Push 通知のサーバ側経路と app 側 tap deep-link listen
 
 | # | 作業 | 詳細 |
 |---|---|---|
-| 1 | App ID 確認 | Identifiers → bundle id `com.swaply.app` が登録されているか確認。未登録なら新規作成 |
-| 2 | Push Notifications capability ON | 上記 App ID の Capabilities で **Push Notifications** にチェック |
-| 3 | APNs Key 作成 | Keys → "+" → **Apple Push Notifications service (APNs)** にチェック → Continue → Register |
-| 4 | `.p8` ファイルダウンロード | 1 回しかダウンロードできないので確実に保存。Key ID / Team ID を控える |
-| 5 | `.p8` の保管 | **repo には絶対に入れない**。ローカルの secure な場所 (Keychain / 1Password 等) に保管。EAS credentials アップロード後はローカルから消しても良い |
+| 1 | App ID 確認 | **✅ 完了済**: Identifiers → bundle id `com.swaply.jp` の App ID 作成済 (description: スワップリー) |
+| 2 | Push Notifications capability ON | **✅ 完了済**: 上記 App ID の Capabilities で **Push Notifications** ON 確認済。証明書数 0 で OK (証明書方式ではなく後段で APNs Key 方式で接続するため) |
+| 3 | APNs Key 作成 | (未) Keys → "+" → **Apple Push Notifications service (APNs)** にチェック → Continue → Register |
+| 4 | `.p8` ファイルダウンロード | (未) 1 回しかダウンロードできないので確実に保存。Key ID / Team ID を控える |
+| 5 | `.p8` の保管 | (未) **repo には絶対に入れない**。ローカルの secure な場所 (Keychain / 1Password 等) に保管。EAS credentials アップロード後はローカルから消しても良い |
 
 ## 5. ユーザーが EAS でやること
 
@@ -177,7 +181,7 @@ data = @{
 | 7 | secret / `.p8` / Service Account JSON を repo に入れてしまう | 焦り / うっかり commit | **`.p8` / SA JSON は repo に絶対入れない**。EAS credentials のみで管理 |
 | 8 | build キュー時間が長い | Expo 無料枠の優先度 | 時間に余裕を見るか、Expo 有料プランを検討 |
 | 9 | 実機で token は取れるが Push が届かない | Expo Push API → APNs 経路の不一致 (`BadDeviceToken` / `Unregistered` 等が ticket に出る) | `notify-on-event` / `send-push` logs で ticket を確認、必要なら APNs Key を再生成 |
-| 10 | `eas build` で App ID 未登録エラー | Apple Developer 側で `com.swaply.app` の App ID が無い | Apple Developer Console で先に作る |
+| 10 | `eas build` で App ID 未登録エラー | Apple Developer 側で `com.swaply.jp` の App ID が無い | Apple Developer Console で先に作る (本 PR 時点では `com.swaply.jp` で作成済) |
 
 ## 11. 残課題 (本ドキュメントの後段で対応)
 

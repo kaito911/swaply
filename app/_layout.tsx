@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { colors } from '@/constants/theme'
+import { PushNotificationResponseHandler } from '@/components/PushNotificationResponseHandler'
 import { AuthProvider, useAuthContext } from '@/providers/AuthProvider'
 import { BadgeProvider } from '@/providers/BadgeProvider'
 import { MasterCacheProvider } from '@/providers/MasterCacheProvider'
@@ -231,6 +232,10 @@ export default function RootLayout() {
     <AuthProvider>
       <BadgeProvider>
         <MasterCacheProvider>
+          {/* PR4-c: Push 通知 tap → deep-link 遷移を担う副作用 component。
+              UI は返さず、cold start / foreground / background tap を listen する。
+              auth/onboarding gate の外でマウントすることで cold start を取り逃さない。 */}
+          <PushNotificationResponseHandler />
           <RootNavigator />
         </MasterCacheProvider>
       </BadgeProvider>

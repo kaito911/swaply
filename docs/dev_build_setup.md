@@ -247,10 +247,88 @@ PR4-d 実機テスト用に新規会場を 1 件作成:
 
 ### 12-4. PR4-d で確認できなかった項目 (別 PR で対応)
 
-- **会場 DM Push 実機受信確認**: 本フェーズでは会場 Hold 実イベントのみ実機確認。会場 DM 経路はサーバ側 E2E (`docs/push_webhook_setup.md` §9-6) のみで、実機 tap で `/venue/trade/<id>` に遷移するかは未検証
+- ~~**会場 DM Push 実機受信確認**: 本フェーズでは会場 Hold 実イベントのみ実機確認。会場 DM 経路はサーバ側 E2E (`docs/push_webhook_setup.md` §9-6) のみで、実機 tap で `/venue/trade/<id>` に遷移するかは未検証~~ → **§13 で完了 (2026-06-20)**
 - **foreground 中の通知バナー表示** (`setNotificationHandler` 未配線、PR4-c スコープ外): 本フェーズではロック画面 / 通知センター経由でのみ確認、foreground 中の挙動は別 PR
 - **killed 状態 (アプリスワイプ終了後) からの cold start tap deep-link**: 500ms 遅延の十分性は体系的に検証していない。実害が見えたら PR4-c 遅延の調整 or `useFocusEffect` ベースに改修
 - **Android 実機**: 後段。Firebase Project + `google-services.json` + FCM V1 SA + Android dev build が必要
+
+## 13. ✅ PR4-e 会場 DM 実機 Push tap deep-link 確認 完了 (2026-06-20)
+
+§12 (PR4-d) で会場 Hold 実イベント Push と `/venue-tab` tap deep-link までを実機確認した続きとして、会場 DM 経路 (venue_trade_messages INSERT → Webhook → notify-on-event → send-push → iPhone → tap で `/venue/trade/<UUID>` 遷移) を実機で確認した。
+
+§12-4 の残課題のうち「会場 DM Push 実機受信確認」が本セクションで完了。本ドキュメントには ExpoPushToken 全文、APNs `.p8`、Apple ID、`SEND_PUSH_SECRET` 値、テスト user_id は記載しない (`venue_id` / `venue_trade_id` のみ記録)。
+
+### 13-1. テスト用 venue / venue_trade
+
+| 項目 | 値 |
+|---|---|
+| venue_id | `6743c0a9-e09c-4ced-b2df-71108d8110f4` |
+| title | PR4-e DM Push実機テスト会場 |
+| event_date | 2026-06-20 (明日付けで作成、当日 expires_at の余裕を確保) |
+| status | open |
+| venue_trade_id | `ca2354cc-dd0e-4002-af92-33186a5543cf` (Hold 承認 → `accept_venue_hold` RPC で生成、status='pending') |
+
+### 13-2. 検証方法 — SQL Helper A 採用
+
+iPhone が 1 台しかなく、別ユーザー B からアプリ経由で DM を送信する手段がないため、**SQL Helper A** で `venue_trade_messages` に `kind='user'` を直接 INSERT する経路で検証した。
+
+- 本番運用 (通常経路): アプリ DM 画面 → `send_venue_trade_message` RPC → INSERT
+- 本フェーズ検証 (helper): SQL Editor で `INSERT INTO venue_trade_messages (..., kind='user', sender_id = iPhone でない方の participant)` を直接実行
+
+Helper A は RPC の送信窓 allowlist (pending / partially_confirmed) チェックを経由しないが、テーブル CHECK 制約 (`vtm_user_requires_sender` 等) と Database Webhook 発火経路は同一のため、Push 通知経路の動作確認には十分。**本番ユーザー操作で発生する DM は必ず RPC 経由** で送信されるため、本 helper の SQL は repo / app コードに残さない (本検証用の一時的な SQL Editor 操作のみ)。
+
+### 13-3. 確認結果
+
+| 確認項目 | 結果 |
+|---|---|
+| `venue_trade_messages` INSERT (kind='user', sender_id = iPhone でない方) | ✅ |
+| Database Webhook `notify_on_venue_trade_message_insert` 発火 | ✅ |
+| `notify-on-event` の `handleVenueTradeMessageInsert` 経路 → service_role で `venue_trades` の participants 解決 → recipient = iPhone user | ✅ |
+| `send-push` → Expo Push API → APNs → iPhone | ✅ |
+| iPhone にロック画面 Push バナー「会場交換のメッセージが届きました」到達 | ✅ |
+| 通知 tap → Swaply dev build 起動 → `data.route = "/venue/trade/<UUID>"` allowlist 検証 → `router.push` 成功 | ✅ |
+| `/venue/trade/ca2354cc-...` の DM 画面に直接遷移 | ✅ |
+
+### 13-4. 通った経路 (まとめ)
+
+```
+SQL Editor で INSERT venue_trade_messages (kind='user', sender_id = B)
+↓
+Database Webhook notify_on_venue_trade_message_insert
+↓ POST + x-send-push-secret
+notify-on-event/index.ts handleVenueTradeMessageInsert
+  - kind='user' OK
+  - service_role で venue_trades から participants 解決
+  - recipient = (senderId === proposerId) ? receiverId : proposerId
+  - data: { type: 'venue_trade_message',
+            route: `/venue/trade/${trade_id}`,
+            venue_trade_id: trade_id }
+↓
+send-push (PR3) → Expo Push API → APNs
+↓
+iPhone 実機受信 (タイトル「会場交換のメッセージが届きました」)
+↓ tap
+PushNotificationResponseHandler.tsx resolveSafeRoute
+  - VENUE_TRADE_RE で /venue/trade/<id> 形式マッチ
+  - UUID_RE で trade_id の UUID 形式判定 → OK
+↓
+router.push('/venue/trade/ca2354cc-...' as never)
+↓
+app/venue/trade/[id].tsx 描画
+```
+
+これにより **PR1〜PR4-e の Push 通知パイプラインは Hold / DM 両系統で実機 tap deep-link まで一気通貫 OK**。
+
+### 13-5. PR4-e で確認できなかった項目 / 残課題
+
+PR4-d §12-4 と同じ未確認項目が残っている (本 PR4-e では DM の tap deep-link 経路のみを追加確認):
+
+- **foreground 中の通知バナー表示** (`setNotificationHandler` 未配線、PR4-c スコープ外): ロック画面 / 通知センター経由でのみ確認、foreground 中の挙動は別 PR
+- **killed (アプリスワイプ終了) 状態からの cold start tap deep-link 安定性**: 500ms 遅延の十分性は体系的に検証していない。実害が見えたら PR4-c 遅延の調整 or `useFocusEffect` ベース ready 検知に改修
+- **Android 実機**: 後段。Firebase Project + `google-services.json` + FCM V1 SA + Android dev build が必要
+- **通常取引 (offers / trades) Push**: 別 PR。`notify-on-event` に分岐追加 + Webhook 追加
+- **`notifications` テーブル + dedupe**: 別 PR。Webhook retry に伴う重複 Push を idempotency key で抑止
+- **pending deep link queue (未ログイン時の tap → login 後 resume)**: 別 PR
 
 ## 関連
 

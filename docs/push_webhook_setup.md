@@ -437,6 +437,26 @@ PR4-d 実機検証フェーズで `SEND_PUSH_SECRET` を再度ローテーショ
 
 これにより PR1〜PR4-d のサーバ → Webhook → Edge Function → 実機 → tap deep-link 経路は一気通貫で機能確認済み。
 
+### 9-11. ✅ 会場 DM Webhook 実機 Push tap 確認 完了 (2026-06-20)
+
+§9-10 (PR4-d) で会場 Hold 実イベントの実機受信を確認した続き。会場 DM 経路 (`notify_on_venue_trade_message_insert` Webhook → `notify-on-event` → `send-push` → iPhone → tap で `/venue/trade/<UUID>` 遷移) を実機で確認した。
+
+iPhone 1 台のみのため、別ユーザー B からの DM 送信は **SQL Helper A** (`venue_trade_messages` への直接 INSERT、kind='user', sender_id = iPhone でない方) で代替。本番運用では `send_venue_trade_message` RPC 経由が通常経路。
+
+詳細は `docs/dev_build_setup.md` §13 を参照。本ドキュメントには user_id / ExpoPushToken / secret は記載しない。
+
+#### 主な確認結果
+
+| 確認項目 | 結果 |
+|---|---|
+| `venue_trade_messages` INSERT (kind='user') → Webhook 発火 → `notify-on-event` で recipient 解決 | ✅ |
+| `send-push` → Expo Push API → iPhone | ✅ |
+| iPhone にロック画面 Push バナー (タイトル「会場交換のメッセージが届きました」) | ✅ |
+| 通知 tap → Swaply dev build 起動 → `/venue/trade/<UUID>` DM 画面に直接遷移 | ✅ |
+| PR4-e テスト用 | `venue_id: 6743c0a9-e09c-4ced-b2df-71108d8110f4` (event_date: 2026-06-20, status: open) / `venue_trade_id: ca2354cc-dd0e-4002-af92-33186a5543cf` |
+
+これにより PR1〜PR4-e のサーバ → Webhook → Edge Function → 実機 → tap deep-link 経路は **Hold / DM 両系統で一気通貫機能確認済み**。
+
 ---
 
 PR4-b (運用反映) はこれで close。残るは PR4-c (app 側 tap listener) / PR4-d (dev build + 実機受信確認) 系。

@@ -419,6 +419,24 @@ where expo_push_token = 'ExponentPushToken[__dummy_token_for_rotation_test__]';
 - 会場 Hold Push サーバ側経路はローテーション後も維持確認 OK
 - §9-8 のリスク (検証中の secret 露出) は本ローテーションで解消
 
+### 9-10. ✅ 再ローテーション + 実機 Push 受信確認 完了 (2026-06-19)
+
+PR4-d 実機検証フェーズで `SEND_PUSH_SECRET` を再度ローテーションし (作業途中で旧値を失念したため)、Edge Function 2 件再 deploy + Dashboard Webhook 2 件 header 貼り替えを完了。続けて iPhone 実機 dev build で Webhook 経由 Push の実機受信と tap deep-link 遷移までの E2E を完了した。
+
+詳細手順と確認結果は `docs/dev_build_setup.md` §12 を参照。本ドキュメントには新旧 secret 値や ExpoPushToken は記載しない。
+
+#### 主な確認結果
+
+| 確認項目 | 結果 |
+|---|---|
+| 旧 secret で `notify-on-event` 疎通 | 401 ✅ |
+| 新 secret で `notify-on-event` 疎通 | 200 ✅ |
+| `send-push` 手動送信 → iPhone 実機受信 → tap で `/venue-tab` 遷移 | ✅ |
+| 会場 Hold 実イベント → Webhook → `notify-on-event` → `send-push` → iPhone 実機受信 → tap で会場モード遷移 | ✅ |
+| PR4-d テスト用会場 | `venue_id: f23ed9f4-4b8f-420b-83c9-510c6cf360e8` (新規作成、`event_date=2026-06-19`, `status=open`) |
+
+これにより PR1〜PR4-d のサーバ → Webhook → Edge Function → 実機 → tap deep-link 経路は一気通貫で機能確認済み。
+
 ---
 
 PR4-b (運用反映) はこれで close。残るは PR4-c (app 側 tap listener) / PR4-d (dev build + 実機受信確認) 系。

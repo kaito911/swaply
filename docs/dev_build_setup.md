@@ -188,9 +188,69 @@ data = @{
 - **Android (Firebase + FCM)**: 後段。`google-services.json` + `app.json` `android.googleServicesFile` 設定 + EAS credentials に FCM V1 SA 登録 + `eas build --profile development-device --platform android`
 - **`setNotificationHandler` (foreground 表示制御)**: 別 PR。foreground 中の通知バナーを制御
 - **pending deep link queue (未ログイン時の resume)**: 別 PR。未ログイン状態で tap → login 後に意図を resume
-- **dev build 後の実機検証結果ドキュメント化**: 検証完了後に本ファイル §8-9 の結果を追記する PR (PR4-b と同パターンの運用反映 commit)
+- ~~**dev build 後の実機検証結果ドキュメント化**: 検証完了後に本ファイル §8-9 の結果を追記する PR (PR4-b と同パターンの運用反映 commit)~~ → **§12 で完了 (2026-06-19)**
 - **通常申請 / 通常承認 Push (offers / trades)**: 別 PR。`notify-on-event` に分岐追加 + Webhook 追加
 - **`notifications` テーブル + dedupe**: 別 PR。Webhook retry に伴う重複 Push を idempotency key で抑止
+
+## 12. ✅ PR4-d 実機 Push 受信確認 完了 (2026-06-19)
+
+`development-device` profile での iOS dev build を起点に、iPhone 実機での Push token 登録 → `send-push` 手動送信受信 → Webhook 経由 Push 受信 → 通知 tap deep-link 遷移までを一気通貫で確認した。
+
+本 docs §11 残課題のうち「dev build 後の実機検証結果ドキュメント化」は本セクションで完了。本ドキュメントには ExpoPushToken 全文、APNs `.p8`、Apple ID、`SEND_PUSH_SECRET` 値、テスト user_id は記載しない (`venue_id` のみテスト痕跡として記録)。
+
+### 12-1. 環境構築結果
+
+| 項目 | 結果 |
+|---|---|
+| `eas build --profile development-device --platform ios` | ✅ 成功 |
+| iPhone 実機 (デベロッパモード ON) に dev build インストール | ✅ 成功 |
+| `npx expo start --dev-client` で Metro 接続 + Swaply 表示 | ✅ 成功 |
+| pre-prompt → 通知許可 ON | ✅ 成功 |
+| `public.push_tokens` に iOS 実 ExpoPushToken 登録 | ✅ 成功 (2026-06-19 付) |
+
+repo 側の追加変更:
+- `expo-dev-client: ~6.0.21` を `package.json` に追加 (dev client 接続のため必須)
+
+### 12-2. `send-push` 手動送信テスト (実機受信 + tap deep-link)
+
+PowerShell から `curl.exe` で `send-push` Edge Function に直接 POST。
+
+| 確認項目 | 結果 |
+|---|---|
+| `send-push` レスポンス | `ok=true, sent=1, removed=0, tickets=[{status:ok}]` |
+| iPhone のロック画面に Push バナー表示 | ✅ |
+| `data.route = "/venue-tab"` 通知 tap → Swaply dev build 起動 → 会場モード遷移 | ✅ |
+
+`SEND_PUSH_SECRET` は本フェーズ着手時に再ローテーション実施 (旧値忘失のため)。詳細は `docs/push_webhook_setup.md` §9-10 参照。
+
+### 12-3. Webhook 経由 (会場 Hold 実イベント) E2E
+
+PR4-d 実機テスト用に新規会場を 1 件作成:
+
+| 項目 | 値 |
+|---|---|
+| venue_id | `f23ed9f4-4b8f-420b-83c9-510c6cf360e8` |
+| title | PR4-d Push実機テスト会場 |
+| event_date | 2026-06-19 |
+| status | open |
+
+実 E2E フロー (server 側 + 実機 + tap deep-link):
+
+1. 出品者ユーザーが上記会場で会場出品 (`venue_supply_posts` INSERT)
+2. 別ユーザーが同会場にチェックイン → 当該出品に Hold 申請
+3. `venue_holds` INSERT (status='pending', receiver_id = 出品者) → Database Webhook (`notify_on_venue_hold_insert`) 発火
+4. `notify-on-event` → `send-push` → Expo Push API → APNs → iPhone 配信
+5. 出品者の iPhone にロック画面 Push バナー (タイトル「会場でHold申請が届きました」) 到達
+6. 通知 tap → Swaply dev build 起動 → `data.route` allowlist (`/venue-tab`) 検証 → 会場モード遷移
+
+結果: **会場 Hold 実イベントの Webhook 経由 → 実機受信 → tap deep-link まで完全成功**。PR1〜PR4-c のサーバ → 実機経路は一気通貫で機能確認済。
+
+### 12-4. PR4-d で確認できなかった項目 (別 PR で対応)
+
+- **会場 DM Push 実機受信確認**: 本フェーズでは会場 Hold 実イベントのみ実機確認。会場 DM 経路はサーバ側 E2E (`docs/push_webhook_setup.md` §9-6) のみで、実機 tap で `/venue/trade/<id>` に遷移するかは未検証
+- **foreground 中の通知バナー表示** (`setNotificationHandler` 未配線、PR4-c スコープ外): 本フェーズではロック画面 / 通知センター経由でのみ確認、foreground 中の挙動は別 PR
+- **killed 状態 (アプリスワイプ終了後) からの cold start tap deep-link**: 500ms 遅延の十分性は体系的に検証していない。実害が見えたら PR4-c 遅延の調整 or `useFocusEffect` ベースに改修
+- **Android 実機**: 後段。Firebase Project + `google-services.json` + FCM V1 SA + Android dev build が必要
 
 ## 関連
 

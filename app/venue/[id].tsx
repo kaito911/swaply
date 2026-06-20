@@ -616,20 +616,27 @@ export default function VenueHomeScreen() {
                           {post.group_name}
                         </Text>
                       )}
-                      {post.want_card != null && (
-                        <>
-                          <Text
-                            style={[
-                              styles.supplyCardFieldLabel,
-                              styles.supplyCardFieldLabelSpacer,
-                            ]}
-                          >
-                            求
-                          </Text>
-                          <Text style={styles.supplyCardWant} numberOfLines={2}>
-                            {post.want_card}
-                          </Text>
-                        </>
+                      {/* PR-3: 求は常時表示 (Swaply は譲・求両面が価値)。
+                          want_card が null の場合は「指定なし」を hint 色で表示。 */}
+                      <Text
+                        style={[
+                          styles.supplyCardFieldLabel,
+                          styles.supplyCardFieldLabelSpacer,
+                        ]}
+                      >
+                        求
+                      </Text>
+                      {post.want_card != null ? (
+                        <Text style={styles.supplyCardWant} numberOfLines={1}>
+                          {post.want_card}
+                        </Text>
+                      ) : (
+                        <Text
+                          style={styles.supplyCardWantNone}
+                          numberOfLines={1}
+                        >
+                          指定なし
+                        </Text>
                       )}
                     </View>
                   </View>
@@ -1092,9 +1099,11 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     alignItems: 'flex-start',
   },
+  // PR-3: 固定 96x96 正方形 + resizeMode='cover' で全カードのサムネ寸法・形を揃える。
+  // 元画像のアスペクト依存を排除し、右テキスト列の高さも安定。
   supplyCardThumb: {
-    width: 88,
-    aspectRatio: 3 / 4,
+    width: 96,
+    height: 96,
     borderRadius: radius.md,
     backgroundColor: VENUE_COLORS.background,
   },
@@ -1126,10 +1135,20 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: VENUE_COLORS.hint,
   },
+  // PR-3: 求 want_card は ink (headline) で表示。
+  // brand 色は主アクション専用 (CTA / FAB) のためテキストには使わない。
+  // 一致強調 (◎一致) はコーラルリボンを別 PR で別途乗せる方針。
   supplyCardWant: {
     fontSize: fontSize.base,
     fontWeight: fontWeight.semibold,
-    color: VENUE_COLORS.brand,
+    color: VENUE_COLORS.headline,
+    lineHeight: 20,
+  },
+  // PR-3: want_card が null 時の「指定なし」placeholder。hint 色 + regular weight で控えめに。
+  supplyCardWantNone: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.regular,
+    color: VENUE_COLORS.hint,
     lineHeight: 20,
   },
   // meta 行: 投稿者 + Trust チップ / 残り時間

@@ -378,6 +378,10 @@ export interface Venue {
   ends_at: string | null
   status: VenueStatus
   created_at: string
+  // PR-3.6a: 作品/グループ紐付けの土台 (master_works.id slug を論理参照、FK なし、NULL 許容)。
+  // 単独ライブ = 1 作品自動継承用。フェス対応は将来 venue_works 中間テーブルで升級予定。
+  // 詳細: docs/migration_venue_add_work_id.sql
+  work_id?: string | null
 }
 
 export interface VenueCheckin {

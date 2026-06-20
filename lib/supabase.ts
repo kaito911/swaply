@@ -2157,10 +2157,15 @@ export async function fetchVenues(): Promise<Venue[]> {
  * 取得失敗 / 未存在は null 返却で UI 側がヘッダー非表示にフォールバックする。
  */
 export async function fetchVenue(venueId: string): Promise<Venue | null> {
+  // PR-3.6a: work_id を選択列に追加 (master_works 紐付けの土台)。
+  // ⚠️ 適用順序: docs/migration_venue_add_work_id.sql を本番 DB に先に適用してから
+  //   本コードを merge すること。未適用の DB だと PostgREST が
+  //   'column work_id does not exist' で 400 を返し fetchVenue が null となり、
+  //   会場文脈ヘッダーが silent に非表示になる。詳細は migration ファイル冒頭参照。
   const { data, error } = await supabase
     .from('venues')
     .select(
-      'id, title, venue_name, event_date, starts_at, ends_at, status, created_at'
+      'id, title, venue_name, event_date, starts_at, ends_at, status, created_at, work_id'
     )
     .eq('id', venueId)
     .single()

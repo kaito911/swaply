@@ -1,0 +1,145 @@
+-- ====================================================================
+-- migration_venue_add_work_id.sql
+-- 作成日: 2026-06-21
+-- 目的  : venues に work_id TEXT 列を追加する (作品/グループ紐付けの土台)。
+--
+--         single live (単独ライブ) = 1 作品自動継承 (venue.work_id をそのまま inherit)、
+--         フェス対応 (複数作品) は将来 venue_works 中間テーブルで升級する想定 (本 PR では作らない)。
+--
+-- スキーマ:
+--   - work_id  TEXT (NULL 許容、DEFAULT なし、NOT NULL にしない)
+--   - 論理的に master_works.id (slug、例 'treasure') を参照するが、**FK は付けない**。
+--     これは cards.work_id と同じハイブリッドマスタ方針:
+--       docs/migration_extend_cards_to_items.sql:35-37 参照
+--   - NULL = master_works に登録されていないアーティストの会場 (マイナーアーティスト
+--     ライブ / 同人イベント等)、または作品継承なし会場 を許容。
+--     通常出品 (cards) の freeText fallback 思想を会場でも維持する。
+--   - index: venues_work_id_idx (work_id) — 将来の検索/フィルタ用途。
+--
+-- 既存データ:
+--   - 既存テスト会場 (PR4-b/d/e の 3 件、234b380f / f23ed9f4 / 6743c0a9) は
+--     work_id NULL のまま (backfill しない)。テスト用のため運用判断不要。
+--
+-- ⚠️ 適用順序の重要事項:
+--   - 本 migration が本番 DB に適用される **前に** コード側 (lib/supabase.ts の
+--     fetchVenue が work_id を SELECT する) が main に merge されると、
+--     PostgREST が 'column work_id does not exist' エラーを返し、
+--     会場文脈ヘッダー (PR-2/2.1 で実装) が非表示になる
+--     (fetchVenue が null を返す → venue=null → ヘッダー描画 condition false)。
+--     アプリ自体はクラッシュせず、ヘッダーだけが silent に消える挙動。
+--   - 厳守すべき順序:
+--       (1) 運営 K が本ファイルを Supabase SQL Editor で実行 (本番 DB に列追加)
+--       (2) その後にコード commit を main に merge → push
+--   - 開発環境 (Supabase ダッシュボードの dev project 等) でも同様の順序を維持。
+--
+-- 関連:
+--   - cards.work_id の同パターン: docs/migration_extend_cards_to_items.sql
+--   - master_works seed (TREASURE 等 21 グループ): docs/migration_master_works_seed_idol_and_2_5d.sql
+--   - master_characters seed (TREASURE メンバー 10 名等): docs/migration_master_characters_idol.sql
+--   - 連携 fetcher: lib/supabase.ts fetchVenue (本 PR でカラム選択に work_id 追加)
+--   - 連携 型: lib/types.ts Venue.work_id (本 PR で optional 追加)
+--   - 後続: PR-3.6b で venue_supply_posts に characters[] / item_types[] 等の構造化を
+--     追加予定。出品フォームで venue.work_id を継承して characters 候補を絞り込む。
+--     本 PR は土台 (列追加 + 型/fetcher) のみで、UI / 出品 form / マッチ / 検索は触らない。
+-- ====================================================================
+--
+-- 適用前提:
+--   - venues テーブルが存在 (docs/migration_venue.sql:8-18)
+--   - venues に work_id 列が無いこと (本 migration は冪等、二重実行で no-op)
+--
+-- ====================================================================
+
+begin;
+
+-- 列追加 (NULL 許容、DEFAULT なし、FK なし、ハイブリッドマスタ方針)
+alter table public.venues
+  add column if not exists work_id text;
+
+-- index (将来の検索/フィルタ用)
+create index if not exists venues_work_id_idx on public.venues (work_id);
+
+commit;
+
+-- ====================================================================
+-- 適用後確認 (Block C 相当、本ファイル単独でも実行可)
+-- ====================================================================
+--
+-- ◆ C1: 列追加 / 型 / nullable の確認
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public' and table_name = 'venues'
+--     and column_name = 'work_id';
+--   → 期待: 1 行、data_type='text', is_nullable='YES', column_default=NULL
+--
+-- ◆ C2: index 確認
+--   select indexname, indexdef
+--   from pg_indexes
+--   where schemaname='public' and tablename='venues'
+--     and indexname='venues_work_id_idx';
+--   → 期待: 1 行、定義文:
+--     CREATE INDEX venues_work_id_idx ON public.venues USING btree (work_id)
+--
+-- ◆ C3: 既存行が work_id NULL のままであること
+--   select id, title, work_id from public.venues order by created_at desc;
+--   → 期待: 既存テスト会場 3 件 (234b380f / f23ed9f4 / 6743c0a9) は
+--           全行 work_id IS NULL
+--
+-- ◆ C4: FK 制約が付いていない (ハイブリッドマスタ方針の確認)
+--   select conname, pg_get_constraintdef(oid)
+--   from pg_constraint
+--   where conrelid = 'public.venues'::regclass
+--     and contype = 'f';
+--   → 期待: venues に FK 制約は無い (status enum の CHECK のみ存在し、work_id への FK
+--           は無いこと。出力 0 行 or 既存 FK のみ)
+--
+-- ====================================================================
+-- 運営向け: 会場登録時の work_id 設定例
+-- ====================================================================
+--
+-- ◆ 新規会場を作る (master_works に登録済みのアーティスト/作品の場合):
+--   insert into public.venues (title, venue_name, event_date, status, work_id)
+--   values (
+--     'TREASURE WORLD TOUR 東京ドーム Day2',  -- title (公演名、フリーテキスト)
+--     '東京ドーム',                            -- venue_name (会場施設名)
+--     '2026-06-20',                           -- event_date (開催日)
+--     'open',                                  -- status ('upcoming'/'open'/'closed')
+--     'treasure'                               -- work_id ← master_works.id slug を入れる
+--   );
+--
+-- ◆ 既存会場に作品を後から紐付ける:
+--   update public.venues
+--   set work_id = 'treasure'
+--   where id = '<venue_id>';
+--
+-- ◆ work_id に入れる値の規約:
+--   - master_works.id の slug 文字列 (例: 'treasure' / 'seventeen' / 'bts' / 'kimetsu' /
+--     'conan' / 'sanrio' 等)。
+--   - 一覧は docs/migration_master_works_seed_idol_and_2_5d.sql (idol 21 件) +
+--           docs/migration_master_works_seed_expansion_beta1.sql (anime 等) +
+--           docs/migration_master_works_characters.sql:54-63 (kimetsu / conan / sanrio 3 件) で seed 済。
+--   - master_works に存在しない値を入れることも技術的には可能 (FK 制約なし) だが、
+--     後続 PR-3.6b の出品フォーム characters 候補絞り込みが効かなくなるため非推奨。
+--
+-- ◆ master_works に該当作品が無い会場 (マイナーアーティスト / 同人イベント 等):
+--   - work_id を **NULL のまま** にする。
+--   - 通常出品 (cards) の freeText fallback 思想と整合。
+--   - 後から運営判断で master_works に登録した場合は、上記 UPDATE で既存 venue に
+--     後付け紐付け可能。
+--
+-- ◆ 注意:
+--   - 1 会場 = 1 作品 (本 PR の設計)。複数作品 (フェス) は本 PR の範囲外。
+--     将来 venue_works 中間テーブルで升級時に併設する想定 (本 PR の work_id 列は維持、
+--     venue_works が無い venue は work_id 1 つを採用)。
+--
+-- ====================================================================
+-- ロールバック (緊急時、index も列も削除)
+-- ====================================================================
+-- ※ 後続 PR-3.6b で venue_supply_posts が venue.work_id を継承する設計になる予定。
+--    本 migration を rollback すると後続 PR の出品フォーム継承機能が壊れる。
+--    本番適用後の rollback は慎重に判断 (PR-3.6b 適用前ならロールバック可、適用後は
+--    venue_supply_posts 側の列対応が必要)。
+--
+-- begin;
+-- drop index if exists public.venues_work_id_idx;
+-- alter table public.venues drop column if exists work_id;
+-- commit;

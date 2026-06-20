@@ -33,10 +33,12 @@ import { TrustBadge } from '@/components/TrustBadge'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -153,6 +155,37 @@ export default function VenueHomeScreen() {
     setVenue(v)
     setCheckinCount(c)
   }, [venueId])
+
+  // PR-2.1: 「開催中」LIVE ピル内ドットの opacity パルス。
+  // 仕様: 1 → 0.4 → 1、duration 1200ms 全周期 (600ms ずつ)、Easing.inOut。
+  // status === 'open' のときのみ動作。useNativeDriver=true で軽量化。
+  const liveDotOpacity = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    if (venue?.status !== 'open') {
+      liveDotOpacity.setValue(1)
+      return
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(liveDotOpacity, {
+          toValue: 0.4,
+          duration: 600,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(liveDotOpacity, {
+          toValue: 1,
+          duration: 600,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    )
+    loop.start()
+    return () => {
+      loop.stop()
+    }
+  }, [venue?.status, liveDotOpacity])
 
   // 画面 focus 時に再取得 (Hold 承認 / 拒否後に戻ったときの最新化)
   useFocusEffect(
@@ -359,11 +392,20 @@ export default function VenueHomeScreen() {
           <View style={styles.venueContextStatusRow}>
             {venue.status === 'open' ? (
               <>
-                <View style={styles.venueContextOpenDot} />
-                <Text style={styles.venueContextOpenText}>開催中</Text>
-                <Text style={styles.venueContextSeparator}> · </Text>
+                {/* PR-2.1: 緑 LIVE ピル (薄緑背景 + 緑文字 + パルスドット)。
+                    背景 brand のベタ塗りは禁止 (主 CTA 専用)。緑は
+                    status='open' の本ピルのみで使用。 */}
+                <View style={styles.venueContextLivePill}>
+                  <Animated.View
+                    style={[
+                      styles.venueContextLiveDot,
+                      { opacity: liveDotOpacity },
+                    ]}
+                  />
+                  <Text style={styles.venueContextLiveText}>開催中</Text>
+                </View>
                 <Text style={styles.venueContextCheckin}>
-                  {checkinCount}人参加中
+                  · {checkinCount}人参加中
                 </Text>
               </>
             ) : venue.status === 'upcoming' ? (
@@ -873,15 +915,16 @@ export default function VenueHomeScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
-  // PR-2: 会場文脈ヘッダー (画面内ヘッダー、最上部)
-  // brand ベタ塗りはしない (主アクションではない)、緑は status='open' のドット/ラベル限定。
+  // PR-2.1: 会場文脈ヘッダー (画面内ヘッダー、最上部)
+  // 帯背景を brand tint、境界線を brand border に変えて「会場ゾーン」識別性を出す。
+  // brand ベタ塗りはしない (主 CTA 専用)、緑は status='open' のピルのみで使用。
   venueContextHeader: {
     paddingHorizontal: spacing.base,
     paddingTop: spacing.sm,
     paddingBottom: spacing.sm,
-    backgroundColor: VENUE_COLORS.card,
+    backgroundColor: VENUE_COLORS.brandTint,
     borderBottomWidth: 1,
-    borderBottomColor: VENUE_COLORS.border,
+    borderBottomColor: VENUE_COLORS.brandBorder,
     gap: 4,
   },
   venueContextTitle: {
@@ -897,23 +940,32 @@ const styles = StyleSheet.create({
   venueContextStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
     marginTop: 2,
   },
-  venueContextOpenDot: {
+  // PR-2.1: 「開催中」LIVE ピル。proto --green-tint:#E4F5EC を背景に。
+  // ※ #E4F5EC は VENUE_COLORS に未定義 (trustGreen tint 系)。本 PR スコープでは
+  //   VENUE_COLORS 定義変更不可のため inline で使用。後続 PR で
+  //   VENUE_COLORS.trustGreenTint として promote する想定。
+  venueContextLivePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#E4F5EC',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  venueContextLiveDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: VENUE_COLORS.trustGreen,
-    marginRight: 6,
   },
-  venueContextOpenText: {
+  venueContextLiveText: {
     fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
+    fontWeight: fontWeight.extrabold,
     color: VENUE_COLORS.trustGreen,
-  },
-  venueContextSeparator: {
-    fontSize: fontSize.xs,
-    color: VENUE_COLORS.hint,
   },
   venueContextCheckin: {
     fontSize: fontSize.xs,

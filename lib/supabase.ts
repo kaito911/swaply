@@ -2151,6 +2151,28 @@ export async function fetchVenues(): Promise<Venue[]> {
   return (data ?? []) as Venue[]
 }
 
+/**
+ * 単一 venue 行取得 (venues は RLS 上 SELECT 全員可、migration_venue.sql)。
+ * 会場詳細画面 (app/venue/[id].tsx) の文脈ヘッダー (イベント名・日付・開催中状態) で使用。
+ * 取得失敗 / 未存在は null 返却で UI 側がヘッダー非表示にフォールバックする。
+ */
+export async function fetchVenue(venueId: string): Promise<Venue | null> {
+  const { data, error } = await supabase
+    .from('venues')
+    .select(
+      'id, title, venue_name, event_date, starts_at, ends_at, status, created_at'
+    )
+    .eq('id', venueId)
+    .single()
+
+  if (error) {
+    console.error('[fetchVenue]', error)
+    return null
+  }
+
+  return data as Venue
+}
+
 export async function fetchMyCheckin(
   venueId: string,
   userId: string

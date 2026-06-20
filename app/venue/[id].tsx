@@ -20,9 +20,11 @@ import {
   addSupplyPost,
   fetchReceivedHoldCount,
   fetchSupplyPosts,
+  fetchVenue,
+  fetchVenueCheckinCount,
   uploadCardImage,
 } from '@/lib/supabase'
-import { computeTrustBadge, VenueSupplyPost } from '@/lib/types'
+import { computeTrustBadge, Venue, VenueSupplyPost } from '@/lib/types'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
@@ -72,6 +74,19 @@ function getDisplayName(poster: VenueSupplyPost['poster']): string {
   return poster.handle ?? poster.display_name ?? 'ユーザー'
 }
 
+// PR-2: 会場文脈ヘッダー用の和式日付フォーマット。event_date は date 型 ('YYYY-MM-DD')。
+// JST 00:00 として解釈し、曜日 (日〜土) を付ける。例: '2026年6月20日(土)'。
+const JA_WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const
+function formatJaEventDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00+09:00`)
+  if (Number.isNaN(d.getTime())) return dateStr
+  const y = d.getFullYear()
+  const m = d.getMonth() + 1
+  const day = d.getDate()
+  const dow = JA_WEEKDAYS[d.getDay()]
+  return `${y}年${m}月${day}日(${dow})`
+}
+
 export default function VenueHomeScreen() {
   const { id: venueId } = useLocalSearchParams<{ id: string }>()
   const { session } = useAuthContext()
@@ -81,6 +96,11 @@ export default function VenueHomeScreen() {
   const [supplyPosts, setSupplyPosts] = useState<VenueSupplyPost[]>([])
   const [receivedHoldCount, setReceivedHoldCount] = useState(0)
   const [loadingSupply, setLoadingSupply] = useState(false)
+
+  // PR-2: 会場文脈ヘッダー用。venues は RLS 上 SELECT 全員可。
+  // fetch 失敗時 (venue=null) はヘッダー非表示にフォールバック。
+  const [venue, setVenue] = useState<Venue | null>(null)
+  const [checkinCount, setCheckinCount] = useState(0)
 
   // 供給板投稿フォーム
   const [showPostForm, setShowPostForm] = useState(false)
@@ -122,12 +142,25 @@ export default function VenueHomeScreen() {
     setReceivedHoldCount(count)
   }, [venueId, userId])
 
+  // PR-2: venue 行 + チェックイン数を並列取得。失敗時 (venue=null) は
+  // 文脈ヘッダー非表示にフォールバック。
+  const loadVenueContext = useCallback(async () => {
+    if (venueId == null) return
+    const [v, c] = await Promise.all([
+      fetchVenue(venueId),
+      fetchVenueCheckinCount(venueId),
+    ])
+    setVenue(v)
+    setCheckinCount(c)
+  }, [venueId])
+
   // 画面 focus 時に再取得 (Hold 承認 / 拒否後に戻ったときの最新化)
   useFocusEffect(
     useCallback(() => {
       loadSupply()
       loadHoldCount()
-    }, [loadSupply, loadHoldCount])
+      loadVenueContext()
+    }, [loadSupply, loadHoldCount, loadVenueContext])
   )
 
   const handlePickImage = async () => {
@@ -311,6 +344,37 @@ export default function VenueHomeScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      {/* PR-2: 会場文脈ヘッダー — どの会場にいるかを示し、開催中状態と参加人数で
+          現在地＋臨場感を与える。venue 取得失敗時は非表示 (フォールバック)。
+          ナビゲーションバーの Stack title ('会場モード' 固定) は本 PR では触らず、
+          画面内ヘッダーで文脈を出す方針。 */}
+      {venue != null && (
+        <View style={styles.venueContextHeader}>
+          <Text style={styles.venueContextTitle} numberOfLines={2}>
+            {venue.title}
+          </Text>
+          <Text style={styles.venueContextSubtitle} numberOfLines={1}>
+            {venue.venue_name} · {formatJaEventDate(venue.event_date)}
+          </Text>
+          <View style={styles.venueContextStatusRow}>
+            {venue.status === 'open' ? (
+              <>
+                <View style={styles.venueContextOpenDot} />
+                <Text style={styles.venueContextOpenText}>開催中</Text>
+                <Text style={styles.venueContextSeparator}> · </Text>
+                <Text style={styles.venueContextCheckin}>
+                  {checkinCount}人参加中
+                </Text>
+              </>
+            ) : venue.status === 'upcoming' ? (
+              <Text style={styles.venueContextHint}>まもなく開催</Text>
+            ) : (
+              <Text style={styles.venueContextHint}>終了</Text>
+            )}
+          </View>
+        </View>
+      )}
+
       {/* 「届いたHold(n)」CTA: 当該 venue 限定の受信 pending Hold が 1 件以上ある時のみ表示 */}
       {receivedHoldCount > 0 && (
         <Pressable
@@ -802,6 +866,57 @@ export default function VenueHomeScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
+  // PR-2: 会場文脈ヘッダー (画面内ヘッダー、最上部)
+  // brand ベタ塗りはしない (主アクションではない)、緑は status='open' のドット/ラベル限定。
+  venueContextHeader: {
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+    backgroundColor: VENUE_COLORS.card,
+    borderBottomWidth: 1,
+    borderBottomColor: VENUE_COLORS.border,
+    gap: 4,
+  },
+  venueContextTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.extrabold,
+    color: VENUE_COLORS.headline,
+    lineHeight: 22,
+  },
+  venueContextSubtitle: {
+    fontSize: fontSize.sm,
+    color: VENUE_COLORS.body,
+  },
+  venueContextStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  venueContextOpenDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: VENUE_COLORS.trustGreen,
+    marginRight: 6,
+  },
+  venueContextOpenText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: VENUE_COLORS.trustGreen,
+  },
+  venueContextSeparator: {
+    fontSize: fontSize.xs,
+    color: VENUE_COLORS.hint,
+  },
+  venueContextCheckin: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: VENUE_COLORS.body,
+  },
+  venueContextHint: {
+    fontSize: fontSize.xs,
+    color: VENUE_COLORS.hint,
+  },
   holdBanner: {
     flexDirection: 'row',
     alignItems: 'center',

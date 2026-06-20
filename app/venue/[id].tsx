@@ -1,9 +1,21 @@
 // app/venue/[id].tsx
-// 会場ホーム画面（3レーン: 成立候補・当日供給板・会場商品棚）
+// 会場ホーム画面（β1: 当日供給板を主画面として常時表示）
 //
-// PR2 (feat/venue-hold-inbox) 追加:
-//   - 最上部「届いた Hold (n)」CTA (件数 > 0 時のみ表示、当該 venue 限定)
-//   - 当日供給板レーンに「自分の会場投稿を管理 →」リンク → /venue/my-posts
+// β1 方針 (本 PR で確定):
+//   - 主画面 = 当日供給板。会場に入ったらまず「いま出ている募集」が見える。
+//   - 「成立候補」「会場商品棚」レーンは β1 では非表示。
+//     機能未実装 placeholder で UX 混乱を生まないため。
+//     Hidden from the primary venue surface until the P1 implementation is ready.
+//   - P1 follow-up (UI を別 PR で復活させる、優先度は P1):
+//     * 会場商品棚レーン (P1-top follow-up): 参加者の棚を会場文脈で閲覧 (要 RLS 設計)
+//     * 成立候補レーン (P1 follow-up): 同会場 / Trust / 差額量で自動提案 (要 RPC 設計)
+//
+// 上部 CTA / quickLinks 構成は維持:
+//   - 最上部「届いた Hold (n)」CTA (件数 > 0 時のみ、当該 venue 限定)
+//   - quickLinks: 「自分の会場投稿を管理」「送受信のHoldを見る」(常設)
+//
+// 投稿カード: 写真 / 譲 / 求 / 投稿者 + Trust + 残り時間 + 「Holdする」CTA
+// FAB「この会場で出す」: brand #4B3BD6 (β1 主 CTA、SubmitFab に backgroundColor で渡す)
 import {
   addSupplyPost,
   fetchReceivedHoldCount,
@@ -36,7 +48,24 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-type Lane = 'smart' | 'supply' | 'shelf'
+// β1 会場ホーム ローカル color palette。
+// 主 CTA は brand purple、コーラルは「◎一致」「残り僅か」「未読/緊急」に限定、
+// グリーンは Trust 良 / 完了 / 開催中 に限定 (主 CTA には使わない)。
+// 全体テーマ (constants/theme.ts) は別途 PR で統一予定。本 PR ではこの 1 画面のみ。
+const VENUE_COLORS = {
+  brand: '#4B3BD6',
+  brandTint: '#ECEAFB',
+  brandBorder: '#DBD6F7',
+  accent: '#FF3E6C',
+  accentTint: '#FFE6EC',
+  trustGreen: '#15A05A',
+  background: '#F7F8FA',
+  card: '#FFFFFF',
+  border: '#E7E9EF',
+  headline: '#15161E',
+  body: '#5A5D6B',
+  hint: '#9CA0AD',
+} as const
 
 function getDisplayName(poster: VenueSupplyPost['poster']): string {
   if (poster == null) return 'ユーザー'
@@ -48,7 +77,7 @@ export default function VenueHomeScreen() {
   const { session } = useAuthContext()
   const userId = session?.user?.id ?? null
 
-  const [lane, setLane] = useState<Lane>('smart')
+  // β1: レーンタブ廃止、当日供給板を常時表示するため lane state は不要。
   const [supplyPosts, setSupplyPosts] = useState<VenueSupplyPost[]>([])
   const [receivedHoldCount, setReceivedHoldCount] = useState(0)
   const [loadingSupply, setLoadingSupply] = useState(false)
@@ -274,16 +303,9 @@ export default function VenueHomeScreen() {
     }
   }
 
-  const LANE_TABS: { key: Lane; label: string }[] = [
-    { key: 'smart', label: '成立候補' },
-    { key: 'supply', label: '当日供給板' },
-    { key: 'shelf', label: '会場商品棚' },
-  ]
-
-  // 右下 FAB「＋ この会場で出す」押下時: 供給板レーンに切り替えて出品 form を開く。
-  // どのレーンからでも 1 タップで会場出品動線に入れるようにする。
+  // 右下 FAB「この会場で出す」押下時: 出品 form を開く。
+  // β1 では当日供給板を常時表示するため、レーン切替は不要。
   const handleOpenVenuePostForm = () => {
-    setLane('supply')
     setShowPostForm(true)
   }
 
@@ -308,23 +330,10 @@ export default function VenueHomeScreen() {
         </Pressable>
       )}
 
-      {/* レーンタブ */}
-      <View style={styles.laneTabs}>
-        {LANE_TABS.map((t) => (
-          <Pressable
-            key={t.key}
-            style={[styles.laneTab, lane === t.key && styles.laneTabActive]}
-            onPress={() => setLane(t.key)}
-          >
-            <Text style={[styles.laneTabText, lane === t.key && styles.laneTabTextActive]}>
-              {t.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      {/* β1: レーンタブ廃止。当日供給板を常時主表示。 */}
 
       {/* 常設クイックリンク: 受信 Hold 0 件でも Hold 一覧 / 自分の投稿に到達可能。
-          全レーンで表示。届いた Hold が 1 件以上ある場合は上部 holdBanner が優先強調。 */}
+          届いた Hold が 1 件以上ある場合は上部 holdBanner が優先強調。 */}
       <View style={styles.quickLinksRow}>
         <Pressable
           style={styles.quickLink}
@@ -364,47 +373,37 @@ export default function VenueHomeScreen() {
       >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 
-          {/* ── レーン1: 成立候補 ── */}
-          {/* TODO(Phase 2): Smart レーン本実装 — 同会場 / Trust / 差額量による
-              候補スコアリング。現状はプレースホルダー表示のみで Supply レーンへ
-              誘導している。詳細は docs/phase2-backlog.md を参照。 */}
-          {lane === 'smart' && (
-            <View style={styles.emptyBox}>
-              <Ionicons name="construct-outline" size={36} color={colors.border} />
-              <Text style={styles.emptyTitle}>準備中</Text>
-              <Text style={styles.emptyBody}>
-                成立候補の自動提案は今後追加予定です。{'\n'}
-                今は当日供給板で交換相手を探してください。
+          {/* P1 follow-up (本 PR では UI 非表示、優先度は P1 として残す):
+              Hidden from the primary venue surface until the P1 implementation is ready.
+                - 会場商品棚レーン (P1-top follow-up): 参加者の棚を会場文脈で閲覧 (要 RLS 設計)
+                - 成立候補レーン (P1 follow-up): 同会場 / Trust / 差額量で自動提案 (要 RPC 設計)
+              復活時はレーンタブ + 各 lane content を別 PR で追加する。 */}
+
+          {/* ── 当日供給板 (β1 主画面) ── */}
+          <View style={styles.supplyHeader}>
+            <View style={styles.supplyHeaderText}>
+              <Text style={styles.supplyTitle}>いま出ている募集</Text>
+              <Text style={styles.supplySub}>
+                {loadingSupply
+                  ? '読み込み中…'
+                  : supplyPosts.length > 0
+                  ? `${supplyPosts.length} 件 · 本日中有効`
+                  : '本日中有効'}
               </Text>
-              <Pressable
-                style={styles.smartLaneCta}
-                onPress={() => setLane('supply')}
-              >
-                <Text style={styles.smartLaneCtaText}>当日供給板を見る</Text>
-              </Pressable>
             </View>
-          )}
+            {/* β1: form open 時のみ「✕ 閉じる」を表示。form を開く動線は
+                右下 FAB「この会場で出す」に一本化 (二重 CTA 整理)。 */}
+            {showPostForm && (
+              <Pressable
+                style={[styles.postButton, styles.postButtonActive]}
+                onPress={() => setShowPostForm(false)}
+              >
+                <Text style={styles.postButtonText}>✕ 閉じる</Text>
+              </Pressable>
+            )}
+          </View>
 
-          {/* ── レーン2: 当日供給板 ── */}
-          {lane === 'supply' && (
-            <>
-              <View style={styles.supplyHeader}>
-                <View>
-                  <Text style={styles.supplyTitle}>当日供給板</Text>
-                  <Text style={styles.supplySub}>イベント当日23:59まで有効</Text>
-                </View>
-                <Pressable
-                  style={[styles.postButton, showPostForm && styles.postButtonActive]}
-                  onPress={() => setShowPostForm((f) => !f)}
-                >
-                  <Text style={styles.postButtonText}>
-                    {showPostForm ? '✕ 閉じる' : '＋ 会場で交換に出す'}
-                  </Text>
-                </Pressable>
-              </View>
-
-
-              {showPostForm && (
+          {showPostForm && (
                 <View style={styles.formCard}>
                   <Text style={styles.formTitle}>会場で交換に出す（イベント当日23:59まで有効）</Text>
 
@@ -492,148 +491,145 @@ export default function VenueHomeScreen() {
                 </View>
               )}
 
-              {loadingSupply ? (
-                <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
-              ) : supplyPosts.length === 0 ? (
-                <View style={styles.emptyBox}>
-                  <Text style={styles.emptyTitle}>まだ投稿がありません</Text>
-                  <Text style={styles.emptyBody}>会場で譲商品を投稿して、相手を探しましょう</Text>
-                </View>
-              ) : (
-                supplyPosts.map((post) => (
-                  <View key={post.id} style={styles.supplyCard}>
-                    <View style={styles.supplyCardTop}>
-                      <View style={styles.posterInfo}>
-                        <Text style={styles.posterHandle}>@{getDisplayName(post.poster)}</Text>
-                        {post.poster != null && (
-                          <TrustBadge
-                            level={computeTrustBadge({
-                              trade_count: post.poster.trade_count,
-                              ship_rate: post.poster.ship_rate,
-                              reply_median_hours: 24,
-                              trouble_count: post.poster.trouble_count,
-                              last_active_at: null,
-                            })}
-                          />
-                        )}
-                      </View>
-                      <Text style={styles.expiresText}>{formatVenueTimeLeft(post.expires_at)}</Text>
-                    </View>
-                    {/* 一覧性優先: 画像ありは横型 (左サムネ + 右テキスト + 右下に
-                        Hold 申請ボタン) でカード縦幅を圧縮。情報の塊として
-                        見えるよう、Hold ボタンも右詳細内に含めて画像と縦位置を揃える。
-                        画像なしは既存の縦並びを温存、Hold ボタンは下段 supplyCardActions。 */}
+          {loadingSupply ? (
+            <ActivityIndicator color={VENUE_COLORS.brand} style={{ marginTop: 24 }} />
+          ) : supplyPosts.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyTitle}>まだ募集がありません</Text>
+              <Text style={styles.emptyBody}>
+                右下の「この会場で出す」から最初の出品を投稿できます。
+              </Text>
+            </View>
+          ) : (
+            supplyPosts.map((post) => {
+              // β1 投稿カード:
+              //  - 画像 or brand-tint placeholder
+              //  - 譲 / グループ / 求
+              //  - 投稿者 + TrustBadge + 事実 Trust チップ (取引数 / 発送率)
+              //  - 残り時間
+              //  - 主 CTA「Holdする」(brand 色)
+              const trustLevel =
+                post.poster != null
+                  ? computeTrustBadge({
+                      trade_count: post.poster.trade_count,
+                      ship_rate: post.poster.ship_rate,
+                      reply_median_hours: 24,
+                      trouble_count: post.poster.trouble_count,
+                      last_active_at: null,
+                    })
+                  : null
+              return (
+                <View key={post.id} style={styles.supplyCard}>
+                  <View style={styles.supplyCardRow}>
                     {post.image_url != null ? (
-                      <View style={styles.supplyCardBodyRow}>
-                        <Image
-                          source={{ uri: post.image_url }}
-                          style={styles.supplyCardThumb}
-                          resizeMode="cover"
-                        />
-                        {/* 右詳細: 上から「譲：name → group → 求：want → Hold申請」
-                            の 4 行構成。会場では一瞬で譲・求を読み取れることを優先、
-                            Hold 申請は右カラム幅いっぱいの主要 CTA として下に配置。 */}
-                        <View style={styles.supplyCardBodyText}>
-                          <View style={styles.supplyCardTextStack}>
-                            <Text
-                              style={styles.supplyCardNameInline}
-                              numberOfLines={2}
-                            >
-                              譲：{post.card_name}
-                            </Text>
-                            {post.group_name != null && (
-                              <Text style={styles.supplyCardGroup} numberOfLines={1}>
-                                {post.group_name}
-                              </Text>
-                            )}
-                            {post.want_card != null && (
-                              <Text
-                                style={[styles.supplyWant, styles.supplyWantInline]}
-                                numberOfLines={2}
-                              >
-                                求：{post.want_card}
-                              </Text>
-                            )}
-                          </View>
-                          <Pressable
-                            style={[styles.holdButton, styles.holdButtonInline]}
-                            onPress={() => handleHoldRequest(post)}
-                          >
-                            <Text
-                              style={[
-                                styles.holdButtonText,
-                                styles.holdButtonInlineText,
-                              ]}
-                            >
-                              Hold申請
-                            </Text>
-                          </Pressable>
-                        </View>
-                      </View>
+                      <Image
+                        source={{ uri: post.image_url }}
+                        style={styles.supplyCardThumb}
+                        resizeMode="cover"
+                      />
                     ) : (
-                      <>
-                        <Text style={styles.supplyCardName}>{post.card_name}</Text>
-                        {post.group_name != null && (
-                          <Text style={styles.supplyCardGroup}>{post.group_name}</Text>
-                        )}
-                        {post.want_card != null && (
-                          <Text style={styles.supplyWant}>求: {post.want_card}</Text>
-                        )}
-                      </>
-                    )}
-                    {/* PR feat/venue-supply-board-exclude-own-posts:
-                        当日掲示板は他人の post のみ表示するため、Hold 申請のみ常設。
-                        自分の post 管理は /venue/my-posts に集約。
-                        画像ありの場合は上の右詳細内ボタンを表示するため、ここは画像なし時のみ。 */}
-                    {post.image_url == null && (
-                      <View style={styles.supplyCardActions}>
-                        <Pressable
-                          style={styles.holdButton}
-                          onPress={() => handleHoldRequest(post)}
-                        >
-                          <Text style={styles.holdButtonText}>Hold申請 →</Text>
-                        </Pressable>
+                      <View
+                        style={[
+                          styles.supplyCardThumb,
+                          styles.supplyCardThumbPlaceholder,
+                        ]}
+                      >
+                        <Ionicons
+                          name="image-outline"
+                          size={28}
+                          color={VENUE_COLORS.brand}
+                        />
                       </View>
                     )}
-                  </View>
-                ))
-              )}
-            </>
-          )}
 
-          {/* ── レーン3: 会場商品棚 ── */}
-          {lane === 'shelf' && (
-            <>
-              <View style={styles.infoBox}>
-                <Text style={styles.infoText}>
-                  参加者の商品棚を閲覧できます。気になるカードがあればHold申請しましょう。
-                </Text>
-              </View>
-              <View style={styles.emptyBox}>
-                <Ionicons name="albums-outline" size={36} color={colors.border} />
-                <Text style={styles.emptyTitle}>会場商品棚</Text>
-                <Text style={styles.emptyBody}>
-                  参加者が増えると商品棚が表示されます。
-                </Text>
-              </View>
-            </>
+                    <View style={styles.supplyCardDetails}>
+                      <Text style={styles.supplyCardFieldLabel}>譲</Text>
+                      <Text style={styles.supplyCardName} numberOfLines={2}>
+                        {post.card_name}
+                      </Text>
+                      {post.group_name != null && (
+                        <Text style={styles.supplyCardGroup} numberOfLines={1}>
+                          {post.group_name}
+                        </Text>
+                      )}
+                      {post.want_card != null && (
+                        <>
+                          <Text
+                            style={[
+                              styles.supplyCardFieldLabel,
+                              styles.supplyCardFieldLabelSpacer,
+                            ]}
+                          >
+                            求
+                          </Text>
+                          <Text style={styles.supplyCardWant} numberOfLines={2}>
+                            {post.want_card}
+                          </Text>
+                        </>
+                      )}
+                    </View>
+                  </View>
+
+                  {/* meta: 投稿者 + Trust チップ + 残り時間 */}
+                  <View style={styles.supplyCardMetaRow}>
+                    <View style={styles.supplyCardPosterCol}>
+                      <View style={styles.supplyCardPosterLine}>
+                        <Text style={styles.supplyCardPoster}>
+                          @{getDisplayName(post.poster)}
+                        </Text>
+                        {trustLevel != null && <TrustBadge level={trustLevel} />}
+                      </View>
+                      {post.poster != null && (
+                        <View style={styles.supplyCardTrustChips}>
+                          <View style={styles.supplyCardChip}>
+                            <Text style={styles.supplyCardChipText}>
+                              取引 {post.poster.trade_count}
+                            </Text>
+                          </View>
+                          <View style={styles.supplyCardChip}>
+                            <Text style={styles.supplyCardChipText}>
+                              発送 {post.poster.ship_rate}%
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.supplyCardTimeLeft}>
+                      {formatVenueTimeLeft(post.expires_at)}
+                    </Text>
+                  </View>
+
+                  {/* β1 主 CTA: brand 色「Holdする」 */}
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.holdCta,
+                      pressed && styles.holdCtaPressed,
+                    ]}
+                    onPress={() => handleHoldRequest(post)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Holdする"
+                  >
+                    <Text style={styles.holdCtaText}>Holdする</Text>
+                  </Pressable>
+                </View>
+              )
+            })
           )}
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* 右下 FAB「＋ この会場で出す」: 会場詳細は (tabs) の外で通常 FAB が
-          表示されないため、本画面専用に配置。供給板レーンの「＋ 会場で交換に出す」
-          ボタンと役割が一部重複するが、レーン切替を含めて 1 タップで form を開ける
-          補助動線として機能。
+      {/* 右下 FAB「この会場で出す」(β1 主 CTA、brand 色 #4B3BD6):
+          会場詳細は (tabs) の外で通常 FAB が表示されないため本画面専用に配置。
+          β1: 出品 form を開く動線はこの FAB のみに一本化 (inline 「＋」ボタンは廃止)。
           表示条件:
             - Hold 申請モーダル open 中は非表示 (overlay 競合防止)
-            - 会場出品フォーム open 中は非表示 (form が画面に出ているので
-              FAB 重複が無意味、閉じたら再表示) */}
+            - 会場出品フォーム open 中は非表示 (form に「✕ 閉じる」が出る) */}
       {holdTarget == null && !showPostForm && (
         <SubmitFab
           label="この会場で出す"
           onPress={handleOpenVenuePostForm}
           hasTabBar={false}
+          backgroundColor={VENUE_COLORS.brand}
           accessibilityLabel="この会場の当日供給板に出品"
         />
       )}
@@ -855,73 +851,48 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: fontWeight.bold,
   },
-  laneTabs: {
-    flexDirection: 'row',
-    backgroundColor: colors.backgroundCard,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingHorizontal: spacing.base,
-  },
-  laneTab: {
-    flex: 1,
-    paddingVertical: spacing.sm + 2,
-    alignItems: 'center',
-    borderBottomWidth: 2.5,
-    borderBottomColor: 'transparent',
-  },
-  laneTabActive: { borderBottomColor: colors.primary },
-  laneTabText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.textTertiary,
-  },
-  laneTabTextActive: {
-    color: colors.primary,
-    fontWeight: fontWeight.bold,
-  },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },
-  infoBox: {
-    backgroundColor: '#EEF2FF',
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-  },
-  infoText: { fontSize: fontSize.xs, color: '#3730A3', lineHeight: 18 },
   emptyBox: { alignItems: 'center', paddingVertical: 40, gap: spacing.sm },
-  emptyTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  emptyBody: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
-  smartLaneCta: {
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.backgroundCard,
-    borderWidth: 1,
-    borderColor: colors.primary,
+  emptyTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: VENUE_COLORS.headline,
   },
-  smartLaneCtaText: {
+  emptyBody: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.primary,
+    color: VENUE_COLORS.body,
+    textAlign: 'center',
+    lineHeight: 20,
   },
+  // β1 当日供給板の見出し: 「いま出ている募集」+ {n} 件 · 本日中有効
   supplyHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
-  supplyTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  supplySub: { fontSize: fontSize.xs, color: colors.textTertiary, marginTop: 2 },
+  supplyHeaderText: { gap: 2 },
+  supplyTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.extrabold,
+    color: VENUE_COLORS.headline,
+  },
+  supplySub: { fontSize: fontSize.xs, color: VENUE_COLORS.hint },
+  // β1: form open 時のみ表示する「✕ 閉じる」用。form を開く動線は FAB に一本化したため neutral 配色。
   postButton: {
-    backgroundColor: '#FEF3C7',
+    backgroundColor: VENUE_COLORS.background,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs + 2,
     borderWidth: 1,
-    borderColor: '#FDE68A',
+    borderColor: VENUE_COLORS.border,
   },
-  postButtonActive: { backgroundColor: colors.backgroundMuted, borderColor: colors.border },
-  postButtonText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: '#92400E' },
+  // 旧 form-open style は廃止 (showPostForm 時しか表示しないため active 状態は不要)
+  postButtonActive: {},
+  postButtonText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: VENUE_COLORS.body,
+  },
   formCard: {
     backgroundColor: colors.backgroundCard,
     borderRadius: radius.xl,
@@ -991,93 +962,121 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     color: colors.textSecondary,
   },
+  // β1 投稿カード: 写真 + 譲/求 + 投稿者 + Trust + 残り時間 + Holdする CTA
   supplyCard: {
-    backgroundColor: colors.backgroundCard,
+    backgroundColor: VENUE_COLORS.card,
     borderRadius: radius.xl,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.xs,
+    borderColor: VENUE_COLORS.border,
+    gap: spacing.sm,
   },
-  supplyCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  posterInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  posterHandle: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textPrimary },
-  expiresText: { fontSize: fontSize.xs, color: colors.textTertiary },
-  // 旧 supplyCardImage は image-only branch を分岐化したため未使用、後方互換のため残置。
-  supplyCardImage: {
-    width: '100%',
-    aspectRatio: 3 / 4,
-    borderRadius: radius.md,
-    backgroundColor: colors.backgroundMuted,
-    marginVertical: spacing.xs,
-  },
-  // 画像あり投稿の横型レイアウト (左サムネ + 右詳細 + 右下に Hold ボタン)。
-  // alignItems='stretch' で右 column を画像高さに合わせて伸ばし、
-  // supplyCardBodyText の justifyContent='space-between' で stack を上端、
-  // Hold ボタンを下端に anchor。残り空間を 1 箇所 (stack と button の間) に
-  // 集約することで「Hold の下にも余白」状態を防ぎ、左右が 1 つの塊に見える。
-  supplyCardBodyRow: {
+  // 画像 (or placeholder) + 右詳細 の横型 row。
+  supplyCardRow: {
     flexDirection: 'row',
     gap: spacing.sm,
-    alignItems: 'stretch',
-    marginVertical: spacing.xs,
+    alignItems: 'flex-start',
   },
   supplyCardThumb: {
     width: 88,
     aspectRatio: 3 / 4,
     borderRadius: radius.md,
-    backgroundColor: colors.backgroundMuted,
+    backgroundColor: VENUE_COLORS.background,
   },
-  // 右詳細 column。flex:1 で残り全幅を確保。justifyContent='space-between' で
-  // stack を上端 / button を下端に分配。残り空間は 1 箇所のみに出る (求とボタンの間)。
-  supplyCardBodyText: {
-    flex: 1,
-    justifyContent: 'space-between',
-  },
-  // テキスト stack は自然な縦サイズで上端に配置。行間 gap は 6 で息継ぎを確保。
-  supplyCardTextStack: {
-    gap: 6,
-  },
-  // 画像あり時の商品名はフォント拡大して情報の核として強調。
-  // 求 (supplyWantInline) と同じ size / weight で対の関係を保つ。
-  supplyCardNameInline: {
-    fontSize: fontSize.lg,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-    lineHeight: 22,
-  },
-  // 画像あり時の求 (supplyWantInline) は譲 (supplyCardNameInline) と同じ
-  // 視覚レベル (lg + bold + lineHeight 22) に揃え、primary 色で交換情報の
-  // 対として読みやすくする。image-less 経路は供給 supplyWant を従来通り使用。
-  supplyWantInline: {
-    fontSize: fontSize.lg,
-    fontWeight: fontWeight.bold,
-    lineHeight: 22,
-  },
-  // 画像あり時の Hold ボタンを右詳細 column 内の 4 行目として stretch 配置。
-  // 押しやすさは維持しつつ縦 padding を spacing.sm (8) に揃え総高さを整える。
-  // marginTop は不要 (column の justifyContent='space-between' が下端 anchor を担当)。
-  holdButtonInline: {
-    alignSelf: 'stretch',
+  // 画像なし時の placeholder (brand tint + icon)。サムネと同サイズで
+  // カード全体のレイアウトを崩さない。
+  supplyCardThumbPlaceholder: {
+    backgroundColor: VENUE_COLORS.brandTint,
+    borderWidth: 1,
+    borderColor: VENUE_COLORS.brandBorder,
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    justifyContent: 'center',
   },
-  holdButtonInlineText: {
+  supplyCardDetails: { flex: 1, gap: 2 },
+  // 「譲」「求」ラベル: 小さく hint 色で前置きしてから商品名を強調。
+  supplyCardFieldLabel: {
+    fontSize: 10,
+    fontWeight: fontWeight.bold,
+    color: VENUE_COLORS.hint,
+    letterSpacing: 0.5,
+  },
+  supplyCardFieldLabelSpacer: { marginTop: spacing.xs },
+  supplyCardName: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.bold,
+    color: VENUE_COLORS.headline,
+    lineHeight: 22,
+  },
+  supplyCardGroup: {
+    fontSize: fontSize.sm,
+    color: VENUE_COLORS.hint,
+  },
+  supplyCardWant: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+    color: VENUE_COLORS.brand,
+    lineHeight: 20,
+  },
+  // meta 行: 投稿者 + Trust チップ / 残り時間
+  supplyCardMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: VENUE_COLORS.border,
+  },
+  supplyCardPosterCol: { flex: 1, gap: 4 },
+  supplyCardPosterLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+  },
+  supplyCardPoster: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: VENUE_COLORS.body,
+  },
+  // Trust 事実チップ (取引数 / 発送率)。星・レビューは禁止 (Swaply 原則)。
+  supplyCardTrustChips: {
+    flexDirection: 'row',
+    gap: 4,
+    flexWrap: 'wrap',
+  },
+  supplyCardChip: {
+    backgroundColor: VENUE_COLORS.background,
+    borderRadius: radius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: VENUE_COLORS.border,
+  },
+  supplyCardChipText: {
+    fontSize: 11,
+    fontWeight: fontWeight.semibold,
+    color: VENUE_COLORS.body,
+  },
+  supplyCardTimeLeft: {
+    fontSize: fontSize.xs,
+    color: VENUE_COLORS.hint,
+  },
+  // β1 投稿カード主 CTA「Holdする」(brand 色 #4B3BD6)
+  holdCta: {
+    marginTop: spacing.xs,
+    height: 44,
+    borderRadius: radius.lg,
+    backgroundColor: VENUE_COLORS.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  holdCtaPressed: { opacity: 0.9 },
+  holdCtaText: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
   },
-  supplyCardName: { fontSize: fontSize.base, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  // 画像あり時のグループ名 / 求は font 拡大して右詳細の余白を埋め、可読性を上げる。
-  supplyCardGroup: { fontSize: fontSize.sm, color: colors.textTertiary },
-  supplyWant: { fontSize: fontSize.base, color: colors.primary, fontWeight: fontWeight.semibold },
-  supplyCardActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: spacing.xs },
-  holdButton: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-  },
-  holdButtonText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: '#FFFFFF' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',

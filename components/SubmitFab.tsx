@@ -50,6 +50,11 @@ type SubmitFabProps = {
   hasTabBar?: boolean
   /** スクリーンリーダー用ラベル。default: '出品を作成' */
   accessibilityLabel?: string
+  /**
+   * 背景色の上書き。default: colors.primary (navy)。
+   * 文脈別に brand 色を渡す用途 (例: 会場モードで brand 色 #4B3BD6 を渡す)。
+   */
+  backgroundColor?: string
 }
 
 export function SubmitFab(props: SubmitFabProps = {}) {
@@ -58,6 +63,7 @@ export function SubmitFab(props: SubmitFabProps = {}) {
     onPress,
     hasTabBar = true,
     accessibilityLabel = '出品を作成',
+    backgroundColor,
   } = props
   const insets = useSafeAreaInsets()
   const pathname = usePathname()
@@ -87,6 +93,7 @@ export function SubmitFab(props: SubmitFabProps = {}) {
       style={({ pressed }) => [
         styles.fab,
         { bottom: bottomDistance },
+        backgroundColor != null && { backgroundColor },
         pressed && styles.fabPressed,
       ]}
     >

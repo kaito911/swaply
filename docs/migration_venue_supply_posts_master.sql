@@ -1,0 +1,172 @@
+-- ====================================================================
+-- migration_venue_supply_posts_master.sql
+-- 作成日: 2026-06-21
+-- 目的  : venue_supply_posts に master 構造化列を追加し、通常出品 (cards) と
+--         同じハイブリッドマスタ・パターンで会場出品を扱えるようにする。
+--
+-- ハイブリッドマスタ方針 (cards.characters[] と同思想):
+--   - work_id / characters / item_types / want_characters / want_item_types は
+--     **master_works.id / master_characters.id / master_item_types.id の slug を
+--     論理参照** するが、FK は付けない。
+--     先行例: cards.work_id / cards.characters[] (docs/migration_extend_cards_arrays.sql)
+--     先行例: venues.work_id (docs/migration_venue_add_work_id.sql)
+--   - master に登録されていないキャラ / 種別は **freeText 文字列** をそのまま
+--     配列要素として混在させる (出品 form の freeText fallback がそのまま動く)。
+--   - matcher v2 (lib/matcher.ts) は master ID / freeText の両方を fuzzy match で
+--     吸収する設計なので、本列もそのままマッチング対象に乗る。
+--
+-- 既存テキスト列 (card_name / group_name / want_card) を維持する理由:
+--   - 後方互換: PR-3.6b 適用前に作られた既存 supply_post と、運営 K の手動 backfill
+--     が必要にならない設計。供給板カード / Hold / Trade 表示 (app/venue/[id].tsx /
+--     my-posts.tsx / trade/[id].tsx) は引き続き card_name / want_card を主に参照する。
+--   - freeText fallback の上位入力欄として残す: 構造化 (characters[] / item_types[]) の
+--     入力が無い / 失敗したケースでも従来通り出品可。
+--   - cards 側で legacy K-POP 列 (member_name / group_name / series) を DEPRECATED
+--     コメントで温存しているのと同じ思想 (docs/migration_extend_cards_arrays.sql:76-86)。
+--   - 物理 drop は Phase 1.5 で正式統一を判断する想定 (本 PR では触らない)。
+--
+-- ⚠️ 適用順序の重要事項:
+--   - 本 migration が本番 DB に適用される **前に** コード側 (lib/supabase.ts の
+--     addSupplyPost が新規列に INSERT する) が main に merge されると、
+--     PostgREST が 'column work_id of relation venue_supply_posts does not exist'
+--     等のエラーを返し、会場出品が全く投稿できない状態になる。
+--   - 厳守すべき順序:
+--       (1) 運営 K が本ファイルを Supabase SQL Editor で実行 (本番 DB に列追加)
+--       (2) 下記 C1〜C3 で適用確認
+--       (3) その後にコード commit を main に merge → push
+--   - 開発環境 (Supabase ダッシュボードの dev project 等) でも同様の順序を維持。
+--
+-- 関連:
+--   - 先行 PR-3.6a: docs/migration_venue_add_work_id.sql (venues.work_id 追加)
+--   - 同パターン:    docs/migration_extend_cards_arrays.sql (cards.characters[] / item_types[])
+--   - 連携 fetcher:  lib/supabase.ts fetchSupplyPosts (.select('*') のため
+--                    DB 側で列追加すれば自動で取得対象に乗る、コード変更なし)
+--   - 連携 insert:   lib/supabase.ts addSupplyPost (本 PR で workId / characters /
+--                    itemTypes / wantCharacters / wantItemTypes optional 追加)
+--   - 連携 型:       lib/types.ts VenueSupplyPost (本 PR で optional 5 フィールド追加)
+--   - 連携 UI:       app/venue/[id].tsx 出品 form (本 PR で MultiSelectAutocomplete 4 本に置換)
+--   - 後続:          PR-4 で供給カードへの characters[] 表示・マッチリボン・検索
+-- ====================================================================
+--
+-- 適用前提:
+--   - venue_supply_posts テーブルが存在 (docs/migration_venue.sql:45-56)
+--   - venue_supply_posts に追加対象の 5 列が無いこと (本 migration は冪等、二重実行で no-op)
+--
+-- ====================================================================
+
+begin;
+
+-- ─────────────────────────────────────────
+-- 1. 列追加 (ハイブリッドマスタ方針: FK なし、論理参照のみ)
+-- ─────────────────────────────────────────
+-- work_id: 会場の work_id (venues.work_id) を出品時に継承する想定。
+--   venue.work_id が NULL の会場 (マイナーアーティスト等) では NULL のまま出品される。
+-- characters / item_types: 譲グッズ側の構造化 (master slug + freeText 混在)。
+-- want_characters / want_item_types: 求グッズ側 (作品横断、複数候補 OK)。
+alter table public.venue_supply_posts
+  add column if not exists work_id          text,
+  add column if not exists characters       text[] not null default '{}',
+  add column if not exists item_types       text[] not null default '{}',
+  add column if not exists want_characters  text[] not null default '{}',
+  add column if not exists want_item_types  text[] not null default '{}';
+
+-- ─────────────────────────────────────────
+-- 2. GIN index (配列の @>, <@, && 検索用)
+-- ─────────────────────────────────────────
+-- 注: pg_trgm gin_trgm_ops は text 用、配列には標準 gin を使う。
+-- 配列要素の fuzzy match (例: '炭治郎' を含む supply 検索) は PR-4 で unnest 経由実装予定。
+-- item_types 系の GIN は β1 の supply 件数規模では不要と判断、追加しない。
+create index if not exists venue_supply_posts_characters_gin
+  on public.venue_supply_posts using gin (characters);
+create index if not exists venue_supply_posts_want_characters_gin
+  on public.venue_supply_posts using gin (want_characters);
+
+commit;
+
+-- ====================================================================
+-- 適用後確認 (Block C 相当、本ファイル単独でも実行可)
+--   コード commit 前に必ず C1〜C3 を実行し、想定通りに列 / index が追加されたことを
+--   確認してからコード側を main に merge する。
+-- ====================================================================
+--
+-- ◆ C1: 列追加 / 型 / nullable / default の確認
+--   select column_name, data_type, is_nullable, column_default
+--   from information_schema.columns
+--   where table_schema = 'public' and table_name = 'venue_supply_posts'
+--     and column_name in (
+--       'work_id', 'characters', 'item_types', 'want_characters', 'want_item_types'
+--     )
+--   order by column_name;
+--   → 期待 (5 行):
+--     characters       | ARRAY | NO  | '{}'::text[]
+--     item_types       | ARRAY | NO  | '{}'::text[]
+--     want_characters  | ARRAY | NO  | '{}'::text[]
+--     want_item_types  | ARRAY | NO  | '{}'::text[]
+--     work_id          | text  | YES | NULL
+--
+-- ◆ C2: GIN index 確認
+--   select indexname, indexdef
+--   from pg_indexes
+--   where schemaname='public' and tablename='venue_supply_posts'
+--     and indexname in (
+--       'venue_supply_posts_characters_gin',
+--       'venue_supply_posts_want_characters_gin'
+--     )
+--   order by indexname;
+--   → 期待 (2 行、定義文):
+--     CREATE INDEX venue_supply_posts_characters_gin
+--       ON public.venue_supply_posts USING gin (characters)
+--     CREATE INDEX venue_supply_posts_want_characters_gin
+--       ON public.venue_supply_posts USING gin (want_characters)
+--
+-- ◆ C3: 既存行が新列の default で埋まっていること
+--   select count(*) as total,
+--          count(*) filter (where work_id is null) as work_id_null,
+--          count(*) filter (where characters = '{}'::text[]) as empty_chars,
+--          count(*) filter (where item_types = '{}'::text[]) as empty_items,
+--          count(*) filter (where want_characters = '{}'::text[]) as empty_want_chars,
+--          count(*) filter (where want_item_types = '{}'::text[]) as empty_want_items
+--   from public.venue_supply_posts;
+--   → 期待: total = work_id_null = empty_chars = empty_items = empty_want_chars = empty_want_items
+--           (既存全行は全て NULL / 空配列で初期化される)
+--
+-- ◆ C4: FK 制約が付いていないこと (ハイブリッドマスタ方針の確認)
+--   select conname, pg_get_constraintdef(oid)
+--   from pg_constraint
+--   where conrelid = 'public.venue_supply_posts'::regclass
+--     and contype = 'f';
+--   → 期待: 既存 FK (venue_id, user_id) のみ。
+--           work_id / characters / item_types 関連の FK は無いこと。
+--
+-- ====================================================================
+-- 運営向け: 適用 → 確認 → コード merge の手順
+-- ====================================================================
+--
+-- (1) Supabase SQL Editor で本ファイルを開いて実行 (begin; ... commit; 全体)。
+-- (2) 上記 C1 / C2 / C3 / C4 の確認 SQL を順に実行し、期待どおりであることを確認。
+-- (3) Claude Code 側にコード変更 (本 PR-3.6b の lib/types.ts / lib/supabase.ts /
+--     app/venue/[id].tsx) を commit / push してもらい main に merge。
+-- (4) 実機で会場出品フォームを開き、MultiSelectAutocomplete でキャラ / 種別を
+--     選択 → 投稿 → DB に値が入ることを再確認:
+--       select id, characters, item_types, want_characters, want_item_types, work_id
+--       from public.venue_supply_posts
+--       order by created_at desc
+--       limit 3;
+--
+-- ====================================================================
+-- ロールバック (緊急時、新列の値は消失する)
+-- ====================================================================
+-- ※ コード側で新列を参照し始めた後の rollback は会場出品が完全に止まる。
+--   コード commit 前 / 実機検証前のみ即時可。
+--   コード merge 後にロールバックが必要な場合は、本 PR のコード変更を先に revert する。
+--
+-- begin;
+-- drop index if exists public.venue_supply_posts_characters_gin;
+-- drop index if exists public.venue_supply_posts_want_characters_gin;
+-- alter table public.venue_supply_posts
+--   drop column if exists work_id,
+--   drop column if exists characters,
+--   drop column if exists item_types,
+--   drop column if exists want_characters,
+--   drop column if exists want_item_types;
+-- commit;

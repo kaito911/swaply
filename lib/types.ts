@@ -405,6 +405,17 @@ export interface VenueSupplyPost {
   // Supabase Storage 'card-images' バケットに保存した publicUrl 文字列を格納。
   // path 規約: `${userId}/venue-supply/${ts}.${ext}`
   image_url: string | null
+  // PR-3.6b で追加: 通常出品 cards と同じハイブリッドマスタ構造化。
+  // master_works.id / master_characters.id / master_item_types.id を論理参照する
+  // slug 文字列、または master 未登録の freeText 文字列が混在する (FK なし)。
+  // migration 未適用環境では fetchSupplyPosts (.select('*')) の戻り値に
+  // これらの key が含まれない可能性があるため optional。
+  // 詳細: docs/migration_venue_supply_posts_master.sql
+  work_id?: string | null
+  characters?: string[]
+  item_types?: string[]
+  want_characters?: string[]
+  want_item_types?: string[]
   poster?: {
     handle: string | null
     display_name: string | null

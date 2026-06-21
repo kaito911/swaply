@@ -2290,6 +2290,14 @@ export async function addSupplyPost(params: {
   // PR3: 会場投稿の画像 publicUrl (任意)。事前に uploadCardImage で上げて
   // 戻り値の publicUrl を渡す想定。
   imageUrl?: string | null
+  // PR-3.6b: 通常出品 cards と同じハイブリッドマスタ構造化 (master slug + freeText 混在)。
+  // 全て optional、未指定なら DB default (work_id=NULL, *[]='{}') が入る。
+  // 詳細: docs/migration_venue_supply_posts_master.sql
+  workId?: string | null
+  characters?: string[]
+  itemTypes?: string[]
+  wantCharacters?: string[]
+  wantItemTypes?: string[]
 }): Promise<VenueSupplyPost> {
   // PR feat/venue-event-day-expiry: 30 分固定失効を廃止し、イベント当日 23:59 (JST)
   // までの有効期限に変更。event_date のみ参照し、ends_at は使わない (過去 venue の
@@ -2302,17 +2310,28 @@ export async function addSupplyPost(params: {
   if (venueError) throw venueError
   const expiresAt = computeVenueExpiry(venue)
 
+  // PR-3.6b: 新規列は値が渡されたときだけ insert payload に含める。
+  // 未指定 (undefined) なら payload に key 自体を入れず、DB の default に委ねる。
+  // (migration 未適用環境で payload に未知の列を送ると PostgREST が
+  //  'column ... does not exist' エラーを返すため、明示的に指定された場合のみ送る)
+  const payload: Record<string, unknown> = {
+    venue_id: params.venueId,
+    user_id: params.userId,
+    card_name: params.cardName,
+    group_name: params.groupName,
+    want_card: params.wantCard,
+    image_url: params.imageUrl ?? null,
+    expires_at: expiresAt,
+  }
+  if (params.workId !== undefined) payload.work_id = params.workId
+  if (params.characters !== undefined) payload.characters = params.characters
+  if (params.itemTypes !== undefined) payload.item_types = params.itemTypes
+  if (params.wantCharacters !== undefined) payload.want_characters = params.wantCharacters
+  if (params.wantItemTypes !== undefined) payload.want_item_types = params.wantItemTypes
+
   const { data, error } = await supabase
     .from('venue_supply_posts')
-    .insert({
-      venue_id: params.venueId,
-      user_id: params.userId,
-      card_name: params.cardName,
-      group_name: params.groupName,
-      want_card: params.wantCard,
-      image_url: params.imageUrl ?? null,
-      expires_at: expiresAt,
-    })
+    .insert(payload)
     .select()
     .single()
 

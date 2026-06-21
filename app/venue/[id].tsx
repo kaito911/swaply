@@ -25,9 +25,17 @@ import {
   uploadCardImage,
 } from '@/lib/supabase'
 import { computeTrustBadge, Venue, VenueSupplyPost } from '@/lib/types'
+import type { MasterCharacter, MasterItemType } from '@/lib/types'
+import {
+  getCharacterSuggestions,
+  getCharacterSuggestionsAcrossWorks,
+  getItemTypeSuggestions,
+  recordListingKeyword,
+} from '@/lib/master'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { MultiSelectAutocomplete } from '@/components/MultiSelectAutocomplete'
 import { SubmitFab } from '@/components/SubmitFab'
 import { TrustBadge } from '@/components/TrustBadge'
 import { Ionicons } from '@expo/vector-icons'
@@ -76,6 +84,68 @@ function getDisplayName(poster: VenueSupplyPost['poster']): string {
   return poster.handle ?? poster.display_name ?? 'ユーザー'
 }
 
+// PR-3.6b: 出品 form の MultiSelectAutocomplete 配下に freeText 追加分を別行で表示する
+// 小さな chip リスト。通常出品 (app/listing/new/characters.tsx) の同等セクションを
+// インライン化したもの (会場 form は inline 完結 = 別画面遷移なしの即時性優先のため)。
+function FreeTextChipsRow({
+  items,
+  onRemove,
+}: {
+  items: string[]
+  onRemove: (text: string) => void
+}) {
+  return (
+    <View style={freeTextChipsStyles.row}>
+      {items.map((t) => (
+        <View key={t} style={freeTextChipsStyles.chip}>
+          <Text style={freeTextChipsStyles.label}>{t}</Text>
+          <Pressable
+            onPress={() => onRemove(t)}
+            hitSlop={8}
+            style={freeTextChipsStyles.clear}
+          >
+            <Ionicons name="close" size={12} color={colors.primary} />
+          </Pressable>
+        </View>
+      ))}
+    </View>
+  )
+}
+
+const freeTextChipsStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: colors.primary,
+    borderRadius: radius.full,
+    paddingLeft: spacing.sm,
+    paddingRight: 4,
+    paddingVertical: 3,
+    backgroundColor: colors.background,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+  },
+  clear: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+})
+
 // PR-2: 会場文脈ヘッダー用の和式日付フォーマット。event_date は date 型 ('YYYY-MM-DD')。
 // JST 00:00 として解釈し、曜日 (日〜土) を付ける。例: '2026年6月20日(土)'。
 const JA_WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const
@@ -107,10 +177,21 @@ export default function VenueHomeScreen() {
   // 供給板投稿フォーム
   const [showPostForm, setShowPostForm] = useState(false)
   const [postCard, setPostCard] = useState('')
-  const [postGroup, setPostGroup] = useState('')
-  const [postWant, setPostWant] = useState('')
   const [postImageUri, setPostImageUri] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
+  // PR-3.6b: 通常出品と同じ master 構造化入力 (master ID + freeText 混在の string[])。
+  //   譲側 (characters / item_types): venue.work_id がある場合は作品で絞り込み、
+  //     NULL なら作品横断 fallback。
+  //   求側 (want_characters / want_item_types): 常に作品横断。
+  //   freeText は別 state に分離して chip 表示するパターン (通常出品 characters.tsx と同形)。
+  const [postCharacters, setPostCharacters] = useState<MasterCharacter[]>([])
+  const [postCharacterFreeTexts, setPostCharacterFreeTexts] = useState<string[]>([])
+  const [postItemTypes, setPostItemTypes] = useState<MasterItemType[]>([])
+  const [postItemTypeFreeTexts, setPostItemTypeFreeTexts] = useState<string[]>([])
+  const [postWantCharacters, setPostWantCharacters] = useState<MasterCharacter[]>([])
+  const [postWantCharacterFreeTexts, setPostWantCharacterFreeTexts] = useState<string[]>([])
+  const [postWantItemTypes, setPostWantItemTypes] = useState<MasterItemType[]>([])
+  const [postWantItemTypeFreeTexts, setPostWantItemTypeFreeTexts] = useState<string[]>([])
 
   // Hold申請モーダル
   const [holdTarget, setHoldTarget] = useState<{
@@ -249,22 +330,56 @@ export default function VenueHomeScreen() {
         }
       }
 
+      // PR-3.6b: 通常出品 cards と同じく master ID + freeText を合成した string[] で送る。
+      // 会場の work_id を出品行にも継承する (NULL 会場は NULL のまま送出)。
+      const charactersPayload = [
+        ...postCharacters.map((c) => c.id),
+        ...postCharacterFreeTexts,
+      ]
+      const itemTypesPayload = [
+        ...postItemTypes.map((t) => t.id),
+        ...postItemTypeFreeTexts,
+      ]
+      const wantCharactersPayload = [
+        ...postWantCharacters.map((c) => c.id),
+        ...postWantCharacterFreeTexts,
+      ]
+      const wantItemTypesPayload = [
+        ...postWantItemTypes.map((t) => t.id),
+        ...postWantItemTypeFreeTexts,
+      ]
+
+      // PR-3.6b: group_name / want_card 純テキスト列は後方互換のため DB 上は残すが、
+      // フォームからの入力は廃止 (キャラ / 種別の master 構造化に置換)。
+      // 既存 supply_post 表示 (group_name 行 / want_card 「指定なし」フォールバック) は
+      // PR-4 で characters[] / want_characters[] 表示に置き換わる予定。
       const post = await addSupplyPost({
         venueId,
         userId,
         cardName: postCard.trim(),
-        groupName: postGroup.trim() !== '' ? postGroup.trim() : null,
-        wantCard: postWant.trim() !== '' ? postWant.trim() : null,
+        groupName: null,
+        wantCard: null,
         imageUrl: uploadedUrl,
+        workId: venue?.work_id ?? null,
+        characters: charactersPayload,
+        itemTypes: itemTypesPayload,
+        wantCharacters: wantCharactersPayload,
+        wantItemTypes: wantItemTypesPayload,
       })
       // 当日掲示板は他人 post のみ表示 (PR #30) のため、自分の新規 post は
       // ローカル一覧に追加しない。代わりに /venue/my-posts で確認可能。
       // ただし投稿者本人へのフィードバックとして form は閉じてリセット。
       // 既に他人 post が見えている画面上で post 数の見た目は変わらない。
       setPostCard('')
-      setPostGroup('')
-      setPostWant('')
       setPostImageUri(null)
+      setPostCharacters([])
+      setPostCharacterFreeTexts([])
+      setPostItemTypes([])
+      setPostItemTypeFreeTexts([])
+      setPostWantCharacters([])
+      setPostWantCharacterFreeTexts([])
+      setPostWantItemTypes([])
+      setPostWantItemTypeFreeTexts([])
       setShowPostForm(false)
       Alert.alert(
         '投稿しました',
@@ -374,6 +489,47 @@ export default function VenueHomeScreen() {
   const handleOpenVenuePostForm = () => {
     setShowPostForm(true)
   }
+
+  // PR-3.6b: MultiSelectAutocomplete の fetchSuggestions 用 helper。
+  //   譲側キャラ: venue.work_id があれば作品で絞り込み (TREASURE 会場で「ハル」→ TREASURE のハルトのみ)、
+  //     NULL なら作品横断 fallback (マイナーアーティスト会場でクラッシュ回避)。
+  //   求側キャラ: 常に作品横断 (会場の作品 ≠ 求めるグッズの作品の状況を許容)。
+  //   種別: 譲 / 求とも作品縛りなし、master_item_types 全体から候補表示。
+  const fetchOfferCharacterSuggestions = useCallback(
+    (input: string): MasterCharacter[] => {
+      const workId = venue?.work_id ?? null
+      if (workId == null) {
+        return getCharacterSuggestionsAcrossWorks(input)
+      }
+      return getCharacterSuggestions(input, { workId })
+    },
+    [venue?.work_id],
+  )
+  const fetchWantCharacterSuggestions = useCallback(
+    (input: string): MasterCharacter[] => getCharacterSuggestionsAcrossWorks(input),
+    [],
+  )
+  const fetchItemTypeSuggestions = useCallback(
+    (input: string): MasterItemType[] => getItemTypeSuggestions(input),
+    [],
+  )
+
+  // PR-3.6b: freeText fallback handler。通常出品 (app/listing/new/characters.tsx) と
+  // 同じパターン: dedup + append + recordListingKeyword で運営側に master 追加判断を渡す。
+  const makeAddFreeText = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+  ) => (text: string) => {
+    const trimmed = text.trim()
+    if (trimmed === '') return
+    setter((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]))
+    if (userId != null) {
+      void recordListingKeyword(userId, trimmed)
+    }
+  }
+  const handleAddOfferCharacterFreeText = makeAddFreeText(setPostCharacterFreeTexts)
+  const handleAddOfferItemTypeFreeText = makeAddFreeText(setPostItemTypeFreeTexts)
+  const handleAddWantCharacterFreeText = makeAddFreeText(setPostWantCharacterFreeTexts)
+  const handleAddWantItemTypeFreeText = makeAddFreeText(setPostWantItemTypeFreeTexts)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -553,36 +709,171 @@ export default function VenueHomeScreen() {
                     )}
                   </View>
 
+                  {/* PR-3.6b: 譲グッズ (master 構造化、会場の work_id で絞り込み) */}
+                  <Text style={styles.sectionLabel}>譲グッズ</Text>
+
                   <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>譲商品名 *</Text>
+                    <Text style={styles.fieldLabel}>キャラ（任意）</Text>
+                    <MultiSelectAutocomplete<MasterCharacter>
+                      selected={postCharacters}
+                      onChange={setPostCharacters}
+                      fetchSuggestions={fetchOfferCharacterSuggestions}
+                      getKey={(c) => c.id}
+                      renderOption={(c) => (
+                        <View>
+                          <Text style={styles.msaOptionMain}>{c.display_name_ja}</Text>
+                          {c.display_name_en != null && c.display_name_en !== '' && (
+                            <Text style={styles.msaOptionSub}>{c.display_name_en}</Text>
+                          )}
+                        </View>
+                      )}
+                      renderChip={(c) => (
+                        <Text style={styles.msaChipLabel}>{c.display_name_ja}</Text>
+                      )}
+                      placeholder="例: ハルト, ヨシ"
+                      minInputChars={2}
+                      softLimit={10}
+                      freeTextEnabled
+                      onFreeText={handleAddOfferCharacterFreeText}
+                      freeTextModalTitle="フリーテキストで追加"
+                      freeTextModalBody="マスタにないキャラを追加できます。運営が確認次第マスタに追加されると、検索でヒットしやすくなります。"
+                    />
+                    {postCharacterFreeTexts.length > 0 && (
+                      <FreeTextChipsRow
+                        items={postCharacterFreeTexts}
+                        onRemove={(t) =>
+                          setPostCharacterFreeTexts((prev) => prev.filter((x) => x !== t))
+                        }
+                      />
+                    )}
+                  </View>
+
+                  <View style={styles.fieldBlock}>
+                    <Text style={styles.fieldLabel}>種別（任意）</Text>
+                    <MultiSelectAutocomplete<MasterItemType>
+                      selected={postItemTypes}
+                      onChange={setPostItemTypes}
+                      fetchSuggestions={fetchItemTypeSuggestions}
+                      getKey={(t) => t.id}
+                      renderOption={(t) => (
+                        <View>
+                          <Text style={styles.msaOptionMain}>{t.display_name_ja}</Text>
+                          {t.display_name_en != null && t.display_name_en !== '' && (
+                            <Text style={styles.msaOptionSub}>{t.display_name_en}</Text>
+                          )}
+                        </View>
+                      )}
+                      renderChip={(t) => (
+                        <Text style={styles.msaChipLabel}>{t.display_name_ja}</Text>
+                      )}
+                      placeholder="例: トレカ, 缶バッジ"
+                      minInputChars={2}
+                      softLimit={10}
+                      freeTextEnabled
+                      onFreeText={handleAddOfferItemTypeFreeText}
+                      freeTextModalTitle="フリーテキストで追加"
+                      freeTextModalBody="マスタにない種別を追加できます。運営が確認次第マスタに追加されます。"
+                    />
+                    {postItemTypeFreeTexts.length > 0 && (
+                      <FreeTextChipsRow
+                        items={postItemTypeFreeTexts}
+                        onRemove={(t) =>
+                          setPostItemTypeFreeTexts((prev) => prev.filter((x) => x !== t))
+                        }
+                      />
+                    )}
+                  </View>
+
+                  <View style={styles.fieldBlock}>
+                    <Text style={styles.fieldLabel}>商品名 *</Text>
                     <TextInput
                       style={styles.input}
-                      placeholder="例：ジュンギュ A ver."
+                      placeholder="例：ハルト A ver. トレカ"
                       value={postCard}
                       onChangeText={setPostCard}
                       autoCorrect={false}
                     />
                   </View>
+
+                  {/* PR-3.6b: 求グッズ (作品横断、複数候補 OK、空でも出品可) */}
+                  <Text style={styles.sectionLabel}>求グッズ</Text>
+
                   <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>グループ</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="例：TREASURE"
-                      value={postGroup}
-                      onChangeText={setPostGroup}
-                      autoCorrect={false}
+                    <Text style={styles.fieldLabel}>キャラ（任意・作品横断）</Text>
+                    <MultiSelectAutocomplete<MasterCharacter>
+                      selected={postWantCharacters}
+                      onChange={setPostWantCharacters}
+                      fetchSuggestions={fetchWantCharacterSuggestions}
+                      getKey={(c) => c.id}
+                      renderOption={(c) => (
+                        <View>
+                          <Text style={styles.msaOptionMain}>{c.display_name_ja}</Text>
+                          {c.display_name_en != null && c.display_name_en !== '' && (
+                            <Text style={styles.msaOptionSub}>{c.display_name_en}</Text>
+                          )}
+                        </View>
+                      )}
+                      renderChip={(c) => (
+                        <Text style={styles.msaChipLabel}>{c.display_name_ja}</Text>
+                      )}
+                      placeholder="例: ジヒョン, ハルト"
+                      minInputChars={2}
+                      softLimit={10}
+                      freeTextEnabled
+                      onFreeText={handleAddWantCharacterFreeText}
+                      freeTextModalTitle="フリーテキストで追加"
+                      freeTextModalBody="マスタにないキャラを追加できます。運営が確認次第マスタに追加されます。"
                     />
+                    {postWantCharacterFreeTexts.length > 0 && (
+                      <FreeTextChipsRow
+                        items={postWantCharacterFreeTexts}
+                        onRemove={(t) =>
+                          setPostWantCharacterFreeTexts((prev) =>
+                            prev.filter((x) => x !== t),
+                          )
+                        }
+                      />
+                    )}
                   </View>
+
                   <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>求商品</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="例：ヨシ unit（なんでも可）"
-                      value={postWant}
-                      onChangeText={setPostWant}
-                      autoCorrect={false}
+                    <Text style={styles.fieldLabel}>種別（任意）</Text>
+                    <MultiSelectAutocomplete<MasterItemType>
+                      selected={postWantItemTypes}
+                      onChange={setPostWantItemTypes}
+                      fetchSuggestions={fetchItemTypeSuggestions}
+                      getKey={(t) => t.id}
+                      renderOption={(t) => (
+                        <View>
+                          <Text style={styles.msaOptionMain}>{t.display_name_ja}</Text>
+                          {t.display_name_en != null && t.display_name_en !== '' && (
+                            <Text style={styles.msaOptionSub}>{t.display_name_en}</Text>
+                          )}
+                        </View>
+                      )}
+                      renderChip={(t) => (
+                        <Text style={styles.msaChipLabel}>{t.display_name_ja}</Text>
+                      )}
+                      placeholder="例: トレカ, アクスタ"
+                      minInputChars={2}
+                      softLimit={10}
+                      freeTextEnabled
+                      onFreeText={handleAddWantItemTypeFreeText}
+                      freeTextModalTitle="フリーテキストで追加"
+                      freeTextModalBody="マスタにない種別を追加できます。運営が確認次第マスタに追加されます。"
                     />
+                    {postWantItemTypeFreeTexts.length > 0 && (
+                      <FreeTextChipsRow
+                        items={postWantItemTypeFreeTexts}
+                        onRemove={(t) =>
+                          setPostWantItemTypeFreeTexts((prev) =>
+                            prev.filter((x) => x !== t),
+                          )
+                        }
+                      />
+                    )}
                   </View>
+
                   <Pressable
                     style={[styles.submitButton, (postCard.trim() === '' || posting) && styles.buttonDisabled]}
                     onPress={handleSubmitPost}
@@ -1078,6 +1369,31 @@ const styles = StyleSheet.create({
   formTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: '#92400E' },
   fieldBlock: { gap: 4 },
   fieldLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textSecondary },
+  // PR-3.6b: 出品 form の「譲グッズ」「求グッズ」セクション区切りラベル。
+  sectionLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: VENUE_COLORS.brand,
+    letterSpacing: 0.5,
+    marginTop: spacing.xs,
+  },
+  // PR-3.6b: MultiSelectAutocomplete の renderOption / renderChip 内テキスト用。
+  // 通常出品 (app/listing/new/characters.tsx) の同名 style を移植。
+  msaOptionMain: {
+    fontSize: 14,
+    fontWeight: fontWeight.semibold,
+    color: colors.textPrimary,
+  },
+  msaOptionSub: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  msaChipLabel: {
+    fontSize: 12,
+    fontWeight: fontWeight.semibold,
+    color: colors.textInverse,
+  },
   input: {
     borderWidth: 1,
     borderColor: colors.border,

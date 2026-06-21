@@ -2977,7 +2977,7 @@ export async function fetchVenueTradeById(
   const { data, error } = await supabase
     .from('venue_trades')
     .select(
-      'id, venue_id, hold_id, proposer_id, receiver_id, proposer_card, receiver_card, status, proposer_confirmed_at, receiver_confirmed_at, completed_at, created_at, updated_at, offered_snapshot, wanted_snapshot'
+      'id, venue_id, hold_id, proposer_id, receiver_id, proposer_card, receiver_card, status, proposer_confirmed_at, receiver_confirmed_at, completed_at, created_at, updated_at, offered_snapshot, wanted_snapshot, cancel_requested_at, cancel_requested_by'
     )
     .eq('id', tradeId)
     .maybeSingle()

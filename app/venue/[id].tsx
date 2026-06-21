@@ -41,7 +41,7 @@ import { TrustBadge } from '@/components/TrustBadge'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -247,6 +247,48 @@ export default function VenueHomeScreen() {
       )
     }, 300)
   }, [])
+
+  // PR-3.5: 会場内検索 (クライアントフィルタ、DB クエリ追加なし)。
+  //   検索バーは bottom sheet の外、メイン供給板エリアの ScrollView 内にあるため、
+  //   focus 時に scroll させたい対象は mainScrollRef (sheetScrollRef ではない)。
+  //   scrollToMsa と同じ measureLayout パターンを mainScrollRef 上で再利用。
+  const [searchCharacters, setSearchCharacters] = useState<MasterCharacter[]>([])
+  const mainScrollRef = useRef<ScrollView>(null)
+  const searchBarRef = useRef<View>(null)
+  const scrollToSearch = useCallback(() => {
+    setTimeout(() => {
+      searchBarRef.current?.measureLayout(
+        mainScrollRef.current as unknown as React.ElementRef<typeof View>,
+        (_x, y) => {
+          mainScrollRef.current?.scrollTo({ y: y - 16, animated: true })
+        },
+        () => {},
+      )
+    }, 300)
+  }, [])
+
+  // PR-3.5: 会場内検索フィルタ (クライアントサイド、DB クエリ追加なし)。
+  //   - searchCharacters が空なら全件返す。
+  //   - master slug overlap: characters[] / want_characters[] のいずれかに含まれる post を採用
+  //     (PR-3.6b 以降に作成された structured post 用)。
+  //   - legacy fallback: card_name / want_card のテキスト部分一致
+  //     (PR-3.6b 以前の post、または freeText のみで投稿された post 用)。
+  //   - 比較は display_name_ja の lowerCase で行う (英表記との混在は本 PR 範囲外)。
+  const filteredPosts = useMemo(() => {
+    if (searchCharacters.length === 0) return supplyPosts
+    const searchSlugs = searchCharacters.map((c) => c.id)
+    const searchNames = searchCharacters.map((c) => c.display_name_ja.toLowerCase())
+    return supplyPosts.filter((post) => {
+      const inChars = (post.characters ?? []).some((s) => searchSlugs.includes(s))
+      const inWant = (post.want_characters ?? []).some((s) => searchSlugs.includes(s))
+      const inLegacy = searchNames.some(
+        (name) =>
+          (post.card_name ?? '').toLowerCase().includes(name) ||
+          (post.want_card ?? '').toLowerCase().includes(name),
+      )
+      return inChars || inWant || inLegacy
+    })
+  }, [supplyPosts, searchCharacters])
 
   // Hold申請モーダル
   const [holdTarget, setHoldTarget] = useState<{
@@ -693,7 +735,7 @@ export default function VenueHomeScreen() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={mainScrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 
           {/* P1 follow-up (本 PR では UI 非表示、優先度は P1 として残す):
               Hidden from the primary venue surface until the P1 implementation is ready.
@@ -709,12 +751,53 @@ export default function VenueHomeScreen() {
                 {loadingSupply
                   ? '読み込み中…'
                   : supplyPosts.length > 0
-                  ? `${supplyPosts.length} 件 · 本日中有効`
+                  ? `${filteredPosts.length} 件${
+                      searchCharacters.length > 0 ? '（絞り込み中）' : ''
+                    } · 本日中有効`
                   : '本日中有効'}
               </Text>
             </View>
             {/* PR-3.6d: 出品フォームは bottom sheet Modal に分離 (板とフォームの混線解消)。
                 以前ここにあった「✕ 閉じる」はシート内 × ボタンに役割を統合した。 */}
+          </View>
+
+          {/* PR-3.5: 会場内検索バー (メンバー / キャラ master 横断、複数選択可、freeText 不可)。
+              フィルタは filteredPosts useMemo でクライアント側完結、fetchSupplyPosts は不変。
+              検索バー focus 時は scrollToSearch で mainScrollRef を該当位置にスクロール。 */}
+          <View ref={searchBarRef} style={styles.searchBar} collapsable={false}>
+            <View style={styles.searchBarMsaWrap}>
+              <MultiSelectAutocomplete<MasterCharacter>
+                selected={searchCharacters}
+                onChange={setSearchCharacters}
+                fetchSuggestions={(input) => getCharacterSuggestionsAcrossWorks(input)}
+                getKey={(c) => c.id}
+                renderOption={(c) => (
+                  <View>
+                    <Text style={styles.msaOptionMain}>{c.display_name_ja}</Text>
+                    {c.display_name_en != null && c.display_name_en !== '' && (
+                      <Text style={styles.msaOptionSub}>{c.display_name_en}</Text>
+                    )}
+                  </View>
+                )}
+                renderChip={(c) => (
+                  <Text style={styles.msaChipLabel}>{c.display_name_ja}</Text>
+                )}
+                placeholder="メンバー / キャラで絞り込む"
+                minInputChars={1}
+                softLimit={3}
+                onFocus={scrollToSearch}
+              />
+            </View>
+            {searchCharacters.length > 0 && (
+              <Pressable
+                onPress={() => setSearchCharacters([])}
+                style={styles.searchClearButton}
+                hitSlop={8}
+                accessibilityLabel="検索をクリア"
+              >
+                <Text style={styles.searchClearText}>クリア</Text>
+              </Pressable>
+            )}
           </View>
 
           {/* PR-3.6d: 出品フォームの inline JSX (画像 / 譲セクション / 求セクション /
@@ -730,8 +813,19 @@ export default function VenueHomeScreen() {
                 右下の「この会場で出す」から最初の出品を投稿できます。
               </Text>
             </View>
+          ) : filteredPosts.length === 0 ? (
+            /* PR-3.5: 絞り込み結果 0 件 (全件 0 件とは分岐を分ける) */
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyTitle}>該当する募集がありません</Text>
+              <Pressable
+                onPress={() => setSearchCharacters([])}
+                style={styles.searchClearButtonInline}
+              >
+                <Text style={styles.searchClearText}>クリア</Text>
+              </Pressable>
+            </View>
           ) : (
-            supplyPosts.map((post) => {
+            filteredPosts.map((post) => {
               // β1 投稿カード:
               //  - 画像 or brand-tint placeholder
               //  - 譲 / グループ / 求
@@ -1465,6 +1559,34 @@ const styles = StyleSheet.create({
     color: VENUE_COLORS.headline,
   },
   supplySub: { fontSize: fontSize.xs, color: VENUE_COLORS.hint },
+  // PR-3.5: 会場内検索バー (供給板タイトル直下に配置)。
+  // 横並びレイアウト: MSA (flex:1) + クリアボタン (テキストボタン、右端、選択中のみ表示)。
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    marginBottom: 4,
+  },
+  searchBarMsaWrap: {
+    flex: 1,
+  },
+  // 選択中チップ右端の「クリア」ボタン (テキストのみ、hint 色)。
+  searchClearButton: {
+    paddingHorizontal: 8,
+    paddingVertical: spacing.xs,
+  },
+  // 絞り込み結果 0 件の empty 内で再利用するクリアボタン (中央配置の inline 版)。
+  searchClearButtonInline: {
+    marginTop: spacing.xs,
+    paddingHorizontal: 8,
+    paddingVertical: spacing.xs,
+  },
+  searchClearText: {
+    fontSize: 13,
+    color: VENUE_COLORS.hint,
+    fontWeight: fontWeight.semibold,
+  },
   // β1: form open 時のみ表示する「✕ 閉じる」用。form を開く動線は FAB に一本化したため neutral 配色。
   postButton: {
     backgroundColor: VENUE_COLORS.background,

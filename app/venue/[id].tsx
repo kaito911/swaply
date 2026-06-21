@@ -177,6 +177,11 @@ export default function VenueHomeScreen() {
   // 供給板投稿フォーム
   const [showPostForm, setShowPostForm] = useState(false)
   const [postCard, setPostCard] = useState('')
+  // PR-3.6c: 商品名は譲セクション (メンバー / キャラ + 種別) から自動生成する。
+  // ユーザーが手で 1 度でも触ったら dirty=true にして以後自動同期を止め、
+  // 手書きで足したシリーズ名等 (例: '2024') を保持する。
+  // フォームリセット時 (submit 成功 / form 閉じる) で false に戻して次回再開可能。
+  const [postCardDirty, setPostCardDirty] = useState(false)
   const [postImageUri, setPostImageUri] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
   // PR-3.6b: 通常出品と同じ master 構造化入力 (master ID + freeText 混在の string[])。
@@ -192,6 +197,23 @@ export default function VenueHomeScreen() {
   const [postWantCharacterFreeTexts, setPostWantCharacterFreeTexts] = useState<string[]>([])
   const [postWantItemTypes, setPostWantItemTypes] = useState<MasterItemType[]>([])
   const [postWantItemTypeFreeTexts, setPostWantItemTypeFreeTexts] = useState<string[]>([])
+
+  // PR-3.6c: 譲セクション (メンバー / キャラ + 種別) の選択から商品名を自動生成。
+  //   形式: '<キャラ表示名> <キャラ表示名> ... <種別表示名> <種別表示名> ...' (半角スペース連結)
+  //   - master 選択は display_name_ja (slug ではなく人間可読の表示名) を使う。
+  //   - freeText は生文字列 (postCharacterFreeTexts) をそのまま連結。
+  //   - postCardDirty===true (= ユーザーが手で触った) のときは上書きしない。
+  //   - 全部未選択なら空文字 → 必須バリデーション (postCard.trim()==='') で投稿無効が維持される。
+  useEffect(() => {
+    if (postCardDirty) return
+    const chars = [
+      ...postCharacters.map((c) => c.display_name_ja),
+      ...postCharacterFreeTexts,
+    ]
+    const items = postItemTypes.map((t) => t.display_name_ja)
+    const derived = [...chars, ...items].join(' ')
+    setPostCard(derived)
+  }, [postCardDirty, postCharacters, postCharacterFreeTexts, postItemTypes])
 
   // Hold申請モーダル
   const [holdTarget, setHoldTarget] = useState<{
@@ -371,6 +393,8 @@ export default function VenueHomeScreen() {
       // ただし投稿者本人へのフィードバックとして form は閉じてリセット。
       // 既に他人 post が見えている画面上で post 数の見た目は変わらない。
       setPostCard('')
+      // PR-3.6c: 次回フォーム開きでも自動派生を再開できるよう dirty を戻す。
+      setPostCardDirty(false)
       setPostImageUri(null)
       setPostCharacters([])
       setPostCharacterFreeTexts([])
@@ -713,7 +737,7 @@ export default function VenueHomeScreen() {
                   <Text style={styles.sectionLabel}>譲グッズ</Text>
 
                   <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>キャラ（任意）</Text>
+                    <Text style={styles.fieldLabel}>メンバー / キャラ（任意）</Text>
                     <MultiSelectAutocomplete<MasterCharacter>
                       selected={postCharacters}
                       onChange={setPostCharacters}
@@ -790,7 +814,13 @@ export default function VenueHomeScreen() {
                       style={styles.input}
                       placeholder="例：ハルト A ver. トレカ"
                       value={postCard}
-                      onChangeText={setPostCard}
+                      // PR-3.6c: ユーザー操作で dirty=true にしてから値を反映。
+                      // 以後は譲セクション変更があっても自動同期されず、手書きの追記
+                      // (例: 'ハルト トレカ 2024') が保持される。
+                      onChangeText={(text) => {
+                        if (!postCardDirty) setPostCardDirty(true)
+                        setPostCard(text)
+                      }}
                       autoCorrect={false}
                     />
                   </View>
@@ -799,7 +829,7 @@ export default function VenueHomeScreen() {
                   <Text style={styles.sectionLabel}>求グッズ</Text>
 
                   <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>キャラ（任意・作品横断）</Text>
+                    <Text style={styles.fieldLabel}>メンバー / キャラ（任意・作品横断）</Text>
                     <MultiSelectAutocomplete<MasterCharacter>
                       selected={postWantCharacters}
                       onChange={setPostWantCharacters}

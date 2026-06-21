@@ -30,6 +30,7 @@ import type { MasterCharacter, MasterItemType } from '@/lib/types'
 import {
   getCharacterSuggestions,
   getCharacterSuggestionsAcrossWorks,
+  getItemTypeById,
   getItemTypeSuggestions,
   recordListingKeyword,
 } from '@/lib/master'
@@ -891,9 +892,28 @@ export default function VenueHomeScreen() {
                           />
                         </View>
                       )}
-                      <Text style={styles.matchCardName} numberOfLines={2}>
-                        {pair.theirPost.card_name}
-                      </Text>
+                      {/* PR-8: 種別サブ行を card_name の下に。先頭 1 件のみ、master 未登録は
+                          slug 自身をフォールバック表示。種別未指定 (空配列 / undefined) は
+                          サブ行ごと非表示 (return null)。 */}
+                      <View style={styles.matchCardTextCol}>
+                        <Text style={styles.matchCardName} numberOfLines={1}>
+                          {pair.theirPost.card_name}
+                        </Text>
+                        {(() => {
+                          const slug = (pair.theirPost.item_types ?? [])[0]
+                          if (slug == null) return null
+                          const label =
+                            getItemTypeById(slug)?.display_name_ja ?? slug
+                          return (
+                            <Text
+                              style={styles.matchCardItemType}
+                              numberOfLines={1}
+                            >
+                              {label}
+                            </Text>
+                          )
+                        })()}
+                      </View>
                     </View>
                     <Text style={styles.matchCardArrow}>⇵</Text>
                     <Text style={styles.matchCardLabel}>あなたが出す</Text>
@@ -918,9 +938,25 @@ export default function VenueHomeScreen() {
                           />
                         </View>
                       )}
-                      <Text style={styles.matchCardName} numberOfLines={2}>
-                        {pair.myPost.card_name}
-                      </Text>
+                      <View style={styles.matchCardTextCol}>
+                        <Text style={styles.matchCardName} numberOfLines={1}>
+                          {pair.myPost.card_name}
+                        </Text>
+                        {(() => {
+                          const slug = (pair.myPost.item_types ?? [])[0]
+                          if (slug == null) return null
+                          const label =
+                            getItemTypeById(slug)?.display_name_ja ?? slug
+                          return (
+                            <Text
+                              style={styles.matchCardItemType}
+                              numberOfLines={1}
+                            >
+                              {label}
+                            </Text>
+                          )
+                        })()}
+                      </View>
                     </View>
                     <Pressable
                       style={styles.matchCardButton}
@@ -1837,11 +1873,12 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 4,
   },
-  // PR-6-b: マッチカード内サムネ (56×56、角丸 8px、placeholder と兼用)。
+  // PR-6-b → PR-8: マッチカード内サムネ。56 → 44 に縮小し、写真と名前の距離を詰める。
+  // borderRadius も 8 → 6 に比例縮小、placeholder と兼用。
   matchCardThumb: {
-    width: 56,
-    height: 56,
-    borderRadius: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 6,
     backgroundColor: VENUE_COLORS.background,
   },
   matchCardThumbPlaceholder: {
@@ -1851,12 +1888,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  matchCardName: {
-    // サムネと横並びになるため flex で残り幅を取らせる。
+  // PR-8: 名前 + 種別を縦に並べるテキスト列。サムネと横並びになるため flex:1 で残り幅を取る
+  // (旧 matchCardName が持っていた flex:1 はこちらに移管)。
+  matchCardTextCol: {
     flex: 1,
+    gap: 2,
+  },
+  matchCardName: {
     fontSize: 14,
     fontWeight: '700',
     color: '#15161E',
+  },
+  // PR-8: 種別サブ行 (accent 色で「相手が出す」ラベルと色味を揃える、控えめ opacity)。
+  matchCardItemType: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: VENUE_COLORS.accent,
+    opacity: 0.85,
   },
   matchCardArrow: {
     fontSize: 16,

@@ -103,7 +103,7 @@ function getTrustRows(owner: Profile): { label: string; value: string }[] {
   return rows
 }
 
-// ⑤ CTA: 押していい理由を1つだけ返す（want一致 → 実績 → 郵送 → 差額 の優先順）
+// ⑤ CTA: 押していい理由を1つだけ返す（want一致 → 郵送 の優先順）
 function getPushReason(
   card: Card,
   owner: Profile | undefined,
@@ -111,7 +111,6 @@ function getPushReason(
 ): string | null {
   if (bestMatchScore === 'strong') return 'あなたが求めているカードと一致しています'
   if (bestMatchScore === 'medium') return 'あなたが求めているカードに近いです'
-  if (owner != null && owner.trade_count >= 1) return '交換実績があるため、安心して提案できます'
   if (card.allows_mail) return '郵送で交換しやすい条件です'
   // β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金 push 理由を出さない
   if (FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && card.allows_adjustment) {

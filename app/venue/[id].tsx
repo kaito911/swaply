@@ -724,7 +724,11 @@ export default function VenueHomeScreen() {
   const handleAddWantItemTypeFreeText = makeAddFreeText(setPostWantItemTypeFreeTexts)
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    /* PR-7: Stack header (app/_layout.tsx:173-182 で headerShown:true) が既に top
+        safe area を消化しているため、ここで edges={['top']} を付けると二重に
+        inset が乗り「会場モード」タイトルと会場文脈ヘッダーの間に余分な余白が出る。
+        edges={[]} で top safe area を画面側からは取らず、Stack header の高さに任せる。 */
+    <SafeAreaView style={styles.safe} edges={[]}>
       {/* PR-2: 会場文脈ヘッダー — どの会場にいるかを示し、開催中状態と参加人数で
           現在地＋臨場感を与える。venue 取得失敗時は非表示 (フォールバック)。
           ナビゲーションバーの Stack title ('会場モード' 固定) は本 PR では触らず、
@@ -803,7 +807,9 @@ export default function VenueHomeScreen() {
             size={16}
             color={colors.primary}
           />
-          <Text style={styles.quickLinkText}>自分の会場投稿を管理</Text>
+          <Text style={styles.quickLinkText} numberOfLines={1}>
+            自分の会場投稿を管理
+          </Text>
           <Text style={styles.quickLinkArrow}>→</Text>
         </Pressable>
         <Pressable
@@ -816,7 +822,18 @@ export default function VenueHomeScreen() {
           }
         >
           <Ionicons name="list-outline" size={16} color={colors.primary} />
-          <Text style={styles.quickLinkText}>送受信のHoldを見る</Text>
+          <Text style={styles.quickLinkText} numberOfLines={1}>
+            送受信のHoldを見る
+          </Text>
+          {/* PR-7: 受信中 pending Hold 件数バッジ (= 既存の receivedHoldCount、
+              loadHoldCount で取得済)。新規 fetch なし。cancel 応答待ちは
+              holds 画面の成立済タブで赤ドット表示 (PR-5-b) するため、本バッジは
+              受信 Hold のみに絞り、画面間で役割分担する。 */}
+          {receivedHoldCount > 0 && (
+            <View style={styles.quickLinkBadge}>
+              <Text style={styles.quickLinkBadgeText}>{receivedHoldCount}</Text>
+            </View>
+          )}
           <Text style={styles.quickLinkArrow}>→</Text>
         </Pressable>
       </View>
@@ -1716,7 +1733,9 @@ const styles = StyleSheet.create({
   },
   quickLinksRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    // PR-7: 2 ボタンを常に横並びにする (折り返し禁止)。各ボタンが flex:1 で
+    // 画面幅を等分するため、wrap は不要。
+    flexWrap: 'nowrap',
     gap: spacing.xs,
     paddingHorizontal: spacing.base,
     paddingTop: spacing.sm,
@@ -1726,8 +1745,12 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   quickLink: {
+    // PR-7: 2 ボタンが画面幅を等分するよう flex:1。中身 (アイコン+テキスト+矢印) は
+    // justifyContent:'center' でボタン内中央寄せ。
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 4,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
@@ -1735,6 +1758,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundMuted,
   },
   quickLinkText: {
+    // PR-7: テキストが長くてアイコン/矢印を押し出さないよう flexShrink:1 で潰せる
+    // ようにする (numberOfLines={1} と併せて 1 行省略を担保)。
+    flexShrink: 1,
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,
     color: colors.primary,
@@ -1743,6 +1769,22 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.primary,
     fontWeight: fontWeight.bold,
+  },
+  // PR-7: 「送受信のHoldを見る」内の受信件数バッジ (coral 丸)。
+  quickLinkBadge: {
+    backgroundColor: '#FF3E6C',
+    borderRadius: 999,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 2,
+  },
+  quickLinkBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },
   emptyBox: { alignItems: 'center', paddingVertical: 40, gap: spacing.sm },

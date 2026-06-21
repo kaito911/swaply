@@ -46,6 +46,11 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 type Tab = 'received' | 'sent' | 'converted'
 
+// PR-5-b: キャンセル申請バッジ用 accent (= app/venue/[id].tsx の VENUE_COLORS.accent
+// 同値、本ファイル局所利用)。export されていないトークンなのでローカル定数として持つ。
+const ACCENT_COLOR = '#FF3E6C'
+const INK3_COLOR = '#9CA0AD'
+
 const HOLD_STATUS_COLORS: Record<VenueHoldStatus, string> = {
   pending: '#D97706',
   held: '#059669',
@@ -179,6 +184,18 @@ export default function VenueHoldsScreen() {
   const receivedCount = holds.filter((h) => matchTab(h, 'received')).length
   const sentCount = holds.filter((h) => matchTab(h, 'sent')).length
   const convertedCount = holds.filter((h) => matchTab(h, 'converted')).length
+  // PR-5-b: 成立済タブのうち「相手からキャンセル申請が届いて自分がまだ応答していない」件数。
+  // タブラベル横の赤ドットで対応必要を可視化する。
+  const convertedUrgentCount = holds.filter((h) => {
+    if (!matchTab(h, 'converted')) return false
+    const t = h.venue_trade
+    return (
+      t != null &&
+      t.cancel_requested_at != null &&
+      t.cancel_requested_by !== userId &&
+      t.status === 'pending'
+    )
+  }).length
 
   const visible = holds.filter((h) => matchTab(h, tab))
 
@@ -360,10 +377,17 @@ export default function VenueHoldsScreen() {
     )
   }
 
-  const TABS: { key: Tab; label: string; count: number }[] = [
+  // PR-5-b: 成立済タブのみ urgent (対応待ち件数) を持たせる。他タブは undefined のまま
+  // で描画時に赤ドットが出ない。
+  const TABS: { key: Tab; label: string; count: number; urgent?: number }[] = [
     { key: 'received', label: '受信', count: receivedCount },
     { key: 'sent', label: '送信', count: sentCount },
-    { key: 'converted', label: '成立済', count: convertedCount },
+    {
+      key: 'converted',
+      label: '成立済',
+      count: convertedCount,
+      urgent: convertedUrgentCount,
+    },
   ]
 
   return (
@@ -376,14 +400,23 @@ export default function VenueHoldsScreen() {
             style={[styles.tabItem, tab === t.key && styles.tabItemActive]}
             onPress={() => setTab(t.key)}
           >
-            <Text
-              style={[
-                styles.tabLabel,
-                tab === t.key && styles.tabLabelActive,
-              ]}
-            >
-              {t.label}（{t.count}）
-            </Text>
+            <View style={styles.tabLabelRow}>
+              <Text
+                style={[
+                  styles.tabLabel,
+                  tab === t.key && styles.tabLabelActive,
+                ]}
+              >
+                {t.label}（{t.count}）
+              </Text>
+              {/* PR-5-b: urgent (キャンセル申請応答待ち) 件数を赤ドットで可視化。
+                  urgent が undefined / 0 のタブには出ない (received/sent はそのまま)。 */}
+              {t.urgent != null && t.urgent > 0 && (
+                <View style={styles.tabUrgentDot}>
+                  <Text style={styles.tabUrgentDotText}>{t.urgent}</Text>
+                </View>
+              )}
+            </View>
           </Pressable>
         ))}
       </View>
@@ -422,6 +455,20 @@ export default function VenueHoldsScreen() {
               tab === 'received' ? hold.proposer_profile : hold.receiver_profile
             const isActing = actingId === hold.id
             const trade = hold.venue_trade
+
+            // PR-5-b: キャンセル申請バッジ判定 (成立済タブで trade があるカードのみ意味を持つ)。
+            //   isCancelRequested  : trade に申請が立っている
+            //   isMyCancelRequest  : 申請者は自分
+            //   needsCancelResponse: 相手の申請 + 自分が未応答 (trade.status='pending')
+            //                        → 「⚠️ キャンセル申請が届いています」を出す
+            const isCancelRequested =
+              trade != null && trade.cancel_requested_at != null
+            const isMyCancelRequest =
+              isCancelRequested && trade?.cancel_requested_by === userId
+            const needsCancelResponse =
+              isCancelRequested &&
+              !isMyCancelRequest &&
+              trade?.status === 'pending'
 
             const showAccept =
               tab === 'received' && hold.status === 'pending' && !expired
@@ -465,6 +512,25 @@ export default function VenueHoldsScreen() {
                     </Text>
                   ) : null}
                 </View>
+
+                {/* PR-5-b: キャンセル申請バッジ。
+                    needsCancelResponse: 相手の申請に未応答 → coral 強調バッジ。
+                    isMyCancelRequest  : 自分の申請待ち応答 → ink3 控えめバッジ。
+                    どちらでもないカードには何も出さない (= キャンセル文脈なし)。 */}
+                {needsCancelResponse && (
+                  <View style={styles.cancelRequestBadge}>
+                    <Text style={styles.cancelRequestBadgeText}>
+                      ⚠️ キャンセル申請が届いています
+                    </Text>
+                  </View>
+                )}
+                {isMyCancelRequest && (
+                  <View style={styles.cancelPendingBadge}>
+                    <Text style={styles.cancelPendingBadgeText}>
+                      キャンセル申請中
+                    </Text>
+                  </View>
+                )}
 
                 {/* 相手情報 (counterpart) */}
                 {counterpart != null && (
@@ -706,12 +772,62 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   tabItemActive: { borderBottomColor: colors.primary },
+  // PR-5-b: タブラベル + 赤ドットの横並びコンテナ。
+  tabLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   tabLabel: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
     color: colors.textTertiary,
   },
   tabLabelActive: { color: colors.primary, fontWeight: fontWeight.bold },
+  // PR-5-b: タブ右端の赤ドット (キャンセル申請応答待ち件数)。
+  tabUrgentDot: {
+    backgroundColor: ACCENT_COLOR,
+    borderRadius: 999,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 4,
+  },
+  tabUrgentDotText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  // PR-5-b: カード上のキャンセル申請バッジ (受け側、coral 強調)。
+  cancelRequestBadge: {
+    backgroundColor: ACCENT_COLOR + '18',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    marginTop: 6,
+    alignSelf: 'flex-start',
+  },
+  cancelRequestBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: ACCENT_COLOR,
+  },
+  // PR-5-b: カード上のキャンセル申請中バッジ (自分側、ink3 控えめ)。
+  cancelPendingBadge: {
+    backgroundColor: INK3_COLOR + '18',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    marginTop: 6,
+    alignSelf: 'flex-start',
+  },
+  cancelPendingBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: INK3_COLOR,
+  },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },
   emptyBox: {
     alignItems: 'center',

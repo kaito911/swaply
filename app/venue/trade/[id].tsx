@@ -24,11 +24,15 @@
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
+  confirmVenueTradeCancel,
   fetchProfile,
   fetchVenueTradeById,
   fetchVenueTradeMessages,
   markVenueTradeThreadRead,
+  requestVenueTradeCancel,
+  respondVenueTradeCancel,
   sendVenueTradeMessage,
+  withdrawVenueTradeCancel,
 } from '@/lib/supabase'
 import {
   Profile,
@@ -176,6 +180,9 @@ export default function VenueTradeDMScreen() {
   const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  // PR-5: キャンセル申請モデル (request/withdraw/respond/confirm) 中の loading 抑止。
+  // 1 つの flag で 4 RPC を共有 (CTA はいずれか 1 つしか同時表示されないため衝突しない)。
+  const [cancelLoading, setCancelLoading] = useState(false)
 
   const scrollRef = useRef<ScrollView | null>(null)
   // mark read 多重実行抑止 (mount + focus の二重起動などを吸収)
@@ -334,6 +341,108 @@ export default function VenueTradeDMScreen() {
   const isMine = (m: VenueTradeMessage) =>
     m.kind === 'user' && m.sender_id != null && m.sender_id === userId
 
+  // PR-5: キャンセル申請モデルの UI 状態ヘルパー。
+  //   isCancelRequested: 申請中フラグ (cancel_requested_at が NOT NULL)
+  //   isMyRequest: 自分が申請者
+  //   canRequestCancel: 申請可 (pending + 未申請)
+  //   canWithdraw: 取り下げ可 (自分の申請を取り消し)
+  //   canRespond: 相手の申請に応答可 (承認 / 拒否)
+  //   isCancelExpired: 申請から 2h 経過 → 申請者は確定可
+  //   partially_confirmed / completed / cancelled では CTA を一切出さない (status='pending' のみ表示)
+  const isCancelRequested = trade.cancel_requested_at != null
+  const isMyRequest =
+    isCancelRequested && trade.cancel_requested_by === userId
+  const cancelExpiredAt =
+    trade.cancel_requested_at != null
+      ? new Date(
+          new Date(trade.cancel_requested_at).getTime() + 2 * 60 * 60 * 1000,
+        )
+      : null
+  const isCancelExpired =
+    cancelExpiredAt != null ? new Date() > cancelExpiredAt : false
+  const canRequestCancel =
+    trade.status === 'pending' && !isCancelRequested
+  const canWithdraw =
+    trade.status === 'pending' && isCancelRequested && isMyRequest
+  const canRespond =
+    trade.status === 'pending' && isCancelRequested && !isMyRequest
+  const canConfirmCancel =
+    trade.status === 'pending' &&
+    isCancelRequested &&
+    isMyRequest &&
+    isCancelExpired
+
+  // PR-5: 4 RPC のハンドラ。共通エラー UI と reload で trade を最新化。
+  const handleCancelRpc = async (
+    rpc: () => Promise<VenueTrade>,
+    label: string,
+  ) => {
+    if (cancelLoading) return
+    setCancelLoading(true)
+    try {
+      await rpc()
+      await reload()
+    } catch (error) {
+      console.error(`[VenueTradeDM] ${label}`, error)
+      const msg = error instanceof Error ? error.message : '操作に失敗しました'
+      Alert.alert('エラー', msg)
+    } finally {
+      setCancelLoading(false)
+    }
+  }
+  const handleRequestCancel = () => {
+    if (tradeId == null || userId == null) return
+    Alert.alert(
+      'キャンセルを申請しますか？',
+      '相手の応答を待ち、承認されると取引はキャンセルされます。2 時間経過すると自分で確定できます。',
+      [
+        { text: 'やめる', style: 'cancel' },
+        {
+          text: '申請する',
+          style: 'destructive',
+          onPress: () =>
+            handleCancelRpc(
+              () => requestVenueTradeCancel(tradeId, userId),
+              'requestVenueTradeCancel',
+            ),
+        },
+      ],
+    )
+  }
+  const handleWithdrawCancel = () => {
+    if (tradeId == null || userId == null) return
+    handleCancelRpc(
+      () => withdrawVenueTradeCancel(tradeId, userId),
+      'withdrawVenueTradeCancel',
+    )
+  }
+  const handleRespondCancel = (accept: boolean) => {
+    if (tradeId == null || userId == null) return
+    handleCancelRpc(
+      () => respondVenueTradeCancel(tradeId, userId, accept),
+      `respondVenueTradeCancel(${accept ? 'accept' : 'decline'})`,
+    )
+  }
+  const handleConfirmCancel = () => {
+    if (tradeId == null || userId == null) return
+    Alert.alert(
+      'キャンセルを確定しますか？',
+      '相手が 2 時間応答しなかったため、申請者の判断で取引をキャンセルできます。',
+      [
+        { text: 'やめる', style: 'cancel' },
+        {
+          text: '確定する',
+          style: 'destructive',
+          onPress: () =>
+            handleCancelRpc(
+              () => confirmVenueTradeCancel(tradeId, userId),
+              'confirmVenueTradeCancel',
+            ),
+        },
+      ],
+    )
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader title={counterpartLabel(counterpart)} />
@@ -473,6 +582,116 @@ export default function VenueTradeDMScreen() {
             </View>
           )}
         </ScrollView>
+
+        {/* PR-5: キャンセル CTA (status='pending' のみ表示、優先順 1〜4)。
+            partially_confirmed では何も表示しない (送信欄のみ)。 */}
+        {trade.status === 'pending' && (
+          canConfirmCancel ? (
+            <View style={styles.cancelCtaBox}>
+              <Text style={styles.cancelCtaHint}>
+                相手が 2 時間応答しませんでした。
+              </Text>
+              <Pressable
+                onPress={handleConfirmCancel}
+                disabled={cancelLoading}
+                style={({ pressed }) => [
+                  styles.cancelConfirmButton,
+                  cancelLoading && styles.cancelButtonDisabled,
+                  pressed && styles.cancelButtonPressed,
+                ]}
+              >
+                {cancelLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.cancelConfirmText}>
+                    キャンセルを確定する
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          ) : canWithdraw ? (
+            <View style={styles.cancelCtaBox}>
+              <Text style={styles.cancelCtaHint}>
+                キャンセルを申請中です。相手の応答を待っています。
+              </Text>
+              <Pressable
+                onPress={handleWithdrawCancel}
+                disabled={cancelLoading}
+                style={({ pressed }) => [
+                  styles.cancelOutlineButton,
+                  cancelLoading && styles.cancelButtonDisabled,
+                  pressed && styles.cancelButtonPressed,
+                ]}
+              >
+                {cancelLoading ? (
+                  <ActivityIndicator size="small" color="#9CA0AD" />
+                ) : (
+                  <Text style={styles.cancelOutlineText}>
+                    申請を取り下げる
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          ) : canRespond ? (
+            <View style={styles.cancelCtaBox}>
+              <Text style={styles.cancelCtaHint}>
+                相手からキャンセル申請が届きました。
+              </Text>
+              <View style={styles.cancelRespondRow}>
+                <Pressable
+                  onPress={() => handleRespondCancel(false)}
+                  disabled={cancelLoading}
+                  style={({ pressed }) => [
+                    styles.cancelOutlineButton,
+                    styles.cancelRespondHalf,
+                    cancelLoading && styles.cancelButtonDisabled,
+                    pressed && styles.cancelButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.cancelOutlineText}>拒否する</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => handleRespondCancel(true)}
+                  disabled={cancelLoading}
+                  style={({ pressed }) => [
+                    styles.cancelConfirmButton,
+                    styles.cancelRespondHalf,
+                    cancelLoading && styles.cancelButtonDisabled,
+                    pressed && styles.cancelButtonPressed,
+                  ]}
+                >
+                  {cancelLoading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.cancelConfirmText}>
+                      キャンセルを承認する
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          ) : canRequestCancel ? (
+            <View style={styles.cancelCtaBox}>
+              <Pressable
+                onPress={handleRequestCancel}
+                disabled={cancelLoading}
+                style={({ pressed }) => [
+                  styles.cancelOutlineButton,
+                  cancelLoading && styles.cancelButtonDisabled,
+                  pressed && styles.cancelButtonPressed,
+                ]}
+              >
+                {cancelLoading ? (
+                  <ActivityIndicator size="small" color="#9CA0AD" />
+                ) : (
+                  <Text style={styles.cancelOutlineText}>
+                    キャンセルを申請する
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          ) : null
+        )}
 
         {/* 入力欄 / read-only バナー */}
         {sendWindowOpen ? (
@@ -661,6 +880,60 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.backgroundCard,
+  },
+  // PR-5: キャンセル CTA セクション。入力欄 (またはバナー) の上に挿入。
+  cancelCtaBox: {
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: 0,
+    gap: spacing.xs,
+    backgroundColor: colors.backgroundCard,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  cancelCtaHint: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    lineHeight: 16,
+  },
+  cancelOutlineButton: {
+    height: 40,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#9CA0AD',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelOutlineText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: '#9CA0AD',
+  },
+  cancelConfirmButton: {
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: '#FF3E6C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelConfirmText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
+  },
+  cancelRespondRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  cancelRespondHalf: {
+    flex: 1,
+  },
+  cancelButtonDisabled: {
+    opacity: 0.5,
+  },
+  cancelButtonPressed: {
+    opacity: 0.8,
   },
   input: {
     flex: 1,

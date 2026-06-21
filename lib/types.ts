@@ -464,6 +464,14 @@ export interface VenueTrade {
   // 構造は migration_venue_trades_add_snapshot_columns.sql 参照。
   offered_snapshot: Record<string, unknown>
   wanted_snapshot: Record<string, unknown>
+  // PR-5 で追加: venue_trade キャンセル申請モデル。
+  // 申請中は cancel_requested_at NOT NULL & cancel_requested_by NOT NULL、
+  // 取り下げ / 拒否 / 承認 後は両 NULL に戻す。承認時は status='cancelled'。
+  // 詳細: docs/migration_venue_trades_cancel_request.sql /
+  //       docs/migration_rpc_venue_trade_cancel.sql
+  // migration 未適用環境では PostgREST が key を返さない可能性があるため optional。
+  cancel_requested_at?: string | null
+  cancel_requested_by?: string | null
 }
 
 // ─────────────────────────────────────────

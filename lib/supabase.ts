@@ -2516,6 +2516,73 @@ export async function cancelVenueHold(
   if (error) throw error
 }
 
+// ─────────────────────────────────────────
+// PR-5: venue_trade キャンセル申請モデル (4 RPC)
+//   docs/migration_venue_trades_cancel_request.sql (列追加)
+//   docs/migration_rpc_venue_trade_cancel.sql (4 RPC 定義)
+//   各関数は更新後の venue_trades 行 1 件を返す。
+//   エラーは raise exception の文字列 (TRADE_NOT_PENDING / CANCEL_NOT_REQUESTED 等) で
+//   返るので、UI 側は error.message で分岐する。
+// ─────────────────────────────────────────
+
+/** キャンセル申請 (pending かつ未申請のみ可、当事者どちらでも申請可) */
+export async function requestVenueTradeCancel(
+  tradeId: string,
+  userId: string,
+): Promise<VenueTrade> {
+  const { data, error } = await supabase.rpc('request_venue_trade_cancel', {
+    p_trade_id: tradeId,
+    p_user_id: userId,
+  })
+  if (error) throw error
+  if (data == null) throw new Error('NO_TRADE_RETURNED')
+  return data as VenueTrade
+}
+
+/** 申請の取り下げ (申請者本人のみ、pending に戻す) */
+export async function withdrawVenueTradeCancel(
+  tradeId: string,
+  userId: string,
+): Promise<VenueTrade> {
+  const { data, error } = await supabase.rpc('withdraw_venue_trade_cancel', {
+    p_trade_id: tradeId,
+    p_user_id: userId,
+  })
+  if (error) throw error
+  if (data == null) throw new Error('NO_TRADE_RETURNED')
+  return data as VenueTrade
+}
+
+/** キャンセル申請への応答 (申請者以外のみ、accept=true で cancelled、false で pending 復帰) */
+export async function respondVenueTradeCancel(
+  tradeId: string,
+  userId: string,
+  accept: boolean,
+): Promise<VenueTrade> {
+  const { data, error } = await supabase.rpc('respond_venue_trade_cancel', {
+    p_trade_id: tradeId,
+    p_user_id: userId,
+    p_accept: accept,
+  })
+  if (error) throw error
+  if (data == null) throw new Error('NO_TRADE_RETURNED')
+  return data as VenueTrade
+}
+
+/** 2 時間タイムアウト後の申請者による確定 (申請者本人のみ、cancelled に倒す) */
+export async function confirmVenueTradeCancel(
+  tradeId: string,
+  userId: string,
+): Promise<VenueTrade> {
+  const { data, error } = await supabase.rpc('confirm_venue_trade_cancel', {
+    p_trade_id: tradeId,
+    p_user_id: userId,
+  })
+  if (error) throw error
+  if (data == null) throw new Error('NO_TRADE_RETURNED')
+  return data as VenueTrade
+}
+
 /**
  * 自分宛の受信中 (pending かつ未失効) Hold 件数を取得。
  * venueId を渡せば当該 venue 限定。未指定なら全 venue 横断 (BadgeProvider 用)。

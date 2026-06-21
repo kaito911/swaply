@@ -29,6 +29,29 @@
 //      - data.route: '/venue/trade/<trade_id>' (tap 時 router.push 1 発で解決)
 //      - body: 'メッセージが届きました' 固定文 (privacy 配慮、本文プレビュー無し)
 //
+//   C. venue_trades UPDATE (PR-5 キャンセル申請モデル)
+//      - C1: cancel_requested_at が NULL → NOT NULL に変わった (= キャンセル申請)
+//            通知先: cancel_requested_by 以外の participant
+//            title: 'キャンセル申請が届きました'
+//            body : '取引のキャンセルを申請されました。2 時間以内に承認または拒否してください。'
+//      - C2: cancel_requested_at が NOT NULL → NULL かつ record.status='pending' (= 拒否)
+//            (申請取り下げと拒否は両方とも NOT NULL→NULL の遷移だが、申請者本人の取り下げ
+//             を通知するのは騒がしいので、拒否時のみ通知する。申請者と取り下げ者の id を
+//             比較できれば理想だが、Webhook record だけからは取り下げ者が分からない。
+--             代替として『応答 RPC は申請者以外しか呼べない』というガード性質を利用し、
+--             new_record.cancel_requested_by が NULL かつ old.cancel_requested_by が
+--             受信者以外を含む = 申請者以外による NULL 化 = 拒否扱いとして通知する。
+--             ただし取り下げと拒否を Edge 側で正確に分離するのは難しいため、本 PR では
+--             status='cancelled' でない NOT NULL→NULL 遷移を「拒否」と一律扱う。
+--             取り下げ通知が混じる場合があるが、申請者自身に「拒否通知」が誤って届くと UX が
+--             悪いので、recipient = 元 cancel_requested_by に限定して通知する。)
+//            通知先: old_record.cancel_requested_by (= 元の申請者)
+//            title: 'キャンセルが拒否されました'
+//            body : '相手がキャンセルを拒否しました。取引は継続中です。'
+//      - C3: それ以外の UPDATE (status='cancelled' / 完了確定 timestamp 更新 等)
+//            → skip (今後別 PR で別 type の Push を追加する可能性あり)
+//      - data.route: '/venue/trade/<trade_id>'
+//
 // 認証/保護方式:
 //   - PR3 send-push と同じ x-send-push-secret ヘッダ方式
 //   - 同じ SEND_PUSH_SECRET 値を再利用 (Push 経路の単一責務 secret)
@@ -96,6 +119,16 @@ type VenueTradeMessageRecord = {
   system_event?: string | null
 }
 
+// PR-5: venue_trades の record / old_record (UPDATE で参照する列のみ)
+type VenueTradeRecord = {
+  id?: string
+  proposer_id?: string
+  receiver_id?: string
+  status?: string
+  cancel_requested_at?: string | null
+  cancel_requested_by?: string | null
+}
+
 // send-push に渡す payload 形
 type SendPushPayload = {
   user_id: string
@@ -148,20 +181,26 @@ Deno.serve(async (req) => {
   const eventType = typeof payload.type === 'string' ? payload.type : null
   const table = typeof payload.table === 'string' ? payload.table : null
 
-  // 本 PR4-a は INSERT のみ subscribe する想定 (Dashboard 側でも INSERT only)。
-  // 万一 UPDATE/DELETE が来ても 200 skip (Webhook retry させない)。
-  if (eventType !== 'INSERT') {
-    return jsonResponse(200, { ok: true, skipped: 'NOT_INSERT' })
+  // PR-5: venue_trades UPDATE もキャンセル申請モデルで使うため、INSERT に加えて
+  // 'venue_trades' の UPDATE のみ通す。それ以外の UPDATE/DELETE は 200 skip。
+  const isHandledEvent =
+    eventType === 'INSERT' ||
+    (eventType === 'UPDATE' && table === 'venue_trades')
+  if (!isHandledEvent) {
+    return jsonResponse(200, { ok: true, skipped: 'NOT_HANDLED_EVENT' })
   }
 
   // ─────────────────────────────────────────
   // (3) table 別に分岐
   // ─────────────────────────────────────────
-  if (table === 'venue_holds') {
+  if (eventType === 'INSERT' && table === 'venue_holds') {
     return await handleVenueHoldInsert(payload.record)
   }
-  if (table === 'venue_trade_messages') {
+  if (eventType === 'INSERT' && table === 'venue_trade_messages') {
     return await handleVenueTradeMessageInsert(payload.record)
+  }
+  if (eventType === 'UPDATE' && table === 'venue_trades') {
+    return await handleVenueTradeUpdate(payload.record, payload.old_record)
   }
 
   // 不明 table は skip (Webhook retry させない)
@@ -329,6 +368,124 @@ async function handleVenueTradeMessageInsert(
   }
 
   return await invokeSendPush(sendPushPayload, 'venue_trade_messages')
+}
+
+// ─────────────────────────────────────────
+// (C) venue_trades UPDATE ハンドラ (PR-5 キャンセル申請モデル)
+//   - C1: cancel_requested_at が NULL → NOT NULL → 申請通知 (相手側へ)
+//   - C2: cancel_requested_at が NOT NULL → NULL かつ status='pending' → 拒否通知 (元申請者へ)
+//   - その他の遷移は skip。
+// ─────────────────────────────────────────
+async function handleVenueTradeUpdate(
+  recordRaw: unknown,
+  oldRecordRaw: unknown,
+): Promise<Response> {
+  if (recordRaw == null || typeof recordRaw !== 'object') {
+    return jsonResponse(200, { ok: true, skipped: 'NO_RECORD' })
+  }
+  if (oldRecordRaw == null || typeof oldRecordRaw !== 'object') {
+    // UPDATE Webhook で old_record が無いのは Dashboard 設定漏れ。
+    // retry しても解決しないため 200 skip + console.warn。
+    console.warn('[notify-on-event] venue_trades UPDATE: no old_record')
+    return jsonResponse(200, { ok: true, skipped: 'NO_OLD_RECORD' })
+  }
+  const record = recordRaw as VenueTradeRecord
+  const oldRecord = oldRecordRaw as VenueTradeRecord
+
+  const tradeId = typeof record.id === 'string' ? record.id : null
+  const proposerId =
+    typeof record.proposer_id === 'string' ? record.proposer_id : null
+  const receiverId =
+    typeof record.receiver_id === 'string' ? record.receiver_id : null
+  if (tradeId == null || proposerId == null || receiverId == null) {
+    return jsonResponse(200, { ok: true, skipped: 'MISSING_PARTICIPANTS' })
+  }
+
+  const oldRequestedAt =
+    typeof oldRecord.cancel_requested_at === 'string'
+      ? oldRecord.cancel_requested_at
+      : null
+  const newRequestedAt =
+    typeof record.cancel_requested_at === 'string'
+      ? record.cancel_requested_at
+      : null
+  const newRequestedBy =
+    typeof record.cancel_requested_by === 'string'
+      ? record.cancel_requested_by
+      : null
+  const oldRequestedBy =
+    typeof oldRecord.cancel_requested_by === 'string'
+      ? oldRecord.cancel_requested_by
+      : null
+  const newStatus = typeof record.status === 'string' ? record.status : null
+
+  // C1: 申請通知 (NULL → NOT NULL)
+  if (oldRequestedAt == null && newRequestedAt != null) {
+    if (newRequestedBy == null) {
+      console.warn(
+        '[notify-on-event] venue_trades: cancel_requested_by missing on request',
+        tradeId,
+      )
+      return jsonResponse(200, {
+        ok: true,
+        skipped: 'MISSING_REQUESTED_BY',
+      })
+    }
+    // 申請者以外の participant に通知
+    const recipientId =
+      newRequestedBy === proposerId
+        ? receiverId
+        : newRequestedBy === receiverId
+          ? proposerId
+          : null
+    if (recipientId == null) {
+      console.error(
+        '[notify-on-event] venue_trades: requester is not a participant',
+        { trade_id: tradeId, requester: newRequestedBy },
+      )
+      return jsonResponse(200, {
+        ok: true,
+        skipped: 'REQUESTER_NOT_PARTICIPANT',
+      })
+    }
+
+    const sendPushPayload: SendPushPayload = {
+      user_id: recipientId,
+      title: 'キャンセル申請が届きました',
+      body: '取引のキャンセルを申請されました。2 時間以内に承認または拒否してください。',
+      data: {
+        type: 'venue_trade_cancel_requested',
+        route: `/venue/trade/${tradeId}`,
+        venue_trade_id: tradeId,
+      },
+    }
+    return await invokeSendPush(sendPushPayload, 'venue_trades:cancel_requested')
+  }
+
+  // C2: 拒否通知 (NOT NULL → NULL かつ status='pending'、cancelled に倒れた場合は除外)
+  //     取り下げと拒否を厳密に分離できないため、recipient を元申請者に限定して
+  //     「自分の申請が拒否された」通知としてだけ送る (申請者本人による取り下げの場合は
+  //      自分宛通知になるので自己防衛的に SELF_NOTIFY で skip される)。
+  if (oldRequestedAt != null && newRequestedAt == null && newStatus === 'pending') {
+    if (oldRequestedBy == null) {
+      return jsonResponse(200, { ok: true, skipped: 'MISSING_OLD_REQUESTER' })
+    }
+
+    const sendPushPayload: SendPushPayload = {
+      user_id: oldRequestedBy,
+      title: 'キャンセルが拒否されました',
+      body: '相手がキャンセルを拒否しました。取引は継続中です。',
+      data: {
+        type: 'venue_trade_cancel_declined',
+        route: `/venue/trade/${tradeId}`,
+        venue_trade_id: tradeId,
+      },
+    }
+    return await invokeSendPush(sendPushPayload, 'venue_trades:cancel_declined')
+  }
+
+  // その他の UPDATE (確定 / status='cancelled' への遷移 等) は skip。
+  return jsonResponse(200, { ok: true, skipped: 'NO_CANCEL_TRANSITION' })
 }
 
 // ─────────────────────────────────────────

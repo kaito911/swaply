@@ -1,0 +1,116 @@
+-- ====================================================================
+-- migration_venue_trades_cancel_request.sql
+-- 作成日: 2026-06-21
+-- 目的  : venue_trades にキャンセル申請モデル用の 2 列を追加する。
+--
+--         同時刻に成立した取引でも、現地手渡しの可否や合意が崩れたときに
+--         「申請 → 相手応答 → (合意なら) cancelled」の双方向同意プロセスを
+--         踏めるようにする。一方的な venue_trades.status='cancelled' への
+--         更新は本 PR でも引き続き許可しない (UI 上のフローは RPC 経由のみ)。
+--
+-- スキーマ:
+--   - cancel_requested_at  timestamptz NULL  -- キャンセル申請時刻 (NULL=申請なし)
+--   - cancel_requested_by  uuid NULL         -- 申請者の auth.users.id (NULL=申請なし)
+--                                            -- FK ON DELETE は付けない (auth.users 側の
+--                                            -- 削除と本列の clear は delete_my_account RPC で
+--                                            -- 整理する想定、本 migration では未着手)
+--
+-- 状態遷移 (UI 上の許可フロー、いずれも RPC migration_rpc_venue_trade_cancel.sql で実装):
+--   1. request_venue_trade_cancel:
+--        status='pending' AND cancel_requested_at IS NULL
+--        → cancel_requested_at=now(), cancel_requested_by=申請者
+--        partially_confirmed / completed / cancelled では申請不可 (RAISE EXCEPTION)。
+--   2. withdraw_venue_trade_cancel:
+--        cancel_requested_by = 呼出者
+--        → cancel_requested_at=NULL, cancel_requested_by=NULL (status は変えない)
+--   3. respond_venue_trade_cancel(p_accept=true):
+--        cancel_requested_by != 呼出者 (= 相手側)
+--        → status='cancelled', cancel_requested_at=NULL, cancel_requested_by=NULL
+--   4. respond_venue_trade_cancel(p_accept=false):
+--        cancel_requested_by != 呼出者
+--        → cancel_requested_at=NULL, cancel_requested_by=NULL (pending に戻る)
+--   5. confirm_venue_trade_cancel:
+--        cancel_requested_by = 呼出者 AND cancel_requested_at + 2h < now()
+--        → status='cancelled', cancel_requested_at=NULL, cancel_requested_by=NULL
+--        2 時間経過していなければ RAISE EXCEPTION 'CANCEL_NOT_EXPIRED'。
+--
+-- RLS:
+--   - 既存ポリシー "Participants can manage their venue trades" (docs/migration_venue.sql:116-119)
+--     が for all (UPDATE 含む) を auth.uid() = proposer_id or auth.uid() = receiver_id で
+--     制限している。本 2 列の UPDATE も同ポリシーで自動的に当事者限定になる。
+--   - **追加 RLS ポリシー不要**。
+--
+-- ⚠️ 適用順序:
+--   - 本 migration を本番 DB に適用 → C1 確認 → migration_rpc_venue_trade_cancel.sql 適用
+--     → コード側 (lib/supabase.ts / lib/types.ts / app/venue/trade/[id].tsx /
+--        supabase/functions/notify-on-event/index.ts) を main に merge → push
+--   - 列追加だけだとアプリは無害 (PostgREST は新規列を自動拾い、未参照なら影響なし)。
+--     RPC 未適用でも UI が呼ぶまでは問題なし。コード merge 前に両 migration を必ず両方とも適用する。
+--
+-- 関連:
+--   - 先行: docs/migration_venue.sql (venue_trades ベース)
+--   - 先行: docs/migration_venue_trades_state_partially_confirmed.sql (status 4 値)
+--   - 同 PR: docs/migration_rpc_venue_trade_cancel.sql (4 RPC)
+--   - 連動 コード: lib/types.ts / lib/supabase.ts / app/venue/trade/[id].tsx /
+--                  supabase/functions/notify-on-event/index.ts
+-- ====================================================================
+--
+-- 適用前提:
+--   - venue_trades テーブル存在 (docs/migration_venue.sql:97)
+--   - venue_trades に cancel_requested_* 列が無いこと (本 migration は冪等、二重実行 no-op)
+--
+-- ====================================================================
+
+begin;
+
+alter table public.venue_trades
+  add column if not exists cancel_requested_at  timestamptz,
+  add column if not exists cancel_requested_by  uuid references auth.users(id);
+
+commit;
+
+-- ====================================================================
+-- 適用後確認 (本ファイル単独でも実行可)
+-- ====================================================================
+--
+-- ◆ C1: 列追加確認
+--   select column_name, data_type, is_nullable
+--   from information_schema.columns
+--   where table_schema='public' and table_name='venue_trades'
+--     and column_name in ('cancel_requested_at','cancel_requested_by');
+--   → 期待 (2 行):
+--     cancel_requested_at  | timestamp with time zone | YES
+--     cancel_requested_by  | uuid                     | YES
+--
+-- ◆ C2: 既存行が NULL で埋まっていること
+--   select count(*) as total,
+--          count(*) filter (where cancel_requested_at is null) as null_at,
+--          count(*) filter (where cancel_requested_by is null) as null_by
+--   from public.venue_trades;
+--   → 期待: total = null_at = null_by (既存全行は NULL)
+--
+-- ◆ C3: FK 確認 (cancel_requested_by → auth.users.id)
+--   select conname, pg_get_constraintdef(oid)
+--   from pg_constraint
+--   where conrelid = 'public.venue_trades'::regclass
+--     and contype = 'f';
+--   → 期待: 既存 FK (venue_id / hold_id / proposer_id / receiver_id) に加えて
+--           cancel_requested_by → auth.users が含まれる
+--
+-- ◆ C4: 既存 RLS ポリシー継承確認 (追加ポリシーが無いこと)
+--   select polname, polcmd
+--   from pg_policy
+--   where polrelid = 'public.venue_trades'::regclass;
+--   → 期待: "Participants can manage their venue trades" 1 行のみ (本 migration で追加なし)
+--
+-- ====================================================================
+-- ロールバック (緊急時、新列の値は消失する)
+-- ====================================================================
+-- ※ 本 migration 適用後にコード側で本 2 列を参照し始めた後の rollback は
+--   キャンセル申請フローが完全に止まる。コード commit 前 / 実機検証前のみ即時可。
+--
+-- begin;
+-- alter table public.venue_trades
+--   drop column if exists cancel_requested_at,
+--   drop column if exists cancel_requested_by;
+-- commit;

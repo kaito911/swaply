@@ -18,6 +18,7 @@
 // FAB「この会場で出す」: brand #4B3BD6 (β1 主 CTA、SubmitFab に backgroundColor で渡す)
 import {
   addSupplyPost,
+  fetchMySupplyPosts,
   fetchReceivedHoldCount,
   fetchSupplyPosts,
   fetchVenue,
@@ -168,6 +169,9 @@ export default function VenueHomeScreen() {
   const [supplyPosts, setSupplyPosts] = useState<VenueSupplyPost[]>([])
   const [receivedHoldCount, setReceivedHoldCount] = useState(0)
   const [loadingSupply, setLoadingSupply] = useState(false)
+  // PR-4: 自分の会場出品 (fetchMySupplyPosts) を保持。マッチ計算 (リボン表示) の
+  // データソースになる。fetchSupplyPosts は自分の post を除外するため別 fetch が必要。
+  const [mySupplyPosts, setMySupplyPosts] = useState<VenueSupplyPost[]>([])
 
   // PR-2: 会場文脈ヘッダー用。venues は RLS 上 SELECT 全員可。
   // fetch 失敗時 (venue=null) はヘッダー非表示にフォールバック。
@@ -274,6 +278,22 @@ export default function VenueHomeScreen() {
   //   - legacy fallback: card_name / want_card のテキスト部分一致
   //     (PR-3.6b 以前の post、または freeText のみで投稿された post 用)。
   //   - 比較は display_name_ja の lowerCase で行う (英表記との混在は本 PR 範囲外)。
+  // PR-4: マッチリボン用の自分側 slug 集合 (exact slug overlap、fuzzy 不使用)。
+  //   会場 wanted_cards テーブルは β1 では使わず、会場出品 (mySupplyPosts) の
+  //   want_characters / characters / want_item_types を「会場マッチの原点」として扱う。
+  const myWantSlugs = useMemo(
+    () => mySupplyPosts.flatMap((p) => p.want_characters ?? []),
+    [mySupplyPosts],
+  )
+  const myOfferSlugs = useMemo(
+    () => mySupplyPosts.flatMap((p) => p.characters ?? []),
+    [mySupplyPosts],
+  )
+  const myWantItemTypes = useMemo(
+    () => mySupplyPosts.flatMap((p) => p.want_item_types ?? []),
+    [mySupplyPosts],
+  )
+
   const filteredPosts = useMemo(() => {
     if (searchCharacters.length === 0) return supplyPosts
     const searchSlugs = searchCharacters.map((c) => c.id)
@@ -334,6 +354,17 @@ export default function VenueHomeScreen() {
     setCheckinCount(c)
   }, [venueId])
 
+  // PR-4: 自分の会場出品を取得 (マッチリボン計算用のデータソース)。
+  // userId が null (未ログイン) なら空配列に戻し、リボン非表示にフォールバック。
+  const loadMySupplyPosts = useCallback(async () => {
+    if (venueId == null || userId == null) {
+      setMySupplyPosts([])
+      return
+    }
+    const posts = await fetchMySupplyPosts(venueId, userId)
+    setMySupplyPosts(posts)
+  }, [venueId, userId])
+
   // PR-2.1: 「開催中」LIVE ピル内ドットの opacity パルス。
   // 仕様: 1 → 0.4 → 1、duration 1200ms 全周期 (600ms ずつ)、Easing.inOut。
   // status === 'open' のときのみ動作。useNativeDriver=true で軽量化。
@@ -371,7 +402,8 @@ export default function VenueHomeScreen() {
       loadSupply()
       loadHoldCount()
       loadVenueContext()
-    }, [loadSupply, loadHoldCount, loadVenueContext])
+      loadMySupplyPosts()
+    }, [loadSupply, loadHoldCount, loadVenueContext, loadMySupplyPosts])
   )
 
   const handlePickImage = async () => {
@@ -487,6 +519,8 @@ export default function VenueHomeScreen() {
       // 元から除外されるので板自体には現れないが、再取得で他者 post の最新化と
       // loading インジケータの一瞬の明滅により完了フィードバックが伝わる。
       void loadSupply()
+      // PR-4: 自分の新規出品 (= 求 / 譲 slug 集合) を即時にマッチ計算へ反映。
+      void loadMySupplyPosts()
       // 後方互換: 既存呼出側で setSupplyPosts に依存している箇所はないため変更なし
       void post
     } catch (error) {
@@ -842,8 +876,57 @@ export default function VenueHomeScreen() {
                       last_active_at: null,
                     })
                   : null
+
+              // PR-4: マッチリボン (exact slug overlap、fuzzy 不使用)。
+              //   hasOverlap = 自分の求 ∩ 相手の譲 (片方向)
+              //   isMutual   = それに加えて 自分の譲 ∩ 相手の求 (双方向)
+              //   どちらも false ならリボン非表示。
+              const postSlugs = post.characters ?? []
+              const theirWantSlugs = post.want_characters ?? []
+              const hasOverlap = postSlugs.some((s) => myWantSlugs.includes(s))
+              const isMutual =
+                hasOverlap &&
+                theirWantSlugs.some((s) => myOfferSlugs.includes(s))
+              // 種別補足: 1 件目同士を比較 (β1 範囲では先頭優先で OK)。
+              const postItemType = (post.item_types ?? [])[0] ?? ''
+              const myWantItemType = myWantItemTypes[0] ?? ''
+              let typeNote = ''
+              if (postItemType !== '' && myWantItemType !== '') {
+                typeNote =
+                  postItemType === myWantItemType
+                    ? `${postItemType}⇄${postItemType}`
+                    : `${postItemType}(求:${myWantItemType})`
+              }
               return (
                 <View key={post.id} style={styles.supplyCard}>
+                  {hasOverlap && (
+                    <View
+                      style={
+                        isMutual ? styles.ribbonMutual : styles.ribbonOne
+                      }
+                    >
+                      <Text
+                        style={
+                          isMutual
+                            ? styles.ribbonMutualText
+                            : styles.ribbonOneText
+                        }
+                      >
+                        {isMutual ? '◎ 相互一致' : '求と一致'}
+                      </Text>
+                      {typeNote !== '' && (
+                        <Text
+                          style={
+                            isMutual
+                              ? styles.ribbonTypeNoteMutual
+                              : styles.ribbonTypeNoteOne
+                          }
+                        >
+                          {typeNote}
+                        </Text>
+                      )}
+                    </View>
+                  )}
                   <View style={styles.supplyCardRow}>
                     {post.image_url != null ? (
                       <Image
@@ -1786,6 +1869,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   // β1 投稿カード: 写真 + 譲/求 + 投稿者 + Trust + 残り時間 + Holdする CTA
+  // PR-4: マッチリボンを角丸内に収めるため overflow: 'hidden' を追加。
+  // リボンは padding 外に置く (marginHorizontal/Top で打ち消す) ため必須。
   supplyCard: {
     backgroundColor: VENUE_COLORS.card,
     borderRadius: radius.xl,
@@ -1793,6 +1878,53 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: VENUE_COLORS.border,
     gap: spacing.sm,
+    overflow: 'hidden',
+  },
+  // PR-4: マッチリボン (2 段)。supplyCard の padding (spacing.md) を
+  // marginHorizontal/Top で打ち消し、カード端まで届く帯として描画。
+  // overflow:'hidden' (supplyCard) で角丸の内側にクリップされる。
+  ribbonMutual: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    marginHorizontal: -spacing.md,
+    marginTop: -spacing.md,
+    backgroundColor: VENUE_COLORS.accent,
+  },
+  ribbonOne: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    marginHorizontal: -spacing.md,
+    marginTop: -spacing.md,
+    backgroundColor: VENUE_COLORS.accentTint,
+  },
+  ribbonMutualText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    flex: 1,
+  },
+  ribbonOneText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: VENUE_COLORS.accent,
+    flex: 1,
+  },
+  // 種別補足注記 (リボン右端、小さく)。色は 2 種類のリボン背景に合わせて分岐。
+  ribbonTypeNoteMutual: {
+    fontSize: 11,
+    opacity: 0.85,
+    color: '#FFFFFF',
+    marginLeft: 'auto',
+  },
+  ribbonTypeNoteOne: {
+    fontSize: 11,
+    opacity: 0.85,
+    color: VENUE_COLORS.accent,
+    marginLeft: 'auto',
   },
   // 画像 (or placeholder) + 右詳細 の横型 row。
   supplyCardRow: {

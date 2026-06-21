@@ -70,6 +70,7 @@ export interface MultiSelectAutocompleteProps<T> {
 
   /** 入力欄の disabled 状態 */
   disabled?: boolean
+  onFocus?: () => void
 }
 
 export function MultiSelectAutocomplete<T>(props: MultiSelectAutocompleteProps<T>) {
@@ -181,6 +182,7 @@ export function MultiSelectAutocomplete<T>(props: MultiSelectAutocompleteProps<T
           editable={!props.disabled}
           style={styles.input}
           clearButtonMode="while-editing"
+          onFocus={props.onFocus}
         />
       </View>
 

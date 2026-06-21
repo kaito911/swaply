@@ -215,6 +215,27 @@ export default function VenueHomeScreen() {
     setPostCard(derived)
   }, [postCardDirty, postCharacters, postCharacterFreeTexts, postItemTypes])
 
+  // PR-3.6d-fix: bottom sheet の ScrollView + 4 つの MSA wrap View に ref を持たせ、
+  // MSA focus 時にキーボード展開後 (300ms 待ち) でその MSA を可視位置までスクロール。
+  // measureLayout を使って当該 MSA View の y 座標を ScrollView 座標系で取得し、
+  // 16px の余白を残してその位置に scrollTo する (16 = sheetScrollContent の paddingVertical 相当)。
+  const sheetScrollRef = useRef<ScrollView>(null)
+  const offerCharRef = useRef<View>(null)
+  const offerItemRef = useRef<View>(null)
+  const wantCharRef = useRef<View>(null)
+  const wantItemRef = useRef<View>(null)
+  const scrollToMsa = useCallback((msaRef: React.RefObject<View | null>) => {
+    setTimeout(() => {
+      msaRef.current?.measureLayout(
+        sheetScrollRef.current as unknown as React.ElementRef<typeof View>,
+        (_x, y) => {
+          sheetScrollRef.current?.scrollTo({ y: y - 16, animated: true })
+        },
+        () => {},
+      )
+    }, 300)
+  }, [])
+
   // Hold申請モーダル
   const [holdTarget, setHoldTarget] = useState<{
     post: VenueSupplyPost
@@ -405,10 +426,11 @@ export default function VenueHomeScreen() {
       setPostWantItemTypes([])
       setPostWantItemTypeFreeTexts([])
       setShowPostForm(false)
-      Alert.alert(
-        '投稿しました',
-        '自分の会場投稿は「自分の会場投稿を管理」から確認できます。'
-      )
+      // PR-3.6d: Alert を廃止し、シート close アニメーション + 板の即時リロードで
+      // 「投稿した感」を出す。自分の post は fetchSupplyPosts(venueId, excludeUserId=me) で
+      // 元から除外されるので板自体には現れないが、再取得で他者 post の最新化と
+      // loading インジケータの一瞬の明滅により完了フィードバックが伝わる。
+      void loadSupply()
       // 後方互換: 既存呼出側で setSupplyPosts に依存している箇所はないため変更なし
       void post
     } catch (error) {
@@ -677,246 +699,13 @@ export default function VenueHomeScreen() {
                   : '本日中有効'}
               </Text>
             </View>
-            {/* β1: form open 時のみ「✕ 閉じる」を表示。form を開く動線は
-                右下 FAB「この会場で出す」に一本化 (二重 CTA 整理)。 */}
-            {showPostForm && (
-              <Pressable
-                style={[styles.postButton, styles.postButtonActive]}
-                onPress={() => setShowPostForm(false)}
-              >
-                <Text style={styles.postButtonText}>✕ 閉じる</Text>
-              </Pressable>
-            )}
+            {/* PR-3.6d: 出品フォームは bottom sheet Modal に分離 (板とフォームの混線解消)。
+                以前ここにあった「✕ 閉じる」はシート内 × ボタンに役割を統合した。 */}
           </View>
 
-          {showPostForm && (
-                <View style={styles.formCard}>
-                  <Text style={styles.formTitle}>会場で交換に出す（イベント当日23:59まで有効）</Text>
-
-                  {/* PR3: 画像追加 UI (任意) */}
-                  <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>画像（任意）</Text>
-                    {postImageUri != null ? (
-                      <View style={styles.imagePreviewWrap}>
-                        <Image
-                          source={{ uri: postImageUri }}
-                          style={styles.imagePreview}
-                          resizeMode="cover"
-                        />
-                        <View style={styles.imageActions}>
-                          <Pressable
-                            style={styles.imageActionButton}
-                            onPress={handlePickImage}
-                          >
-                            <Text style={styles.imageActionText}>変更</Text>
-                          </Pressable>
-                          <Pressable
-                            style={styles.imageActionButton}
-                            onPress={handleClearImage}
-                          >
-                            <Text style={styles.imageActionText}>削除</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                    ) : (
-                      <Pressable
-                        style={styles.imagePickerButton}
-                        onPress={handlePickImage}
-                      >
-                        <Ionicons
-                          name="image-outline"
-                          size={20}
-                          color={colors.primary}
-                        />
-                        <Text style={styles.imagePickerText}>画像を選択</Text>
-                      </Pressable>
-                    )}
-                  </View>
-
-                  {/* PR-3.6b: 譲グッズ (master 構造化、会場の work_id で絞り込み) */}
-                  <Text style={styles.sectionLabel}>譲グッズ</Text>
-
-                  <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>メンバー / キャラ（任意）</Text>
-                    <MultiSelectAutocomplete<MasterCharacter>
-                      selected={postCharacters}
-                      onChange={setPostCharacters}
-                      fetchSuggestions={fetchOfferCharacterSuggestions}
-                      getKey={(c) => c.id}
-                      renderOption={(c) => (
-                        <View>
-                          <Text style={styles.msaOptionMain}>{c.display_name_ja}</Text>
-                          {c.display_name_en != null && c.display_name_en !== '' && (
-                            <Text style={styles.msaOptionSub}>{c.display_name_en}</Text>
-                          )}
-                        </View>
-                      )}
-                      renderChip={(c) => (
-                        <Text style={styles.msaChipLabel}>{c.display_name_ja}</Text>
-                      )}
-                      placeholder="例: ハルト, ヨシ"
-                      minInputChars={2}
-                      softLimit={10}
-                      freeTextEnabled
-                      onFreeText={handleAddOfferCharacterFreeText}
-                      freeTextModalTitle="フリーテキストで追加"
-                      freeTextModalBody="マスタにないキャラを追加できます。運営が確認次第マスタに追加されると、検索でヒットしやすくなります。"
-                    />
-                    {postCharacterFreeTexts.length > 0 && (
-                      <FreeTextChipsRow
-                        items={postCharacterFreeTexts}
-                        onRemove={(t) =>
-                          setPostCharacterFreeTexts((prev) => prev.filter((x) => x !== t))
-                        }
-                      />
-                    )}
-                  </View>
-
-                  <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>種別（任意）</Text>
-                    <MultiSelectAutocomplete<MasterItemType>
-                      selected={postItemTypes}
-                      onChange={setPostItemTypes}
-                      fetchSuggestions={fetchItemTypeSuggestions}
-                      getKey={(t) => t.id}
-                      renderOption={(t) => (
-                        <View>
-                          <Text style={styles.msaOptionMain}>{t.display_name_ja}</Text>
-                          {t.display_name_en != null && t.display_name_en !== '' && (
-                            <Text style={styles.msaOptionSub}>{t.display_name_en}</Text>
-                          )}
-                        </View>
-                      )}
-                      renderChip={(t) => (
-                        <Text style={styles.msaChipLabel}>{t.display_name_ja}</Text>
-                      )}
-                      placeholder="例: トレカ, 缶バッジ"
-                      minInputChars={2}
-                      softLimit={10}
-                      freeTextEnabled
-                      onFreeText={handleAddOfferItemTypeFreeText}
-                      freeTextModalTitle="フリーテキストで追加"
-                      freeTextModalBody="マスタにない種別を追加できます。運営が確認次第マスタに追加されます。"
-                    />
-                    {postItemTypeFreeTexts.length > 0 && (
-                      <FreeTextChipsRow
-                        items={postItemTypeFreeTexts}
-                        onRemove={(t) =>
-                          setPostItemTypeFreeTexts((prev) => prev.filter((x) => x !== t))
-                        }
-                      />
-                    )}
-                  </View>
-
-                  <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>商品名 *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="例：ハルト A ver. トレカ"
-                      value={postCard}
-                      // PR-3.6c: ユーザー操作で dirty=true にしてから値を反映。
-                      // 以後は譲セクション変更があっても自動同期されず、手書きの追記
-                      // (例: 'ハルト トレカ 2024') が保持される。
-                      onChangeText={(text) => {
-                        if (!postCardDirty) setPostCardDirty(true)
-                        setPostCard(text)
-                      }}
-                      autoCorrect={false}
-                    />
-                  </View>
-
-                  {/* PR-3.6b: 求グッズ (作品横断、複数候補 OK、空でも出品可) */}
-                  <Text style={styles.sectionLabel}>求グッズ</Text>
-
-                  <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>メンバー / キャラ（任意・作品横断）</Text>
-                    <MultiSelectAutocomplete<MasterCharacter>
-                      selected={postWantCharacters}
-                      onChange={setPostWantCharacters}
-                      fetchSuggestions={fetchWantCharacterSuggestions}
-                      getKey={(c) => c.id}
-                      renderOption={(c) => (
-                        <View>
-                          <Text style={styles.msaOptionMain}>{c.display_name_ja}</Text>
-                          {c.display_name_en != null && c.display_name_en !== '' && (
-                            <Text style={styles.msaOptionSub}>{c.display_name_en}</Text>
-                          )}
-                        </View>
-                      )}
-                      renderChip={(c) => (
-                        <Text style={styles.msaChipLabel}>{c.display_name_ja}</Text>
-                      )}
-                      placeholder="例: ジヒョン, ハルト"
-                      minInputChars={2}
-                      softLimit={10}
-                      freeTextEnabled
-                      onFreeText={handleAddWantCharacterFreeText}
-                      freeTextModalTitle="フリーテキストで追加"
-                      freeTextModalBody="マスタにないキャラを追加できます。運営が確認次第マスタに追加されます。"
-                    />
-                    {postWantCharacterFreeTexts.length > 0 && (
-                      <FreeTextChipsRow
-                        items={postWantCharacterFreeTexts}
-                        onRemove={(t) =>
-                          setPostWantCharacterFreeTexts((prev) =>
-                            prev.filter((x) => x !== t),
-                          )
-                        }
-                      />
-                    )}
-                  </View>
-
-                  <View style={styles.fieldBlock}>
-                    <Text style={styles.fieldLabel}>種別（任意）</Text>
-                    <MultiSelectAutocomplete<MasterItemType>
-                      selected={postWantItemTypes}
-                      onChange={setPostWantItemTypes}
-                      fetchSuggestions={fetchItemTypeSuggestions}
-                      getKey={(t) => t.id}
-                      renderOption={(t) => (
-                        <View>
-                          <Text style={styles.msaOptionMain}>{t.display_name_ja}</Text>
-                          {t.display_name_en != null && t.display_name_en !== '' && (
-                            <Text style={styles.msaOptionSub}>{t.display_name_en}</Text>
-                          )}
-                        </View>
-                      )}
-                      renderChip={(t) => (
-                        <Text style={styles.msaChipLabel}>{t.display_name_ja}</Text>
-                      )}
-                      placeholder="例: トレカ, アクスタ"
-                      minInputChars={2}
-                      softLimit={10}
-                      freeTextEnabled
-                      onFreeText={handleAddWantItemTypeFreeText}
-                      freeTextModalTitle="フリーテキストで追加"
-                      freeTextModalBody="マスタにない種別を追加できます。運営が確認次第マスタに追加されます。"
-                    />
-                    {postWantItemTypeFreeTexts.length > 0 && (
-                      <FreeTextChipsRow
-                        items={postWantItemTypeFreeTexts}
-                        onRemove={(t) =>
-                          setPostWantItemTypeFreeTexts((prev) =>
-                            prev.filter((x) => x !== t),
-                          )
-                        }
-                      />
-                    )}
-                  </View>
-
-                  <Pressable
-                    style={[styles.submitButton, (postCard.trim() === '' || posting) && styles.buttonDisabled]}
-                    onPress={handleSubmitPost}
-                    disabled={postCard.trim() === '' || posting}
-                  >
-                    {posting ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <Text style={styles.submitButtonText}>投稿する</Text>
-                    )}
-                  </Pressable>
-                </View>
-              )}
+          {/* PR-3.6d: 出品フォームの inline JSX (画像 / 譲セクション / 求セクション /
+              投稿ボタン) は本 PR で bottom sheet Modal (file 末尾) に移植・除去済。
+              ScrollView 内には供給板リストのみが残る (板とフォームの混線を解消)。 */}
 
           {loadingSupply ? (
             <ActivityIndicator color={VENUE_COLORS.brand} style={{ marginTop: 24 }} />
@@ -1057,7 +846,7 @@ export default function VenueHomeScreen() {
           β1: 出品 form を開く動線はこの FAB のみに一本化 (inline 「＋」ボタンは廃止)。
           表示条件:
             - Hold 申請モーダル open 中は非表示 (overlay 競合防止)
-            - 会場出品フォーム open 中は非表示 (form に「✕ 閉じる」が出る) */}
+            - 出品シート open 中は非表示 (PR-3.6d: シート overlay と二重表示防止) */}
       {holdTarget == null && !showPostForm && (
         <SubmitFab
           label="この会場で出す"
@@ -1067,6 +856,291 @@ export default function VenueHomeScreen() {
           accessibilityLabel="この会場の当日供給板に出品"
         />
       )}
+
+      {/* PR-3.6d: 出品ボトムシート (Modal slide-up)。
+          板 (ScrollView) とフォームを物理分離して以下を解決:
+            (1) フォーム表示中に板を見にいけてしまう混線
+            (2) キーボードで入力欄が隠れる問題 (KeyboardAvoidingView + 内部 ScrollView)
+            (3) フィードバックループの遅さ (Alert → close+reload に置換、handleSubmitPost で実装) */}
+      <Modal
+        visible={showPostForm}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPostForm(false)}
+      >
+        <View style={styles.sheetOverlay}>
+          {/* オーバーレイ tap → close。
+              本 Pressable は absoluteFill で背面を埋め、シート本体 (後段 child) より
+              下のレイヤーに描画されるため、シート上 tap はシートが受け取る (RN の child 順 = z 順)。 */}
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setShowPostForm(false)}
+            accessibilityLabel="シートを閉じる"
+          />
+
+          <KeyboardAvoidingView
+            style={styles.sheetContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <View style={styles.sheetCard}>
+              {/* drag indicator (視覚のみ、実 drag gesture は本 PR スコープ外) */}
+              <View style={styles.sheetHandle} />
+
+              <View style={styles.sheetTitleRow}>
+                <Text style={styles.sheetTitle}>出品する</Text>
+                <Pressable
+                  style={styles.sheetClose}
+                  onPress={() => setShowPostForm(false)}
+                  hitSlop={12}
+                  accessibilityLabel="閉じる"
+                >
+                  <Ionicons name="close" size={24} color={VENUE_COLORS.body} />
+                </Pressable>
+              </View>
+
+              <ScrollView
+                ref={sheetScrollRef}
+                style={styles.sheetScroll}
+                contentContainerStyle={styles.sheetScrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {/* 画像 picker (既存) */}
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.fieldLabel}>画像（任意）</Text>
+                  {postImageUri != null ? (
+                    <View style={styles.imagePreviewWrap}>
+                      <Image
+                        source={{ uri: postImageUri }}
+                        style={styles.imagePreview}
+                        resizeMode="cover"
+                      />
+                      <View style={styles.imageActions}>
+                        <Pressable
+                          style={styles.imageActionButton}
+                          onPress={handlePickImage}
+                        >
+                          <Text style={styles.imageActionText}>変更</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.imageActionButton}
+                          onPress={handleClearImage}
+                        >
+                          <Text style={styles.imageActionText}>削除</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <Pressable
+                      style={styles.imagePickerButton}
+                      onPress={handlePickImage}
+                    >
+                      <Ionicons
+                        name="image-outline"
+                        size={20}
+                        color={colors.primary}
+                      />
+                      <Text style={styles.imagePickerText}>画像を選択</Text>
+                    </Pressable>
+                  )}
+                </View>
+
+                {/* 譲セクション (PR-3.6b: master 構造化、会場の work_id で絞り込み) */}
+                <Text style={styles.sectionLabel}>譲グッズ</Text>
+
+                <View ref={offerCharRef} style={styles.fieldBlock} collapsable={false}>
+                  <Text style={styles.fieldLabel}>メンバー / キャラ（任意）</Text>
+                  <MultiSelectAutocomplete<MasterCharacter>
+                    selected={postCharacters}
+                    onChange={setPostCharacters}
+                    fetchSuggestions={fetchOfferCharacterSuggestions}
+                    getKey={(c) => c.id}
+                    renderOption={(c) => (
+                      <View>
+                        <Text style={styles.msaOptionMain}>{c.display_name_ja}</Text>
+                        {c.display_name_en != null && c.display_name_en !== '' && (
+                          <Text style={styles.msaOptionSub}>{c.display_name_en}</Text>
+                        )}
+                      </View>
+                    )}
+                    renderChip={(c) => (
+                      <Text style={styles.msaChipLabel}>{c.display_name_ja}</Text>
+                    )}
+                    placeholder="例: ハルト, ヨシ"
+                    minInputChars={2}
+                    softLimit={10}
+                    freeTextEnabled
+                    onFreeText={handleAddOfferCharacterFreeText}
+                    freeTextModalTitle="フリーテキストで追加"
+                    freeTextModalBody="マスタにないキャラを追加できます。運営が確認次第マスタに追加されると、検索でヒットしやすくなります。"
+                    onFocus={() => scrollToMsa(offerCharRef)}
+                  />
+                  {postCharacterFreeTexts.length > 0 && (
+                    <FreeTextChipsRow
+                      items={postCharacterFreeTexts}
+                      onRemove={(t) =>
+                        setPostCharacterFreeTexts((prev) => prev.filter((x) => x !== t))
+                      }
+                    />
+                  )}
+                </View>
+
+                <View ref={offerItemRef} style={styles.fieldBlock} collapsable={false}>
+                  <Text style={styles.fieldLabel}>種別（任意）</Text>
+                  <MultiSelectAutocomplete<MasterItemType>
+                    selected={postItemTypes}
+                    onChange={setPostItemTypes}
+                    fetchSuggestions={fetchItemTypeSuggestions}
+                    getKey={(t) => t.id}
+                    renderOption={(t) => (
+                      <View>
+                        <Text style={styles.msaOptionMain}>{t.display_name_ja}</Text>
+                        {t.display_name_en != null && t.display_name_en !== '' && (
+                          <Text style={styles.msaOptionSub}>{t.display_name_en}</Text>
+                        )}
+                      </View>
+                    )}
+                    renderChip={(t) => (
+                      <Text style={styles.msaChipLabel}>{t.display_name_ja}</Text>
+                    )}
+                    placeholder="例: トレカ, 缶バッジ"
+                    minInputChars={2}
+                    softLimit={10}
+                    freeTextEnabled
+                    onFreeText={handleAddOfferItemTypeFreeText}
+                    freeTextModalTitle="フリーテキストで追加"
+                    freeTextModalBody="マスタにない種別を追加できます。運営が確認次第マスタに追加されます。"
+                    onFocus={() => scrollToMsa(offerItemRef)}
+                  />
+                  {postItemTypeFreeTexts.length > 0 && (
+                    <FreeTextChipsRow
+                      items={postItemTypeFreeTexts}
+                      onRemove={(t) =>
+                        setPostItemTypeFreeTexts((prev) => prev.filter((x) => x !== t))
+                      }
+                    />
+                  )}
+                </View>
+
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.fieldLabel}>商品名 *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="例：ハルト A ver. トレカ"
+                    value={postCard}
+                    // PR-3.6c: ユーザー操作で dirty=true にしてから値を反映。
+                    // 以後は譲セクション変更があっても自動同期されず、手書きの追記
+                    // (例: 'ハルト トレカ 2024') が保持される。
+                    onChangeText={(text) => {
+                      if (!postCardDirty) setPostCardDirty(true)
+                      setPostCard(text)
+                    }}
+                    autoCorrect={false}
+                  />
+                </View>
+
+                {/* 求セクション (PR-3.6b: 作品横断、複数候補 OK、空でも出品可) */}
+                <Text style={styles.sectionLabel}>求グッズ</Text>
+
+                <View ref={wantCharRef} style={styles.fieldBlock} collapsable={false}>
+                  <Text style={styles.fieldLabel}>メンバー / キャラ（任意・作品横断）</Text>
+                  <MultiSelectAutocomplete<MasterCharacter>
+                    selected={postWantCharacters}
+                    onChange={setPostWantCharacters}
+                    fetchSuggestions={fetchWantCharacterSuggestions}
+                    getKey={(c) => c.id}
+                    renderOption={(c) => (
+                      <View>
+                        <Text style={styles.msaOptionMain}>{c.display_name_ja}</Text>
+                        {c.display_name_en != null && c.display_name_en !== '' && (
+                          <Text style={styles.msaOptionSub}>{c.display_name_en}</Text>
+                        )}
+                      </View>
+                    )}
+                    renderChip={(c) => (
+                      <Text style={styles.msaChipLabel}>{c.display_name_ja}</Text>
+                    )}
+                    placeholder="例: ジヒョン, ハルト"
+                    minInputChars={2}
+                    softLimit={10}
+                    freeTextEnabled
+                    onFreeText={handleAddWantCharacterFreeText}
+                    freeTextModalTitle="フリーテキストで追加"
+                    freeTextModalBody="マスタにないキャラを追加できます。運営が確認次第マスタに追加されます。"
+                    onFocus={() => scrollToMsa(wantCharRef)}
+                  />
+                  {postWantCharacterFreeTexts.length > 0 && (
+                    <FreeTextChipsRow
+                      items={postWantCharacterFreeTexts}
+                      onRemove={(t) =>
+                        setPostWantCharacterFreeTexts((prev) =>
+                          prev.filter((x) => x !== t),
+                        )
+                      }
+                    />
+                  )}
+                </View>
+
+                <View ref={wantItemRef} style={styles.fieldBlock} collapsable={false}>
+                  <Text style={styles.fieldLabel}>種別（任意）</Text>
+                  <MultiSelectAutocomplete<MasterItemType>
+                    selected={postWantItemTypes}
+                    onChange={setPostWantItemTypes}
+                    fetchSuggestions={fetchItemTypeSuggestions}
+                    getKey={(t) => t.id}
+                    renderOption={(t) => (
+                      <View>
+                        <Text style={styles.msaOptionMain}>{t.display_name_ja}</Text>
+                        {t.display_name_en != null && t.display_name_en !== '' && (
+                          <Text style={styles.msaOptionSub}>{t.display_name_en}</Text>
+                        )}
+                      </View>
+                    )}
+                    renderChip={(t) => (
+                      <Text style={styles.msaChipLabel}>{t.display_name_ja}</Text>
+                    )}
+                    placeholder="例: トレカ, アクスタ"
+                    minInputChars={2}
+                    softLimit={10}
+                    freeTextEnabled
+                    onFreeText={handleAddWantItemTypeFreeText}
+                    freeTextModalTitle="フリーテキストで追加"
+                    freeTextModalBody="マスタにない種別を追加できます。運営が確認次第マスタに追加されます。"
+                    onFocus={() => scrollToMsa(wantItemRef)}
+                  />
+                  {postWantItemTypeFreeTexts.length > 0 && (
+                    <FreeTextChipsRow
+                      items={postWantItemTypeFreeTexts}
+                      onRemove={(t) =>
+                        setPostWantItemTypeFreeTexts((prev) =>
+                          prev.filter((x) => x !== t),
+                        )
+                      }
+                    />
+                  )}
+                </View>
+
+                {/* PR-3.6d: 投稿ボタン (coral / アクション系 CTA、brand 紫は primary CTA 専用)。
+                    既存 disabled 条件 (postCard 必須 + posting flag) は維持。 */}
+                <Pressable
+                  style={[
+                    styles.sheetSubmitButton,
+                    (postCard.trim() === '' || posting) && styles.sheetSubmitButtonDisabled,
+                  ]}
+                  onPress={handleSubmitPost}
+                  disabled={postCard.trim() === '' || posting}
+                >
+                  {posting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.sheetSubmitButtonText}>出品する</Text>
+                  )}
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
 
       {/* Hold申請モーダル */}
       <Modal
@@ -1443,6 +1517,94 @@ const styles = StyleSheet.create({
   },
   submitButtonText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: '#FFFFFF' },
   buttonDisabled: { opacity: 0.5 },
+  // ─────────────────────────────────────────
+  // PR-3.6d: 出品 bottom sheet Modal
+  // ─────────────────────────────────────────
+  // 全画面 overlay (半透明黒) — 下端寄せでシートを 75% の高さに置く。
+  sheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  // KeyboardAvoidingView をこのコンテナで包む。height: '75%' で画面下から
+  // 75% せり上がる構成 (flex: 0.75 相当)。
+  sheetContainer: {
+    height: '75%',
+  },
+  // シート本体: 上端角丸の白パネル、上 8px / 水平 16px パディング (spec)。
+  sheetCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 8,
+    paddingHorizontal: 16,
+    // 軽い上方向 shadow (iOS) / elevation (Android)、せり上がりの「浮遊感」用
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 12,
+  },
+  // 上端 drag indicator (40x4、丸、#D1D5DB、中央)。視覚のみ (gesture 未配線)。
+  sheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D1D5DB',
+    alignSelf: 'center',
+    marginBottom: 8,
+  },
+  // ヘッダー行: 中央タイトル + 右上 × ボタン。× は absolute で右に固定。
+  sheetTitleRow: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E7E9EF',
+  },
+  sheetTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: VENUE_COLORS.headline,
+  },
+  sheetClose: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // シート本体内 ScrollView (KeyboardAvoidingView → sheetCard → ScrollView)
+  sheetScroll: {
+    flex: 1,
+  },
+  sheetScrollContent: {
+    paddingVertical: spacing.md,
+    gap: spacing.md,
+    paddingBottom: spacing.xl,
+  },
+  // 出品ボタン (coral / アクション系 CTA、brand 紫は primary CTA 専用)。
+  sheetSubmitButton: {
+    marginTop: spacing.sm,
+    height: 48,
+    borderRadius: radius.lg,
+    backgroundColor: VENUE_COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetSubmitButtonDisabled: {
+    opacity: 0.4,
+  },
+  sheetSubmitButtonText: {
+    fontSize: fontSize.base,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
   // PR3: 画像 picker / preview
   imagePickerButton: {
     flexDirection: 'row',

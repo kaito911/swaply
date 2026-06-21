@@ -85,6 +85,16 @@ function getDisplayName(poster: VenueSupplyPost['poster']): string {
   return poster.handle ?? poster.display_name ?? 'ユーザー'
 }
 
+// PR-6: 双方向マッチペア (自分の出品 myPost ⇄ 相手の出品 theirPost) のデータ型。
+// レーン UI のカードキー + Hold モーダル open 時の preset 値ソース。
+// matchedOfferSlugs / matchedWantSlugs は将来サブラベルやデバッグ用 (本 PR では未表示)。
+type MutualMatchPair = {
+  myPost: VenueSupplyPost
+  theirPost: VenueSupplyPost
+  matchedOfferSlugs: string[]
+  matchedWantSlugs: string[]
+}
+
 // PR-3.6b: 出品 form の MultiSelectAutocomplete 配下に freeText 追加分を別行で表示する
 // 小さな chip リスト。通常出品 (app/listing/new/characters.tsx) の同等セクションを
 // インライン化したもの (会場 form は inline 完結 = 別画面遷移なしの即時性優先のため)。
@@ -293,6 +303,46 @@ export default function VenueHomeScreen() {
     () => mySupplyPosts.flatMap((p) => p.want_item_types ?? []),
     [mySupplyPosts],
   )
+
+  // PR-6: 双方向マッチペア (自分の出品 X ⇄ 相手の出品 Y) を全件列挙。
+  //   ペア条件:
+  //     - 相手の譲 (theirOffer) ∩ 自分の求 (myWant) が 1 件以上
+  //     - 自分の譲 (myOffer) ∩ 相手の求 (theirWant) が 1 件以上
+  //   両方成立した組合せのみ採用 (片方向マッチはレーン非表示、PR-4 のリボンが拾う)。
+  //   dedup しない (同じ相手 post に自分の複数 post でマッチしたら別カードとして並ぶ)。
+  //   検索フィルタは無視して supplyPosts 全件を母集合にする (検索中でもマッチは表示)。
+  const mutualPairs = useMemo<MutualMatchPair[]>(() => {
+    const pairs: MutualMatchPair[] = []
+    for (const myPost of mySupplyPosts) {
+      const myOffer = myPost.characters ?? []
+      const myWant = myPost.want_characters ?? []
+      if (myOffer.length === 0 && myWant.length === 0) continue
+      for (const theirPost of supplyPosts) {
+        const theirOffer = theirPost.characters ?? []
+        const theirWant = theirPost.want_characters ?? []
+        const matchedWant = theirOffer.filter((s) => myWant.includes(s))
+        const matchedOffer = theirWant.filter((s) => myOffer.includes(s))
+        if (matchedWant.length > 0 && matchedOffer.length > 0) {
+          pairs.push({
+            myPost,
+            theirPost,
+            matchedOfferSlugs: matchedOffer,
+            matchedWantSlugs: matchedWant,
+          })
+        }
+      }
+    }
+    // ソート: 一致度 (matchedOffer + matchedWant の合計) 降順、同点は相手 post の created_at 降順
+    pairs.sort((a, b) => {
+      const aScore = a.matchedOfferSlugs.length + a.matchedWantSlugs.length
+      const bScore = b.matchedOfferSlugs.length + b.matchedWantSlugs.length
+      if (bScore !== aScore) return bScore - aScore
+      return (b.theirPost.created_at ?? '').localeCompare(
+        a.theirPost.created_at ?? '',
+      )
+    })
+    return pairs
+  }, [mySupplyPosts, supplyPosts])
 
   const filteredPosts = useMemo(() => {
     if (searchCharacters.length === 0) return supplyPosts
@@ -531,9 +581,15 @@ export default function VenueHomeScreen() {
     }
   }
 
-  const handleHoldRequest = (post: VenueSupplyPost) => {
-    setHoldTarget({ post, myCard: '' })
-    setMyCardInput('')
+  // PR-6: 双方向マッチレーンからの呼出で proposer_card のプリセット値を受け取れるよう
+  // optional 引数 myCardPreset を追加。既存の供給板カードからの呼出は引数なしのままで動く。
+  // プリセット値はユーザーが Modal 内 TextInput で自由に編集可能 (placeholder ではなく value)。
+  const handleHoldRequest = (
+    post: VenueSupplyPost,
+    myCardPreset?: string,
+  ) => {
+    setHoldTarget({ post, myCard: myCardPreset ?? '' })
+    setMyCardInput(myCardPreset ?? '')
     setHoldAgreed(false)
     setHoldSent(false)
     setHoldImageUri(null)
@@ -777,6 +833,95 @@ export default function VenueHomeScreen() {
                 - 成立候補レーン (P1 follow-up): 同会場 / Trust / 差額量で自動提案 (要 RPC 設計)
               復活時はレーンタブ + 各 lane content を別 PR で追加する。 */}
 
+          {/* PR-6: 双方向マッチレーン (横スクロール、accent 色強調)。
+              mutualPairs.length === 0 のときレーンごと非表示 (供給板だけ見せる)。
+              検索バーで絞り込み中でもこのレーンは消えない (マッチ計算は supplyPosts 全件) */}
+          {mutualPairs.length > 0 && (
+            <View style={styles.matchLane}>
+              <Text style={styles.matchLaneTitle}>◎ 今すぐ交換できる</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.matchLaneScroll}
+              >
+                {mutualPairs.map((pair) => (
+                  <View
+                    key={`${pair.myPost.id}_${pair.theirPost.id}`}
+                    style={styles.matchCard}
+                  >
+                    {/* PR-6-b: 相手 / 自分それぞれのサムネを追加。image_url が NULL の
+                        ケースは供給板カードと同じ brand-tint + image-outline 方式の
+                        プレースホルダで揃える (視認性 + 既存パターン踏襲)。 */}
+                    <Text style={styles.matchCardLabel}>相手が出す</Text>
+                    <View style={styles.matchCardRow}>
+                      {pair.theirPost.image_url != null ? (
+                        <Image
+                          source={{ uri: pair.theirPost.image_url }}
+                          style={styles.matchCardThumb}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.matchCardThumb,
+                            styles.matchCardThumbPlaceholder,
+                          ]}
+                        >
+                          <Ionicons
+                            name="image-outline"
+                            size={18}
+                            color={VENUE_COLORS.brand}
+                          />
+                        </View>
+                      )}
+                      <Text style={styles.matchCardName} numberOfLines={2}>
+                        {pair.theirPost.card_name}
+                      </Text>
+                    </View>
+                    <Text style={styles.matchCardArrow}>⇵</Text>
+                    <Text style={styles.matchCardLabel}>あなたが出す</Text>
+                    <View style={styles.matchCardRow}>
+                      {pair.myPost.image_url != null ? (
+                        <Image
+                          source={{ uri: pair.myPost.image_url }}
+                          style={styles.matchCardThumb}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.matchCardThumb,
+                            styles.matchCardThumbPlaceholder,
+                          ]}
+                        >
+                          <Ionicons
+                            name="image-outline"
+                            size={18}
+                            color={VENUE_COLORS.brand}
+                          />
+                        </View>
+                      )}
+                      <Text style={styles.matchCardName} numberOfLines={2}>
+                        {pair.myPost.card_name}
+                      </Text>
+                    </View>
+                    <Pressable
+                      style={styles.matchCardButton}
+                      onPress={() =>
+                        handleHoldRequest(pair.theirPost, pair.myPost.card_name)
+                      }
+                      accessibilityLabel="この組み合わせでHold申請"
+                    >
+                      <Text style={styles.matchCardButtonText}>
+                        この組み合わせでHold
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
           {/* ── 当日供給板 (β1 主画面) ── */}
           <View style={styles.supplyHeader}>
             <View style={styles.supplyHeaderText}>
@@ -899,31 +1044,14 @@ export default function VenueHomeScreen() {
               }
               return (
                 <View key={post.id} style={styles.supplyCard}>
-                  {hasOverlap && (
-                    <View
-                      style={
-                        isMutual ? styles.ribbonMutual : styles.ribbonOne
-                      }
-                    >
-                      <Text
-                        style={
-                          isMutual
-                            ? styles.ribbonMutualText
-                            : styles.ribbonOneText
-                        }
-                      >
-                        {isMutual ? '◎ 相互一致' : '求と一致'}
-                      </Text>
+                  {/* PR-6-b: 供給板リボンは「片方向一致のみ」に絞る。
+                      双方向 (isMutual) は上部マッチレーン (PR-6) に集約済なのでここでは出さない。
+                      hasOverlap && !isMutual = 片方向のみ → 薄ピンク「求と一致」固定。 */}
+                  {hasOverlap && !isMutual && (
+                    <View style={styles.ribbonOne}>
+                      <Text style={styles.ribbonOneText}>求と一致</Text>
                       {typeNote !== '' && (
-                        <Text
-                          style={
-                            isMutual
-                              ? styles.ribbonTypeNoteMutual
-                              : styles.ribbonTypeNoteOne
-                          }
-                        >
-                          {typeNote}
-                        </Text>
+                        <Text style={styles.ribbonTypeNoteOne}>{typeNote}</Text>
                       )}
                     </View>
                   )}
@@ -1628,6 +1756,84 @@ const styles = StyleSheet.create({
     color: VENUE_COLORS.body,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  // PR-6: 双方向マッチレーン (横スクロール、供給板の上、accent 色強調)。
+  matchLane: {
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  matchLaneTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: VENUE_COLORS.accent,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  matchLaneScroll: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  matchCard: {
+    // PR-6-b: サムネ + 名前 2 列レイアウトに対応するため幅を 200 → 220 に拡張。
+    width: 220,
+    backgroundColor: VENUE_COLORS.accentTint,
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: VENUE_COLORS.accent + '40',
+  },
+  matchCardLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: VENUE_COLORS.accent,
+    opacity: 0.7,
+  },
+  // PR-6-b: サムネ + 名前の横並びコンテナ。
+  matchCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  // PR-6-b: マッチカード内サムネ (56×56、角丸 8px、placeholder と兼用)。
+  matchCardThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: VENUE_COLORS.background,
+  },
+  matchCardThumbPlaceholder: {
+    backgroundColor: VENUE_COLORS.brandTint,
+    borderWidth: 1,
+    borderColor: VENUE_COLORS.brandBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  matchCardName: {
+    // サムネと横並びになるため flex で残り幅を取らせる。
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#15161E',
+  },
+  matchCardArrow: {
+    fontSize: 16,
+    color: VENUE_COLORS.accent,
+    textAlign: 'center',
+    marginVertical: 6,
+  },
+  matchCardButton: {
+    marginTop: 10,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: VENUE_COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  matchCardButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   // β1 当日供給板の見出し: 「いま出ている募集」+ {n} 件 · 本日中有効
   supplyHeader: {

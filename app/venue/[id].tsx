@@ -182,6 +182,10 @@ export default function VenueHomeScreen() {
   // 手書きで足したシリーズ名等 (例: '2024') を保持する。
   // フォームリセット時 (submit 成功 / form 閉じる) で false に戻して次回再開可能。
   const [postCardDirty, setPostCardDirty] = useState(false)
+  // PR-3.6e: 求種別は譲種別をデフォルトで継承する (同シリーズ・別メンバー・同種交換が
+  // 多数派の現場観察に基づく)。ユーザーが求種別を手で触った瞬間に dirty=true、
+  // 以後は譲種別が変わっても追従しない。フォーム submit 成功時に false に戻す。
+  const [postWantItemTypesDirty, setPostWantItemTypesDirty] = useState(false)
   const [postImageUri, setPostImageUri] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
   // PR-3.6b: 通常出品と同じ master 構造化入力 (master ID + freeText 混在の string[])。
@@ -214,6 +218,14 @@ export default function VenueHomeScreen() {
     const derived = [...chars, ...items].join(' ')
     setPostCard(derived)
   }, [postCardDirty, postCharacters, postCharacterFreeTexts, postItemTypes])
+
+  // PR-3.6e: 求種別 (postWantItemTypes) を譲種別 (postItemTypes) から継承。
+  //   postWantItemTypesDirty===false の間は、譲種別が変わるたびに求種別を同期する。
+  //   ユーザーが求種別 MSA を手で触った瞬間に dirty=true、以後は追従しない。
+  useEffect(() => {
+    if (postWantItemTypesDirty) return
+    setPostWantItemTypes(postItemTypes)
+  }, [postWantItemTypesDirty, postItemTypes])
 
   // PR-3.6d-fix: bottom sheet の ScrollView + 4 つの MSA wrap View に ref を持たせ、
   // MSA focus 時にキーボード展開後 (300ms 待ち) でその MSA を可視位置までスクロール。
@@ -416,6 +428,8 @@ export default function VenueHomeScreen() {
       setPostCard('')
       // PR-3.6c: 次回フォーム開きでも自動派生を再開できるよう dirty を戻す。
       setPostCardDirty(false)
+      // PR-3.6e: 求種別の譲継承も次回フォームで再開させる。
+      setPostWantItemTypesDirty(false)
       setPostImageUri(null)
       setPostCharacters([])
       setPostCharacterFreeTexts([])
@@ -1085,7 +1099,12 @@ export default function VenueHomeScreen() {
                   <Text style={styles.fieldLabel}>種別（任意）</Text>
                   <MultiSelectAutocomplete<MasterItemType>
                     selected={postWantItemTypes}
-                    onChange={setPostWantItemTypes}
+                    // PR-3.6e: ユーザー操作で dirty=true にしてから値を反映。
+                    // 以後は譲種別 (postItemTypes) が変わっても求種別は追従しない。
+                    onChange={(next) => {
+                      setPostWantItemTypesDirty(true)
+                      setPostWantItemTypes(next)
+                    }}
                     fetchSuggestions={fetchItemTypeSuggestions}
                     getKey={(t) => t.id}
                     renderOption={(t) => (

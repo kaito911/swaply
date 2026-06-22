@@ -41,6 +41,56 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // ─────────────────────────────────────────
+// PR-V1 (venue resilience): 会場モードの読み込み系 fetch 共通タイムアウト
+// ─────────────────────────────────────────
+//
+// 採用方式: Promise.race。
+//   理由: supabase-js v2 の PostgrestBuilder は AbortSignal 非対応のため、
+//         真に request を abort できない。Promise.race で「結果を捨てる」方式を採用。
+//
+// ⚠️ 既知の制約 (V1 妥協点):
+//   タイムアウトで race から落とした request は内部で生き続け、帯域を解放しない。
+//   ドーム/アリーナで数万人が同時通信する環境では、捨てたリクエストの帯域消費が
+//   むしろ悪化要因として効く可能性がある (= V1 タイムアウト導入で「無限 hanging」は
+//   解消するが、輻輳そのものは軽減しない)。
+//
+// 根本対処は V3 (再fetch 間引き + キャッシュ) で「そもそも request 本数を減らす」
+// 方向で実施する。V1 では race の妥協を受け入れ、まず「画面が固まらない」状態を作る。
+//
+// 値の根拠 (推測): supabase-js のデフォルトは無限待機。会場 (ドーム/アリーナ) の
+// 弱電波下で「8 秒応答ない = ほぼ無理」が経験則。長すぎると UX 悪化、短すぎると
+// 正常リクエストまで切ってしまう。次の PR-V2 でリトライ UI を載せたとき、
+// ユーザーが手動で再試行できる粒度として 8 秒を初期値とする。
+export const VENUE_FETCH_TIMEOUT_MS = 8000
+
+export class VenueFetchTimeoutError extends Error {
+  constructor(operation: string) {
+    super(`VENUE_FETCH_TIMEOUT: ${operation}`)
+    this.name = 'VenueFetchTimeoutError'
+  }
+}
+
+/**
+ * Promise.race でタイムアウトを掛ける軽量ヘルパー。
+ * 元の Promise は abort せず継続するが、UI 側は VenueFetchTimeoutError を見て
+ * 諦めて empty 表示にする / V2 でリトライバナーを出す等の判断ができる。
+ */
+async function withVenueTimeout<T>(
+  operation: string,
+  promise: Promise<T>,
+): Promise<T> {
+  return Promise.race<T>([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(
+        () => reject(new VenueFetchTimeoutError(operation)),
+        VENUE_FETCH_TIMEOUT_MS,
+      )
+    }),
+  ])
+}
+
+// ─────────────────────────────────────────
 // Home screen
 // ─────────────────────────────────────────
 
@@ -2162,20 +2212,25 @@ export async function fetchVenue(venueId: string): Promise<Venue | null> {
   //   本コードを merge すること。未適用の DB だと PostgREST が
   //   'column work_id does not exist' で 400 を返し fetchVenue が null となり、
   //   会場文脈ヘッダーが silent に非表示になる。詳細は migration ファイル冒頭参照。
-  const { data, error } = await supabase
-    .from('venues')
-    .select(
-      'id, title, venue_name, event_date, starts_at, ends_at, status, created_at, work_id'
-    )
-    .eq('id', venueId)
-    .single()
+  // PR-V1: withVenueTimeout で 8s タイムアウト。timeout 時は VenueFetchTimeoutError を
+  //   throw、呼出側 (loadVenueContext) が catch して既存 null fallback と同じ挙動。
+  //   PostgrestBuilder は thenable だが Promise<T> ではないため IIFE で包んで Promise 化。
+  return withVenueTimeout('fetchVenue', (async () => {
+    const { data, error } = await supabase
+      .from('venues')
+      .select(
+        'id, title, venue_name, event_date, starts_at, ends_at, status, created_at, work_id',
+      )
+      .eq('id', venueId)
+      .single()
 
-  if (error) {
-    console.error('[fetchVenue]', error)
-    return null
-  }
+    if (error) {
+      console.error('[fetchVenue]', error)
+      return null
+    }
 
-  return data as Venue
+    return data as Venue
+  })())
 }
 
 export async function fetchMyCheckin(
@@ -2215,17 +2270,22 @@ export async function checkInVenue(
 }
 
 export async function fetchVenueCheckinCount(venueId: string): Promise<number> {
-  const { count, error } = await supabase
-    .from('venue_checkins')
-    .select('*', { count: 'exact', head: true })
-    .eq('venue_id', venueId)
+  // PR-V1: withVenueTimeout で 8s タイムアウト。timeout 時は VenueFetchTimeoutError を
+  //   throw、呼出側が catch して checkinCountFailed flag をセット (「— 人参加中」表示)。
+  //   PostgrestBuilder は thenable だが Promise<T> ではないため IIFE で包んで Promise 化。
+  return withVenueTimeout('fetchVenueCheckinCount', (async () => {
+    const { count, error } = await supabase
+      .from('venue_checkins')
+      .select('*', { count: 'exact', head: true })
+      .eq('venue_id', venueId)
 
-  if (error) {
-    console.error('[fetchVenueCheckinCount]', error)
-    return 0
-  }
+    if (error) {
+      console.error('[fetchVenueCheckinCount]', error)
+      return 0
+    }
 
-  return count ?? 0
+    return count ?? 0
+  })())
 }
 
 /**
@@ -2239,46 +2299,51 @@ export async function fetchSupplyPosts(
   venueId: string,
   excludeUserId?: string | null
 ): Promise<VenueSupplyPost[]> {
-  const now = new Date().toISOString()
+  // PR-V1: 2 段クエリ (supply_posts SELECT + profiles SELECT) の合計を 1 タイマーで
+  //   包む。8s 超えたら VenueFetchTimeoutError を throw、呼出側 (loadSupply) が catch
+  //   して既存の空配列 fallback と同じ挙動。
+  return withVenueTimeout('fetchSupplyPosts', (async () => {
+    const now = new Date().toISOString()
 
-  let query = supabase
-    .from('venue_supply_posts')
-    .select('*')
-    .eq('venue_id', venueId)
-    .eq('status', 'active')
-    .gt('expires_at', now)
-    .order('created_at', { ascending: false })
+    let query = supabase
+      .from('venue_supply_posts')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('status', 'active')
+      .gt('expires_at', now)
+      .order('created_at', { ascending: false })
 
-  if (excludeUserId != null) {
-    query = query.neq('user_id', excludeUserId)
-  }
+    if (excludeUserId != null) {
+      query = query.neq('user_id', excludeUserId)
+    }
 
-  const { data, error } = await query
+    const { data, error } = await query
 
-  if (error) {
-    console.error('[fetchSupplyPosts]', error)
-    return []
-  }
+    if (error) {
+      console.error('[fetchSupplyPosts]', error)
+      return []
+    }
 
-  const posts = (data ?? []) as VenueSupplyPost[]
+    const posts = (data ?? []) as VenueSupplyPost[]
 
-  // poster情報を別クエリで取得
-  const userIds = [...new Set(posts.map((p) => p.user_id))]
-  if (userIds.length === 0) return posts
+    // poster情報を別クエリで取得
+    const userIds = [...new Set(posts.map((p) => p.user_id))]
+    if (userIds.length === 0) return posts
 
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id, handle, display_name, trade_count, ship_rate, trouble_count')
-    .in('id', userIds)
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, handle, display_name, trade_count, ship_rate, trouble_count')
+      .in('id', userIds)
 
-  const profileMap = Object.fromEntries(
-    (profiles ?? []).map((p) => [p.id, p])
-  )
+    const profileMap = Object.fromEntries(
+      (profiles ?? []).map((p) => [p.id, p])
+    )
 
-  return posts.map((post) => ({
-    ...post,
-    poster: profileMap[post.user_id] ?? undefined,
-  }))
+    return posts.map((post) => ({
+      ...post,
+      poster: profileMap[post.user_id] ?? undefined,
+    }))
+  })())
 }
 
 export async function addSupplyPost(params: {
@@ -2592,26 +2657,30 @@ export async function fetchReceivedHoldCount(
   userId: string,
   venueId?: string
 ): Promise<number> {
-  const now = new Date().toISOString()
-  let query = supabase
-    .from('venue_holds')
-    .select('id', { count: 'exact', head: true })
-    .eq('receiver_id', userId)
-    .eq('status', 'pending')
-    .gt('expires_at', now)
+  // PR-V1: withVenueTimeout で 8s タイムアウト。timeout 時は VenueFetchTimeoutError を
+  //   throw、呼出側 (loadHoldCount) が catch して既存の 0 fallback と同じ挙動。
+  return withVenueTimeout('fetchReceivedHoldCount', (async () => {
+    const now = new Date().toISOString()
+    let query = supabase
+      .from('venue_holds')
+      .select('id', { count: 'exact', head: true })
+      .eq('receiver_id', userId)
+      .eq('status', 'pending')
+      .gt('expires_at', now)
 
-  if (venueId != null) {
-    query = query.eq('venue_id', venueId)
-  }
+    if (venueId != null) {
+      query = query.eq('venue_id', venueId)
+    }
 
-  const { count, error } = await query
+    const { count, error } = await query
 
-  if (error) {
-    console.error('[fetchReceivedHoldCount]', error)
-    return 0
-  }
+    if (error) {
+      console.error('[fetchReceivedHoldCount]', error)
+      return 0
+    }
 
-  return count ?? 0
+    return count ?? 0
+  })())
 }
 
 /**
@@ -2622,19 +2691,24 @@ export async function fetchMySupplyPosts(
   venueId: string,
   userId: string
 ): Promise<VenueSupplyPost[]> {
-  const { data, error } = await supabase
-    .from('venue_supply_posts')
-    .select('*')
-    .eq('venue_id', venueId)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
+  // PR-V1: withVenueTimeout で 8s タイムアウト。timeout 時は VenueFetchTimeoutError を
+  //   throw、呼出側 (loadMySupplyPosts) が catch して既存の空配列 fallback と同じ挙動。
+  //   PostgrestBuilder は thenable だが Promise<T> ではないため IIFE で包んで Promise 化。
+  return withVenueTimeout('fetchMySupplyPosts', (async () => {
+    const { data, error } = await supabase
+      .from('venue_supply_posts')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
 
-  if (error) {
-    console.error('[fetchMySupplyPosts]', error)
-    return []
-  }
+    if (error) {
+      console.error('[fetchMySupplyPosts]', error)
+      return []
+    }
 
-  return (data ?? []) as VenueSupplyPost[]
+    return (data ?? []) as VenueSupplyPost[]
+  })())
 }
 
 /**

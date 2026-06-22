@@ -24,6 +24,7 @@ import {
   fetchVenue,
   fetchVenueCheckinCount,
   uploadCardImage,
+  VenueFetchTimeoutError,
 } from '@/lib/supabase'
 import { computeTrustBadge, Venue, VenueSupplyPost } from '@/lib/types'
 import type { MasterCharacter, MasterItemType } from '@/lib/types'
@@ -188,6 +189,10 @@ export default function VenueHomeScreen() {
   // fetch 失敗時 (venue=null) はヘッダー非表示にフォールバック。
   const [venue, setVenue] = useState<Venue | null>(null)
   const [checkinCount, setCheckinCount] = useState(0)
+  // PR-V1: checkinCount だけ「取得失敗」と「0 件」を区別したい (venue 取得は成功し
+  // 会場名は出ているのに、人数だけ取れなかった状態を「— 人参加中」で表現)。
+  // venue 自体の失敗判定は既存の venue==null fallback で代用 (V2 で venueFailed 追加余地)。
+  const [checkinCountFailed, setCheckinCountFailed] = useState(false)
 
   // 供給板投稿フォーム
   const [showPostForm, setShowPostForm] = useState(false)
@@ -375,13 +380,27 @@ export default function VenueHomeScreen() {
   // 画像なしでも従来通り申請できる (DB 列は nullable、RPC は jsonb_strip_nulls)。
   const [holdImageUri, setHoldImageUri] = useState<string | null>(null)
 
+  // PR-V1: 各 load 関数に try/catch を追加。VenueFetchTimeoutError を捕捉して
+  //   既存の silent fallback (空配列 / null / 0) と同じ挙動に倒す。
+  //   想定外のエラーは上位に throw して Sentry 等で検知可能にする。
+  //   loadingSupply は finally で確実に false に戻し、無限スピン防止。
   const loadSupply = useCallback(async () => {
     if (venueId == null) return
     setLoadingSupply(true)
-    // 当日掲示板は他人の post のみ表示。自分の post は /venue/my-posts に集約。
-    const posts = await fetchSupplyPosts(venueId, userId)
-    setSupplyPosts(posts)
-    setLoadingSupply(false)
+    try {
+      // 当日掲示板は他人の post のみ表示。自分の post は /venue/my-posts に集約。
+      const posts = await fetchSupplyPosts(venueId, userId)
+      setSupplyPosts(posts)
+    } catch (err) {
+      if (err instanceof VenueFetchTimeoutError) {
+        console.warn('[VenueHome][loadSupply]', err.message)
+        setSupplyPosts([])
+      } else {
+        throw err
+      }
+    } finally {
+      setLoadingSupply(false)
+    }
   }, [venueId, userId])
 
   const loadHoldCount = useCallback(async () => {
@@ -389,20 +408,57 @@ export default function VenueHomeScreen() {
       setReceivedHoldCount(0)
       return
     }
-    const count = await fetchReceivedHoldCount(userId, venueId)
-    setReceivedHoldCount(count)
+    try {
+      const count = await fetchReceivedHoldCount(userId, venueId)
+      setReceivedHoldCount(count)
+    } catch (err) {
+      if (err instanceof VenueFetchTimeoutError) {
+        console.warn('[VenueHome][loadHoldCount]', err.message)
+        setReceivedHoldCount(0)
+      } else {
+        throw err
+      }
+    }
   }, [venueId, userId])
 
-  // PR-2: venue 行 + チェックイン数を並列取得。失敗時 (venue=null) は
-  // 文脈ヘッダー非表示にフォールバック。
+  // PR-2 → PR-V1: venue 行 + チェックイン数を並列取得。
+  //   Promise.all で両方 fallback だと「checkinCount 失敗で会場名まで消える」最悪状態。
+  //   PR-V1 では Promise.allSettled で並列維持 + 個別判定し、venue が取れれば会場名を出す。
+  //   checkinCount だけが失敗した場合は checkinCountFailed=true で UI 側が「— 人参加中」表示。
   const loadVenueContext = useCallback(async () => {
     if (venueId == null) return
-    const [v, c] = await Promise.all([
+    const [vResult, cResult] = await Promise.allSettled([
       fetchVenue(venueId),
       fetchVenueCheckinCount(venueId),
     ])
-    setVenue(v)
-    setCheckinCount(c)
+
+    // venue: 成功 → setVenue / 失敗 (timeout 等) → null fallback (会場文脈ヘッダー非表示)。
+    //   既存の null 判定 (venue != null && ...) と同じ挙動を維持。
+    //   V2 で venueFailed state を追加するなら本 catch 内でセットする余地。
+    if (vResult.status === 'fulfilled') {
+      setVenue(vResult.value)
+    } else {
+      if (vResult.reason instanceof VenueFetchTimeoutError) {
+        console.warn('[VenueHome][loadVenueContext] venue', vResult.reason.message)
+      } else {
+        console.error('[VenueHome][loadVenueContext] venue', vResult.reason)
+      }
+      setVenue(null)
+    }
+
+    // checkinCount: 成功 → setCheckinCount + Failed=false / 失敗 → Failed=true。
+    //   既存値は保持して画面ちらつきを抑制 (UI 側で Failed=true なら「—」表示)。
+    if (cResult.status === 'fulfilled') {
+      setCheckinCount(cResult.value)
+      setCheckinCountFailed(false)
+    } else {
+      if (cResult.reason instanceof VenueFetchTimeoutError) {
+        console.warn('[VenueHome][loadVenueContext] checkinCount', cResult.reason.message)
+      } else {
+        console.error('[VenueHome][loadVenueContext] checkinCount', cResult.reason)
+      }
+      setCheckinCountFailed(true)
+    }
   }, [venueId])
 
   // PR-4: 自分の会場出品を取得 (マッチリボン計算用のデータソース)。
@@ -412,8 +468,17 @@ export default function VenueHomeScreen() {
       setMySupplyPosts([])
       return
     }
-    const posts = await fetchMySupplyPosts(venueId, userId)
-    setMySupplyPosts(posts)
+    try {
+      const posts = await fetchMySupplyPosts(venueId, userId)
+      setMySupplyPosts(posts)
+    } catch (err) {
+      if (err instanceof VenueFetchTimeoutError) {
+        console.warn('[VenueHome][loadMySupplyPosts]', err.message)
+        setMySupplyPosts([])
+      } else {
+        throw err
+      }
+    }
   }, [venueId, userId])
 
   // PR-2.1: 「開催中」LIVE ピル内ドットの opacity パルス。
@@ -758,7 +823,7 @@ export default function VenueHomeScreen() {
                   <Text style={styles.venueContextLiveText}>開催中</Text>
                 </View>
                 <Text style={styles.venueContextCheckin}>
-                  · {checkinCount}人参加中
+                  · {checkinCountFailed ? '—' : checkinCount}人参加中
                 </Text>
               </>
             ) : venue.status === 'upcoming' ? (

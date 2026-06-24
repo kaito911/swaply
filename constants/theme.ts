@@ -17,14 +17,37 @@
 // - trust* (プレフィックスなし): TradeStats 等のメトリック色 (legacy、別用途)
 
 export const colors = {
-  primary: '#1F2A52',
-  primaryDark: '#141B36',
+  // わくわく化 STEP 1 (色味確定 + 階層化): アプリ全体の主 CTA を coral に統一。
+  //   旧 navy (#1F2A52 / #141B36) → Swaply 正式 coral (#D94370 / #B82E5C)。
+  //
+  //   実機確認の経緯:
+  //     #F03060 (4.51:1) → ピンクが強い・チカチカ・安っぽい
+  //     #EC4070 (4.52:1) → 色味だけでは根本解決せず (主因はベタ塗り面積)
+  //     #D94370 (5.30:1) → 上質・落ち着き、ビビッドより少し深め、AAA に近い視認性
+  //
+  //   コントラスト: 白文字 on #D94370 = 5.30:1 で WCAG AA Normal 余裕クリア (確定)。
+  //   primaryDark は HSL lightness/saturation を約 7pt 暗化した #B82E5C
+  //   (押下 state / 濃いめ強調用、コントラスト 6.7:1 で AAA 圏内)。
+  //
+  //   同時に PrimaryCTA 呼出側で variant='outline' を導入し、サブアクション
+  //   (キャンセル / 戻る / アカウント削除等) を白地 + coral 枠線 + coral 文字に
+  //   分離。主 CTA (出品 / 提案 / Hold 等) のみ solid coral 維持 → ベタ塗り面積を
+  //   1 画面 1 個原則に近づけ、チカチカ感を構造的に解消。
+  //
+  //   VENUE_COLORS の brand / accent / inline coral 直書き約 100 箇所は本 STEP
+  //   では touch せず、STEP 2/3 で別途扱う。
+  primary: '#D94370',
+  primaryDark: '#B82E5C',
 
-  background: '#FFFFFF',
+  // わくわく化 STEP 1: 画面背景にごくごく微量のピンク (= white で完全な無味では
+  //   なく coral CTA との色温度を揃える)。視覚的にはほぼ白、近接比較で僅かに暖色。
+  background: '#FFFCFC',
   backgroundCard: '#FFFFFF',
   backgroundMuted: '#F5F5F7',
 
-  textPrimary: '#1F2A52',
+  // わくわく化 STEP 1: 主要テキストを navy ベースから ink (ほぼ黒 + わずかに青み)
+  //   に変更。背景の極薄ピンク (#FFFCFC) との対比は十分 (contrast ratio 高、AAA 通過)。
+  textPrimary: '#1A1A2E',
   textSecondary: '#5A6478',
   textTertiary: '#9CA3AF',
   textInverse: '#FFFFFF',

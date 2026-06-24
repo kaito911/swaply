@@ -229,12 +229,16 @@ export default function AccountDeleteScreen() {
 
       {!hasActiveTrade && (
         <View style={styles.ctaWrap}>
+          {/* わくわく化 STEP 1: アカウント削除は destructive アクションのため
+              solid coral ではなく outline (白地 + coral 枠線 + coral 文字) に分離。
+              主 CTA との押し間違い防止 + ベタ塗り面積の削減。 */}
           <PrimaryCTA
             label="アカウントを削除する"
             onPress={handleSubmit}
             disabled={!canSubmit}
             loading={submitting}
             size="lg"
+            variant="outline"
           />
         </View>
       )}

@@ -90,6 +90,89 @@ async function withVenueTimeout<T>(
   ])
 }
 
+/**
+ * PR-V2-fix: ネットワーク起因の fetch 失敗を判別するヘルパー。
+ *
+ * React Native の fetch (whatwg-fetch ポリフィル) は到達失敗時に
+ *   `TypeError: Network request failed`
+ * を throw する経路 (素の fetch エラー) に加え、
+ * supabase-js v2 の PostgrestBuilder は内部 fetch エラーを catch して
+ *   `{ data: null, error: { message: 'TypeError: Network request failed', hint: '', code: '' } }`
+ * の形に変換する経路もある (= throw されず resolve、{error} に詰めて返る)。
+ *
+ * 判定対象:
+ *   - VenueFetchTimeoutError: 自前の 8s タイムアウトクラス (PR-V1)
+ *   - VenueNetworkError: lib 内 if (error) ブロックで PostgrestError 経路の
+ *     ネットワーク起因 error を専用クラスに包んで throw し直したもの (PR-V2-fix2)
+ *   - TypeError かつ message に "Network request failed" を含む:
+ *     supabase-js より上の層で素の TypeError が伝播してくる保険経路
+ *
+ * 上記 3 パターンは「ユーザーに『うまく読み込めませんでした』を出す対象」とする。
+ * それ以外 (= 一般バグ、想定外の throw) は呼出側で **再 throw** して
+ * Sentry 等で検知できるようにする (本物のバグは握りつぶさない切り分けが目的)。
+ */
+export function isVenueLoadFailure(err: unknown): boolean {
+  if (err instanceof VenueFetchTimeoutError) return true
+  if (err instanceof VenueNetworkError) return true
+  if (
+    err instanceof TypeError &&
+    typeof err.message === 'string' &&
+    err.message.includes('Network request failed')
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * PR-V2-fix2: supabase-js v2 の PostgrestBuilder が内部 fetch エラーを
+ * { data: null, error: { message: 'TypeError: Network request failed', hint: '', code: '' } }
+ * の形で返す経路を捕まえて throw VenueNetworkError に変換するためのクラス。
+ *
+ * 元の supabase error は source プロパティで保持し、デバッグ / Sentry 等で
+ * 「ネットワーク失敗だが詳細は何だったか」を参照可能にする。
+ *
+ * 「ユーザーに『うまく読み込めませんでした』を出す対象」として isVenueLoadFailure が拾う。
+ */
+export class VenueNetworkError extends Error {
+  constructor(
+    public readonly operation: string,
+    public readonly source: unknown,
+  ) {
+    const sourceMessage =
+      source != null &&
+      typeof source === 'object' &&
+      'message' in source &&
+      typeof (source as { message?: unknown }).message === 'string'
+        ? (source as { message: string }).message
+        : ''
+    super(`VENUE_NETWORK_ERROR: ${operation}${sourceMessage !== '' ? `: ${sourceMessage}` : ''}`)
+    this.name = 'VenueNetworkError'
+  }
+}
+
+/**
+ * PR-V2-fix2: supabase-js が返した PostgrestError-like な error オブジェクトが
+ * 「ネットワーク起因」か「DB エラー」かを判別する。
+ *
+ * 機内モード等の実物 (確定): { message: 'TypeError: Network request failed', hint: '', code: '' }
+ *   → message に 'Network request failed' を含む & code が空文字 が特徴
+ * DB エラー (例): { message: '...', hint: '...', code: 'PGRST116' / '42501' / '23514' 等 }
+ *   → code に PostgrestError コード ('PGRST...' or PostgreSQL SQLSTATE) が入っている
+ *
+ * 判定: error.message に 'Network request failed' を含めば「ネットワーク起因」と判定。
+ * code フィールドは確認には使うがメッセージ文字列を主軸にする (RN fetch 文言は安定)。
+ *
+ * ※ DB エラー側で 'Network request failed' を含む message を返すケースは、
+ *    PostgrestError / RPC の raise exception のいずれでも観測されていない (確定論理)。
+ */
+function isNetworkErrorObject(error: unknown): boolean {
+  if (error == null || typeof error !== 'object') return false
+  const message = (error as { message?: unknown }).message
+  if (typeof message !== 'string') return false
+  return message.includes('Network request failed')
+}
+
 // ─────────────────────────────────────────
 // Home screen
 // ─────────────────────────────────────────
@@ -2181,24 +2264,36 @@ export async function createCounterOffer(params: {
 // ─────────────────────────────────────────
 
 export async function fetchVenues(): Promise<Venue[]> {
-  const today = new Date().toISOString().split('T')[0]
-  const twoWeeksLater = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split('T')[0]
+  // PR-V2: 会場一覧画面の主要 fetch。タイムアウト時は VenueFetchTimeoutError throw、
+  //   呼出側 (app/venue/index.tsx) が catch して venuesLoadFailed=true に倒し、
+  //   「うまく読み込めませんでした [再試行]」を表示する。
+  //   network 以外のエラーは既存通り console.error + 空配列 silent fallback。
+  return withVenueTimeout('fetchVenues', (async () => {
+    const today = new Date().toISOString().split('T')[0]
+    const twoWeeksLater = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split('T')[0]
 
-  const { data, error } = await supabase
-    .from('venues')
-    .select('*')
-    .gte('event_date', today)
-    .lte('event_date', twoWeeksLater)
-    .order('event_date', { ascending: true })
+    const { data, error } = await supabase
+      .from('venues')
+      .select('*')
+      .gte('event_date', today)
+      .lte('event_date', twoWeeksLater)
+      .order('event_date', { ascending: true })
 
-  if (error) {
-    console.error('[fetchVenues]', error)
-    return []
-  }
+    if (error) {
+      // PR-V2-fix2: ネットワーク起因なら throw して上位の failed UI を起動。
+      //   DB エラー (PostgrestError 等) は従来通り silent fallback (空配列) で抑制。
+      //   再試行で解決し得るか否かで切り分ける (DB エラーは再試行ループに陥るため silent)。
+      if (isNetworkErrorObject(error)) {
+        throw new VenueNetworkError('fetchVenues', error)
+      }
+      console.error('[fetchVenues]', error)
+      return []
+    }
 
-  return (data ?? []) as Venue[]
+    return (data ?? []) as Venue[]
+  })())
 }
 
 /**
@@ -2225,6 +2320,10 @@ export async function fetchVenue(venueId: string): Promise<Venue | null> {
       .single()
 
     if (error) {
+      // PR-V2-fix2: ネットワーク起因なら throw、DB エラーは従来通り null fallback。
+      if (isNetworkErrorObject(error)) {
+        throw new VenueNetworkError('fetchVenue', error)
+      }
       console.error('[fetchVenue]', error)
       return null
     }
@@ -2237,19 +2336,29 @@ export async function fetchMyCheckin(
   venueId: string,
   userId: string
 ): Promise<VenueCheckin | null> {
-  const { data, error } = await supabase
-    .from('venue_checkins')
-    .select('*')
-    .eq('venue_id', venueId)
-    .eq('user_id', userId)
-    .maybeSingle()
+  // PR-V2: 会場一覧画面の付随 fetch (個別 venue の自分のチェックイン有無)。
+  //   タイムアウト時は VenueFetchTimeoutError throw、呼出側 (app/venue/index.tsx)
+  //   が Promise.allSettled で個別 catch して null fallback (= 「未チェックイン」扱い)。
+  //   主要 fetch (fetchVenues) が成功していれば画面全体は失敗扱いにしない。
+  return withVenueTimeout('fetchMyCheckin', (async () => {
+    const { data, error } = await supabase
+      .from('venue_checkins')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('user_id', userId)
+      .maybeSingle()
 
-  if (error) {
-    console.error('[fetchMyCheckin]', error)
-    return null
-  }
+    if (error) {
+      // PR-V2-fix2: ネットワーク起因なら throw、DB エラーは従来通り null fallback。
+      if (isNetworkErrorObject(error)) {
+        throw new VenueNetworkError('fetchMyCheckin', error)
+      }
+      console.error('[fetchMyCheckin]', error)
+      return null
+    }
 
-  return data as VenueCheckin | null
+    return data as VenueCheckin | null
+  })())
 }
 
 export async function checkInVenue(
@@ -2280,6 +2389,10 @@ export async function fetchVenueCheckinCount(venueId: string): Promise<number> {
       .eq('venue_id', venueId)
 
     if (error) {
+      // PR-V2-fix2: ネットワーク起因なら throw、DB エラーは従来通り 0 fallback。
+      if (isNetworkErrorObject(error)) {
+        throw new VenueNetworkError('fetchVenueCheckinCount', error)
+      }
       console.error('[fetchVenueCheckinCount]', error)
       return 0
     }
@@ -2320,6 +2433,10 @@ export async function fetchSupplyPosts(
     const { data, error } = await query
 
     if (error) {
+      // PR-V2-fix2: ネットワーク起因なら throw、DB エラーは従来通り空配列 fallback。
+      if (isNetworkErrorObject(error)) {
+        throw new VenueNetworkError('fetchSupplyPosts', error)
+      }
       console.error('[fetchSupplyPosts]', error)
       return []
     }
@@ -2330,10 +2447,20 @@ export async function fetchSupplyPosts(
     const userIds = [...new Set(posts.map((p) => p.user_id))]
     if (userIds.length === 0) return posts
 
-    const { data: profiles } = await supabase
+    const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
       .select('id, handle, display_name, trade_count, ship_rate, trouble_count')
       .in('id', userIds)
+
+    if (profilesError) {
+      // PR-V2-fix2: 2 段目もネットワーク起因なら throw (1 段目成功 + 2 段目ネットワーク失敗は
+      //   事実上の網羅的ネットワーク不調、failed UI に倒すのが妥当)。
+      //   DB エラーなら従来通り continue (profile 情報なしで posts は表示する)。
+      if (isNetworkErrorObject(profilesError)) {
+        throw new VenueNetworkError('fetchSupplyPosts.profiles', profilesError)
+      }
+      console.error('[fetchSupplyPosts] profiles', profilesError)
+    }
 
     const profileMap = Object.fromEntries(
       (profiles ?? []).map((p) => [p.id, p])
@@ -2675,6 +2802,10 @@ export async function fetchReceivedHoldCount(
     const { count, error } = await query
 
     if (error) {
+      // PR-V2-fix2: ネットワーク起因なら throw、DB エラーは従来通り 0 fallback。
+      if (isNetworkErrorObject(error)) {
+        throw new VenueNetworkError('fetchReceivedHoldCount', error)
+      }
       console.error('[fetchReceivedHoldCount]', error)
       return 0
     }
@@ -2703,6 +2834,10 @@ export async function fetchMySupplyPosts(
       .order('created_at', { ascending: false })
 
     if (error) {
+      // PR-V2-fix2: ネットワーク起因なら throw、DB エラーは従来通り空配列 fallback。
+      if (isNetworkErrorObject(error)) {
+        throw new VenueNetworkError('fetchMySupplyPosts', error)
+      }
       console.error('[fetchMySupplyPosts]', error)
       return []
     }

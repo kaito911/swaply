@@ -88,8 +88,17 @@ export function BadgeProvider({ children }: { children: ReactNode }) {
     }
 
     // venue 受信 Hold 件数 (全 venue 横断)
-    const holdCount = await fetchReceivedHoldCount(userId)
-    setReceivedHoldCount(holdCount)
+    // PR-V2-fix2: lib/supabase.ts 側で fetchReceivedHoldCount がネットワーク起因失敗時に
+    //   throw するよう変更されるため、ここで受け止めて silent fallback (0) する。
+    //   グローバル BadgeProvider は UI 表示なし (タブバッジ管理のみ)、再試行 UI も不要、
+    //   全エラーを catch して 0 fallback で十分 (隣の fetchVenueTradeUnreadCount と同思想)。
+    try {
+      const holdCount = await fetchReceivedHoldCount(userId)
+      setReceivedHoldCount(holdCount)
+    } catch (error) {
+      console.warn('[BadgeProvider] fetchReceivedHoldCount', error)
+      setReceivedHoldCount(0)
+    }
 
     // venue_trade DM 合算未読数。RPC エラーは握りつぶさず warn し、表示は 0 にフォールバック。
     try {

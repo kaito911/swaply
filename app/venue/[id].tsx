@@ -24,7 +24,7 @@ import {
   fetchVenue,
   fetchVenueCheckinCount,
   uploadCardImage,
-  VenueFetchTimeoutError,
+  isVenueLoadFailure,
 } from '@/lib/supabase'
 import { computeTrustBadge, Venue, VenueSupplyPost } from '@/lib/types'
 import type { MasterCharacter, MasterItemType } from '@/lib/types'
@@ -193,6 +193,11 @@ export default function VenueHomeScreen() {
   // 会場名は出ているのに、人数だけ取れなかった状態を「— 人参加中」で表現)。
   // venue 自体の失敗判定は既存の venue==null fallback で代用 (V2 で venueFailed 追加余地)。
   const [checkinCountFailed, setCheckinCountFailed] = useState(false)
+  // PR-V2: 当日供給板 (fetchSupplyPosts) の失敗フラグ。
+  //   初期 false、正常 fetch で false 維持、VenueFetchTimeoutError 時のみ true。
+  //   状態優先順位: loadingSupply > supplyLoadFailed > 検索 0 件 > 全件 0 件 > データ表示。
+  //   再試行成功時に false に戻すため、loadSupply の冒頭で setSupplyLoadFailed(false) を呼ぶ。
+  const [supplyLoadFailed, setSupplyLoadFailed] = useState(false)
 
   // 供給板投稿フォーム
   const [showPostForm, setShowPostForm] = useState(false)
@@ -387,14 +392,23 @@ export default function VenueHomeScreen() {
   const loadSupply = useCallback(async () => {
     if (venueId == null) return
     setLoadingSupply(true)
+    // PR-V2: ★ 状態リセット — 冒頭で必ず failed=false に戻す。
+    //   再試行成功時に失敗フラグが残り続けるバグを防ぐ。
+    setSupplyLoadFailed(false)
     try {
       // 当日掲示板は他人の post のみ表示。自分の post は /venue/my-posts に集約。
       const posts = await fetchSupplyPosts(venueId, userId)
       setSupplyPosts(posts)
     } catch (err) {
-      if (err instanceof VenueFetchTimeoutError) {
-        console.warn('[VenueHome][loadSupply]', err.message)
+      // PR-V2-fix: タイムアウトに加え、機内モード/圏外で発生する
+      //   TypeError: Network request failed もネットワーク起因として failed 扱いにする。
+      //   想定外の本物のバグは re-throw で上位に伝播。
+      if (isVenueLoadFailure(err)) {
+        console.warn('[VenueHome][loadSupply]', err instanceof Error ? err.message : String(err))
+        // PR-V1 互換: 既存の silent fallback (空配列) は維持。
+        // PR-V2 で追加: failed フラグを true にして UI 出し分けを起動。
         setSupplyPosts([])
+        setSupplyLoadFailed(true)
       } else {
         throw err
       }
@@ -412,8 +426,10 @@ export default function VenueHomeScreen() {
       const count = await fetchReceivedHoldCount(userId, venueId)
       setReceivedHoldCount(count)
     } catch (err) {
-      if (err instanceof VenueFetchTimeoutError) {
-        console.warn('[VenueHome][loadHoldCount]', err.message)
+      // PR-V2-fix: ネットワーク起因 (timeout + RN fetch エラー) を共通判定で握り、
+      //   既存の 0 fallback を維持。それ以外は re-throw (本物のバグを伝播)。
+      if (isVenueLoadFailure(err)) {
+        console.warn('[VenueHome][loadHoldCount]', err instanceof Error ? err.message : String(err))
         setReceivedHoldCount(0)
       } else {
         throw err
@@ -438,8 +454,10 @@ export default function VenueHomeScreen() {
     if (vResult.status === 'fulfilled') {
       setVenue(vResult.value)
     } else {
-      if (vResult.reason instanceof VenueFetchTimeoutError) {
-        console.warn('[VenueHome][loadVenueContext] venue', vResult.reason.message)
+      // PR-V2-fix: ネットワーク起因 (timeout + RN fetch エラー) は warn 扱い、
+      //   それ以外 (想定外の本物のバグ) は error 扱いで Sentry 等に拾わせる。
+      if (isVenueLoadFailure(vResult.reason)) {
+        console.warn('[VenueHome][loadVenueContext] venue', vResult.reason instanceof Error ? vResult.reason.message : String(vResult.reason))
       } else {
         console.error('[VenueHome][loadVenueContext] venue', vResult.reason)
       }
@@ -452,8 +470,9 @@ export default function VenueHomeScreen() {
       setCheckinCount(cResult.value)
       setCheckinCountFailed(false)
     } else {
-      if (cResult.reason instanceof VenueFetchTimeoutError) {
-        console.warn('[VenueHome][loadVenueContext] checkinCount', cResult.reason.message)
+      // PR-V2-fix: 同上、ネットワーク起因は warn / 本物のバグは error。
+      if (isVenueLoadFailure(cResult.reason)) {
+        console.warn('[VenueHome][loadVenueContext] checkinCount', cResult.reason instanceof Error ? cResult.reason.message : String(cResult.reason))
       } else {
         console.error('[VenueHome][loadVenueContext] checkinCount', cResult.reason)
       }
@@ -472,8 +491,10 @@ export default function VenueHomeScreen() {
       const posts = await fetchMySupplyPosts(venueId, userId)
       setMySupplyPosts(posts)
     } catch (err) {
-      if (err instanceof VenueFetchTimeoutError) {
-        console.warn('[VenueHome][loadMySupplyPosts]', err.message)
+      // PR-V2-fix: ネットワーク起因 (timeout + RN fetch エラー) を共通判定で握り、
+      //   既存の空配列 fallback を維持。それ以外は re-throw (本物のバグを伝播)。
+      if (isVenueLoadFailure(err)) {
+        console.warn('[VenueHome][loadMySupplyPosts]', err instanceof Error ? err.message : String(err))
         setMySupplyPosts([])
       } else {
         throw err
@@ -512,14 +533,28 @@ export default function VenueHomeScreen() {
     }
   }, [venue?.status, liveDotOpacity])
 
+  // PR-V2-fix3: 会場詳細の主要データを一括再取得するエントリ。
+  //   useFocusEffect (画面入り直し) と「うまく読み込めませんでした」再試行ボタンの
+  //   両方から呼ぶ。各 load は独立した try/catch + 失敗フラグ管理を持つので、
+  //   ここでは並列起動するだけ (await しない)。
+  //
+  //   再試行ボタンで本関数を呼ぶことで、loadSupply (supplyPosts) に加え
+  //   loadMySupplyPosts (mySupplyPosts) も再取得され、依存している
+  //   マッチレーン (mutualPairs useMemo) も再計算されて復活する。
+  //   loadHoldCount / loadVenueContext も同タイミングで取り直し、
+  //   Hold バッジ・会場名・参加人数も最新化 (= 入り直しと完全に同じ挙動)。
+  const reloadAll = useCallback(() => {
+    loadSupply()
+    loadHoldCount()
+    loadVenueContext()
+    loadMySupplyPosts()
+  }, [loadSupply, loadHoldCount, loadVenueContext, loadMySupplyPosts])
+
   // 画面 focus 時に再取得 (Hold 承認 / 拒否後に戻ったときの最新化)
   useFocusEffect(
     useCallback(() => {
-      loadSupply()
-      loadHoldCount()
-      loadVenueContext()
-      loadMySupplyPosts()
-    }, [loadSupply, loadHoldCount, loadVenueContext, loadMySupplyPosts])
+      reloadAll()
+    }, [reloadAll])
   )
 
   const handlePickImage = async () => {
@@ -1101,8 +1136,33 @@ export default function VenueHomeScreen() {
               投稿ボタン) は本 PR で bottom sheet Modal (file 末尾) に移植・除去済。
               ScrollView 内には供給板リストのみが残る (板とフォームの混線を解消)。 */}
 
+          {/* PR-V2: 状態優先順位 loadingSupply > supplyLoadFailed > 検索 0 件 > 全件 0 件 > データ表示。
+              「読み込み失敗」と「本当に空」を分離し、失敗時は再試行可能にする。 */}
           {loadingSupply ? (
             <ActivityIndicator color={VENUE_COLORS.brand} style={{ marginTop: 24 }} />
+          ) : supplyLoadFailed ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorTitle}>うまく読み込めませんでした</Text>
+              <Text style={styles.errorBody}>
+                電波が混み合っているかもしれません。少し待って再試行してください。
+              </Text>
+              <Pressable
+                style={[
+                  styles.retryButton,
+                  loadingSupply && styles.retryButtonDisabled,
+                ]}
+                onPress={() => {
+                  // PR-V2-fix3: loadSupply 単体ではなく reloadAll を呼んで、
+                  //   マッチレーンの依存 (mySupplyPosts) や Hold バッジ・会場文脈も
+                  //   同時に再取得し、入り直しと同じ復元挙動にする。
+                  void reloadAll()
+                }}
+                disabled={loadingSupply}
+                accessibilityLabel="再試行"
+              >
+                <Text style={styles.retryButtonText}>再試行</Text>
+              </Pressable>
+            </View>
           ) : supplyPosts.length === 0 ? (
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>まだ募集がありません</Text>
@@ -1899,6 +1959,42 @@ const styles = StyleSheet.create({
     color: VENUE_COLORS.body,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  // PR-V2: 通信失敗時の「うまく読み込めませんでした [再試行]」表示。
+  //   会場一覧画面 (app/venue/index.tsx) の inline 実装と同形 (共通 component 化は V3)。
+  errorBox: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: spacing.base,
+    gap: spacing.sm,
+  },
+  errorTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: VENUE_COLORS.headline,
+  },
+  errorBody: {
+    fontSize: fontSize.sm,
+    color: VENUE_COLORS.body,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  retryButton: {
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: 'transparent',
+  },
+  retryButtonDisabled: {
+    opacity: 0.5,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
   },
   // PR-6: 双方向マッチレーン (横スクロール、供給板の上、accent 色強調)。
   matchLane: {

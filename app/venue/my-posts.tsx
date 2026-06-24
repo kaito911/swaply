@@ -69,15 +69,28 @@ export default function VenueMyPostsScreen() {
   const reload = useCallback(async () => {
     if (venueId == null || userId == null) return
     setLoading(true)
-    const fresh = await fetchMySupplyPosts(venueId, userId)
-    setPosts(fresh)
+    // PR-V2-fix2: lib/supabase.ts 側で fetchMySupplyPosts がネットワーク起因失敗時に
+    //   throw するよう変更されるため、ここで受け止めて silent fallback (空配列) する。
+    //   my-posts 画面は V2 のエラー UI (再試行ボタン等) の対象外、catch なしでの画面落ち
+    //   (= 無限スピン or 赤画面) を防ぐのが目的。finally で setLoading(false) を確実に呼び
+    //   無限スピンを防止する。
+    try {
+      const fresh = await fetchMySupplyPosts(venueId, userId)
+      setPosts(fresh)
 
-    // Hold 件数は自分の post id のみを渡す (補正 4 遵守)
-    const myPostIds = fresh.map((p) => p.id)
-    const counts = await fetchHoldCountsForSupplyPosts(myPostIds, userId)
-    setHoldCounts(counts)
-
-    setLoading(false)
+      // Hold 件数は自分の post id のみを渡す (補正 4 遵守)
+      const myPostIds = fresh.map((p) => p.id)
+      const counts = await fetchHoldCountsForSupplyPosts(myPostIds, userId)
+      setHoldCounts(counts)
+    } catch (error) {
+      console.warn('[VenueMyPosts][reload]', error)
+      // 既存 posts / holdCounts は空にリセット (画面は「投稿がありません」既存 UI に倒れる)。
+      // my-posts 画面の UI 出し分け強化は本 PR スコープ外 (V2 は会場一覧 / 会場詳細の 2 画面のみ)。
+      setPosts([])
+      setHoldCounts({})
+    } finally {
+      setLoading(false)
+    }
   }, [venueId, userId])
 
   useFocusEffect(

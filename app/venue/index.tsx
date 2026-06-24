@@ -2,7 +2,13 @@
 // 会場一覧画面
 import { HeaderActions } from '@/components/HeaderActions'
 import { ScreenHeader } from '@/components/ScreenHeader'
-import { checkInVenue, fetchMyCheckin, fetchVenueCheckinCount, fetchVenues } from '@/lib/supabase'
+import {
+  checkInVenue,
+  fetchMyCheckin,
+  fetchVenueCheckinCount,
+  fetchVenues,
+  isVenueLoadFailure,
+} from '@/lib/supabase'
 import { Venue } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
@@ -37,41 +43,62 @@ export default function VenueListScreen() {
   const [checkinCounts, setCheckinCounts] = useState<Record<string, number>>({})
   const [myCheckins, setMyCheckins] = useState<Record<string, boolean>>({})
   const [checkingIn, setCheckingIn] = useState<string | null>(null)
+  // PR-V2: fetchVenues の VenueFetchTimeoutError を拾って失敗 UI を出すフラグ。
+  //   初期 false、正常 fetch では false 維持。失敗時のみ true、再試行成功で false に戻す。
+  //   付随 fetch (fetchVenueCheckinCount / fetchMyCheckin) の失敗は本フラグに影響させない
+  //   (主要 fetch=fetchVenues が成功していれば画面全体は通常表示、付随は個別 fallback)。
+  const [venuesLoadFailed, setVenuesLoadFailed] = useState(false)
+
+  // PR-V2: load を useCallback 化して再試行ボタンから呼べるようにする。
+  //   状態優先順位: loading > venuesLoadFailed > venues.length===0 > データ表示。
+  //   冒頭で setVenuesLoadFailed(false) を呼び、再試行成功時に失敗フラグが残らないようにする。
+  const load = useCallback(async () => {
+    setLoading(true)
+    setVenuesLoadFailed(false) // ★ 状態リセット (再試行成功で失敗フラグが残らない保証)
+    try {
+      const venueList = await fetchVenues()
+      setVenues(venueList)
+
+      if (userId != null) {
+        const counts: Record<string, number> = {}
+        const checkins: Record<string, boolean> = {}
+        // PR-V2: 付随 fetch の部分失敗を許容するため Promise.allSettled に変更。
+        //   個別 venue で fetchVenueCheckinCount / fetchMyCheckin が timeout しても
+        //   全体は止めず、その venue だけ count=0 / checkin=false の fallback で続行。
+        await Promise.allSettled(
+          venueList.map(async (v) => {
+            const [countResult, checkinResult] = await Promise.allSettled([
+              fetchVenueCheckinCount(v.id),
+              fetchMyCheckin(v.id, userId),
+            ])
+            counts[v.id] = countResult.status === 'fulfilled' ? countResult.value : 0
+            checkins[v.id] =
+              checkinResult.status === 'fulfilled' && checkinResult.value != null
+          })
+        )
+        setCheckinCounts(counts)
+        setMyCheckins(checkins)
+      }
+    } catch (err) {
+      // PR-V2-fix: タイムアウトに加え、機内モード/圏外で発生する
+      //   TypeError: Network request failed もネットワーク起因として failed 扱いにする。
+      //   想定外の本物のバグは re-throw で上位に伝播 (Sentry 等で検知)。
+      if (isVenueLoadFailure(err)) {
+        console.warn('[VenueList][load]', err instanceof Error ? err.message : String(err))
+        setVenues([])
+        setVenuesLoadFailed(true)
+      } else {
+        throw err
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [userId])
 
   useFocusEffect(
     useCallback(() => {
-      let isActive = true
-
-      const load = async () => {
-        setLoading(true)
-        const venueList = await fetchVenues()
-        if (!isActive) return
-        setVenues(venueList)
-
-        if (userId != null) {
-          const counts: Record<string, number> = {}
-          const checkins: Record<string, boolean> = {}
-          await Promise.all(
-            venueList.map(async (v) => {
-              const [count, myCheckin] = await Promise.all([
-                fetchVenueCheckinCount(v.id),
-                fetchMyCheckin(v.id, userId),
-              ])
-              counts[v.id] = count
-              checkins[v.id] = myCheckin != null
-            })
-          )
-          if (!isActive) return
-          setCheckinCounts(counts)
-          setMyCheckins(checkins)
-        }
-
-        setLoading(false)
-      }
-
       load()
-      return () => { isActive = false }
-    }, [userId])
+    }, [load])
   )
 
   const handleCheckin = async (venue: Venue) => {
@@ -126,7 +153,27 @@ export default function VenueListScreen() {
 
         <Text style={styles.sectionLabel}>今日・近日の会場</Text>
 
-        {venues.length === 0 ? (
+        {/* PR-V2: 状態優先順位 loading > venuesLoadFailed > venues.length===0 > データ表示。
+            loading は本 return より上の if (loading) で早期 return 済 (L101)、ここでは
+            failed > empty > データ の 3 分岐のみ評価。 */}
+        {venuesLoadFailed ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>うまく読み込めませんでした</Text>
+            <Text style={styles.errorBody}>
+              電波が混み合っているかもしれません。少し待って再試行してください。
+            </Text>
+            <Pressable
+              style={[styles.retryButton, loading && styles.retryButtonDisabled]}
+              onPress={() => {
+                void load()
+              }}
+              disabled={loading}
+              accessibilityLabel="再試行"
+            >
+              <Text style={styles.retryButtonText}>再試行</Text>
+            </Pressable>
+          </View>
+        ) : venues.length === 0 ? (
           <View style={styles.emptyBox}>
             <Text style={styles.emptyText}>現在開催予定の会場はありません</Text>
           </View>
@@ -249,6 +296,42 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: fontSize.sm,
     color: colors.textTertiary,
+  },
+  // PR-V2: 通信失敗時の「うまく読み込めませんでした [再試行]」表示。
+  //   会場詳細画面の inline 実装と同形 (共通 component 化は V3 cleanup タスクで予定)。
+  errorBox: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: spacing.base,
+    gap: spacing.sm,
+  },
+  errorTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  errorBody: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  retryButton: {
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: 'transparent',
+  },
+  retryButtonDisabled: {
+    opacity: 0.5,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
   },
   venueCard: {
     backgroundColor: colors.backgroundCard,

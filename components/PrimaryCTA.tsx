@@ -1,5 +1,6 @@
 // components/PrimaryCTA.tsx
-import { colors, radius } from '@/constants/theme'
+import { colors, radius, spacing } from '@/constants/theme'
+import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import React from 'react'
 import {
@@ -7,6 +8,7 @@ import {
   StyleProp,
   Text,
   TouchableOpacity,
+  View,
   ViewStyle,
 } from 'react-native'
 
@@ -44,6 +46,7 @@ const PRIMARY_SHADOW = {
 
 type CTAVariant = 'primary' | 'outline' | 'ghost'
 type CTASize = 'sm' | 'md' | 'lg'
+type IoniconName = keyof typeof Ionicons.glyphMap
 
 interface PrimaryCTAProps {
   label: string
@@ -53,10 +56,14 @@ interface PrimaryCTAProps {
   size?: CTASize
   variant?: CTAVariant
   style?: StyleProp<ViewStyle>
+  // iconLeft 指定時のみ label の左に Ionicons を描画。未指定なら従来の単一 Text レンダ
+  // と完全に同一 (後方互換)。色は variant、サイズは size に追従。
+  iconLeft?: IoniconName
 }
 
 const HEIGHT: Record<CTASize, number> = { sm: 36, md: 48, lg: 56 }
 const FONT_SIZE: Record<CTASize, number> = { sm: 13, md: 15, lg: 16 }
+const ICON_SIZE: Record<CTASize, number> = { sm: 14, md: 16, lg: 18 }
 const BORDER_RADIUS: Record<CTASize, number> = {
   sm: radius.lg,
   md: radius.xl,
@@ -71,10 +78,12 @@ export function PrimaryCTA({
   size = 'md',
   variant = 'primary',
   style,
+  iconLeft,
 }: PrimaryCTAProps) {
   const isDisabled = disabled || loading
   const height = HEIGHT[size]
   const fontSize = FONT_SIZE[size]
+  const iconSize = ICON_SIZE[size]
   const bRadius = BORDER_RADIUS[size]
 
   if (variant === 'outline') {
@@ -96,9 +105,24 @@ export function PrimaryCTA({
           style,
         ]}
       >
-        <Text style={{ fontSize, color: colors.primary, fontWeight: '700' }}>
-          {label}
-        </Text>
+        {!loading && iconLeft != null ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: spacing.xs,
+            }}
+          >
+            <Ionicons name={iconLeft} size={iconSize} color={colors.primary} />
+            <Text style={{ fontSize, color: colors.primary, fontWeight: '700' }}>
+              {label}
+            </Text>
+          </View>
+        ) : (
+          <Text style={{ fontSize, color: colors.primary, fontWeight: '700' }}>
+            {label}
+          </Text>
+        )}
       </TouchableOpacity>
     )
   }
@@ -119,9 +143,24 @@ export function PrimaryCTA({
           style,
         ]}
       >
-        <Text style={{ fontSize, color: colors.primary, fontWeight: '600' }}>
-          {label}
-        </Text>
+        {!loading && iconLeft != null ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: spacing.xs,
+            }}
+          >
+            <Ionicons name={iconLeft} size={iconSize} color={colors.primary} />
+            <Text style={{ fontSize, color: colors.primary, fontWeight: '600' }}>
+              {label}
+            </Text>
+          </View>
+        ) : (
+          <Text style={{ fontSize, color: colors.primary, fontWeight: '600' }}>
+            {label}
+          </Text>
+        )}
       </TouchableOpacity>
     )
   }
@@ -160,6 +199,30 @@ export function PrimaryCTA({
       >
         {loading ? (
           <ActivityIndicator size="small" color={colors.textInverse} />
+        ) : iconLeft != null ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: spacing.xs,
+            }}
+          >
+            <Ionicons
+              name={iconLeft}
+              size={iconSize}
+              color={colors.textInverse}
+            />
+            <Text
+              style={{
+                fontSize,
+                color: colors.textInverse,
+                fontWeight: '700',
+                letterSpacing: 0.3,
+              }}
+            >
+              {label}
+            </Text>
+          </View>
         ) : (
           <Text
             style={{

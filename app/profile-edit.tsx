@@ -23,6 +23,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
+import { PrimaryCTA } from '@/components/PrimaryCTA'
 
 async function uploadAvatarImage(userId: string, imageUri: string): Promise<string> {
   const filePath = `${userId}.jpg`
@@ -223,17 +224,16 @@ export default function ProfileEditScreen() {
             )}
           </View>
 
-          <Pressable
-            style={[styles.button, (!canSave) && styles.buttonDisabled]}
+          <PrimaryCTA
+            label="保存する"
             onPress={handleSave}
+            loading={saving}
             disabled={!canSave}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.buttonText}>保存する</Text>
-            )}
-          </Pressable>
+            size="lg"
+            style={{ marginTop: spacing.sm }}
+          />
+          {/* size='lg' = 高さ 56 / radius xl。旧 52h / radius 16 から微増。
+              disabled 表現は PrimaryCTA の opacity 0.5 に統一 (旧 textTertiary 塗りつぶしから変更)。 */}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -347,21 +347,5 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 12,
     color: '#EF4444',
-  },
-  button: {
-    marginTop: 8,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonDisabled: {
-    backgroundColor: colors.textTertiary,
-  },
-  buttonText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
   },
 })

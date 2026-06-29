@@ -4,6 +4,7 @@
 import { fetchShippingAddress, updateShippingAddress } from '@/lib/supabase'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, spacing } from '@/constants/theme'
+import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import React, { useEffect, useState } from 'react'
@@ -155,17 +156,16 @@ export default function ShippingScreen() {
             />
           </View>
 
-          <Pressable
-            style={[styles.button, (!canSave || saving || userId == null) && styles.buttonDisabled]}
+          <PrimaryCTA
+            label="保存する"
             onPress={handleSave}
-            disabled={!canSave || saving || userId == null}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.buttonText}>保存する</Text>
-            )}
-          </Pressable>
+            loading={saving}
+            disabled={!canSave || userId == null}
+            size="lg"
+            style={{ marginTop: spacing.sm }}
+          />
+          {/* pilot (profile-edit) と同型: 旧 52h → lg=56h、radius xl、
+              disabled 表現は opacity 0.5 に統一。 */}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -237,21 +237,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#18181B',
     backgroundColor: '#FFFFFF',
-  },
-  button: {
-    marginTop: 8,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonDisabled: {
-    backgroundColor: colors.textTertiary,
-  },
-  buttonText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
   },
 })

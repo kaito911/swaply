@@ -18,11 +18,11 @@
 //   - PR2 では logout / 退会導線への revoke 接続は行わない (PR1 helper はあるが未配線)。
 
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { registerForPushNotificationsAsync } from '@/lib/pushNotifications'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import React, { useEffect, useState } from 'react'
 import {
-  ActivityIndicator,
   Modal,
   Pressable,
   StyleSheet,
@@ -118,23 +118,16 @@ export function PushPermissionPrePrompt({ userId }: Props) {
           <Text style={styles.body}>
             Hold申請・DM・交換申請を見逃さないように、通知を受け取れます。あとからでも変更できます。
           </Text>
-          <Pressable
-            style={({ pressed }) => [
-              styles.primaryButton,
-              submitting && styles.buttonDisabled,
-              pressed && !submitting && styles.primaryButtonPressed,
-            ]}
+          <PrimaryCTA
+            label="通知を許可する"
             onPress={handleAllow}
+            loading={submitting}
             disabled={submitting}
-            accessibilityRole="button"
-            accessibilityLabel="通知を許可する"
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryButtonText}>通知を許可する</Text>
-            )}
-          </Pressable>
+            size="md"
+            style={{ marginTop: spacing.xs }}
+          />
+          {/* コンポーネント内 → md (48h)。旧 48h と同値、radius xl 維持。
+              accessibilityLabel は PrimaryCTA の TouchableOpacity 既定 (label 文字列が読み上げられる) で代替。 */}
           <Pressable
             style={({ pressed }) => [
               styles.secondaryButton,
@@ -180,25 +173,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     lineHeight: 20,
-  },
-  primaryButton: {
-    height: 48,
-    borderRadius: radius.xl,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.xs,
-  },
-  primaryButtonPressed: {
-    opacity: 0.9,
-  },
-  primaryButtonText: {
-    fontSize: fontSize.md,
-    fontWeight: fontWeight.bold,
-    color: colors.textInverse,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
   },
   secondaryButton: {
     height: 44,

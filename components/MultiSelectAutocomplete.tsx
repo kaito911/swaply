@@ -13,6 +13,7 @@
 
 import { Ionicons } from '@expo/vector-icons'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
+import { PrimaryCTA } from '@/components/PrimaryCTA'
 import React, { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
@@ -267,16 +268,14 @@ export function MultiSelectAutocomplete<T>(props: MultiSelectAutocompleteProps<T
               >
                 <Text style={styles.modalCancelLabel}>キャンセル</Text>
               </Pressable>
-              <Pressable
+              <PrimaryCTA
+                label="追加する"
                 onPress={handleFreeTextConfirm}
-                style={({ pressed }) => [
-                  styles.modalBtn,
-                  styles.modalBtnConfirm,
-                  pressed && styles.modalBtnPressed,
-                ]}
-              >
-                <Text style={styles.modalConfirmLabel}>追加する</Text>
-              </Pressable>
+                size="md"
+                style={{ flex: 1 }}
+              />
+              {/* modal 内 → md (48h)。隣の cancel (modalBtn flex:1 + padding spacing.sm) と
+                  ほぼ揃う高さ。fontSize 15 / radius xl。 */}
             </View>
           </View>
         </View>
@@ -450,17 +449,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  modalBtnConfirm: {
-    backgroundColor: colors.primary,
-  },
   modalCancelLabel: {
     fontSize: 13,
     fontWeight: fontWeight.semibold,
     color: colors.textSecondary,
-  },
-  modalConfirmLabel: {
-    fontSize: 13,
-    fontWeight: fontWeight.semibold,
-    color: colors.textInverse,
   },
 })

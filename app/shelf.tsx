@@ -5,6 +5,7 @@ import { addShelfItem, deleteShelfItem, fetchShelfItems, fetchUserOshi } from '@
 import { ShelfItem, UserOshi } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useState } from 'react'
@@ -240,20 +241,16 @@ export default function ShelfScreen() {
                 >
                   <Text style={styles.cancelButtonText}>キャンセル</Text>
                 </Pressable>
-                <Pressable
-                  style={[
-                    styles.saveButton,
-                    (cardName.trim() === '' || saving) && styles.saveButtonDisabled,
-                  ]}
+                <PrimaryCTA
+                  label="登録する"
                   onPress={handleAdd}
-                  disabled={cardName.trim() === '' || saving}
-                >
-                  {saving ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.saveButtonText}>登録する</Text>
-                  )}
-                </Pressable>
+                  loading={saving}
+                  disabled={cardName.trim() === ''}
+                  size="lg"
+                  style={{ flex: 2 }}
+                />
+                {/* 隣 cancelButton は 44h のまま (今回スコープ外)。
+                    lg=56h との段差は実機で要確認、必要なら md に落とす候補。 */}
               </View>
             </View>
           )}
@@ -403,22 +400,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
     color: colors.textSecondary,
-  },
-  saveButton: {
-    flex: 2,
-    height: 44,
-    borderRadius: radius.lg,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonDisabled: {
-    backgroundColor: colors.textTertiary,
-  },
-  saveButtonText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: '#FFFFFF',
   },
   emptyBox: {
     alignItems: 'center',

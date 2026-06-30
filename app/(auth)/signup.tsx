@@ -1,5 +1,6 @@
 // app/(auth)/signup.tsx
 import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
+import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { signUp } from '@/lib/auth'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
@@ -222,22 +223,17 @@ export default function SignUpScreen() {
               <Text style={styles.consentText}>私は13歳以上です</Text>
             </View>
 
-            {/* 登録CTA */}
-            <TouchableOpacity
+            {/* 登録CTA — handleSignUp (認証 + 規約同意 + 年齢確認 ロジック) は変更せず、
+                見た目のみ巻取り。disabled は canSubmit ベースのまま、規約/年齢の検査は
+                handleSignUp 内の Alert で従来通り表示される。 */}
+            <PrimaryCTA
+              label="アカウントを作成する"
               onPress={handleSignUp}
-              disabled={!canSubmit || loading}
-              activeOpacity={0.85}
-              style={[
-                styles.ctaWrap,
-                (!canSubmit || loading) && styles.ctaDisabled,
-              ]}
-            >
-              <View style={[styles.cta, { backgroundColor: colors.primary }]}>
-                <Text style={styles.ctaText}>
-                  {loading ? '登録中...' : 'アカウントを作成する'}
-                </Text>
-              </View>
-            </TouchableOpacity>
+              loading={loading}
+              disabled={!canSubmit}
+              size="lg"
+              style={{ marginTop: spacing.sm }}
+            />
 
             {/* ログインへ */}
             <View style={styles.switchRow}>
@@ -387,26 +383,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '700',
     textDecorationLine: 'underline',
-  },
-  ctaWrap: {
-    borderRadius: radius.xl,
-    overflow: 'hidden',
-    marginTop: spacing.sm,
-    ...shadow.md,
-  },
-  ctaDisabled: {
-    opacity: 0.5,
-  },
-  cta: {
-    height: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ctaText: {
-    fontSize: fontSize.md,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
   },
   switchRow: {
     flexDirection: 'row',

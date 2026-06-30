@@ -1,4 +1,5 @@
 import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
+import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { supabase } from '@/lib/supabase'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
@@ -132,21 +133,17 @@ export default function LoginScreen() {
               </View>
             </View>
 
-            <TouchableOpacity
+            <PrimaryCTA
+              label="ログインする"
               onPress={handleLogin}
-              disabled={!canSubmit || loading}
-              activeOpacity={0.85}
-              style={[
-                styles.ctaWrap,
-                (!canSubmit || loading) && styles.ctaDisabled,
-              ]}
-            >
-              <View style={[styles.cta, { backgroundColor: colors.primary }]}>
-                <Text style={styles.ctaText}>
-                  {loading ? 'ログイン中...' : 'ログインする'}
-                </Text>
-              </View>
-            </TouchableOpacity>
+              loading={loading}
+              disabled={!canSubmit}
+              size="lg"
+              style={{ marginTop: spacing.sm }}
+            />
+            {/* 認証ロジック (handleLogin) は触らず、ボタン見た目のみ巻取り。
+                旧 52h + 自前 shadow → lg=56h + PrimaryCTA 内蔵 color shadow。
+                ローディング中のテキスト切替 "ログイン中..." は spinner 表示に統一。 */}
 
             <View style={styles.switchRow}>
               <Text style={styles.switchText}>アカウントをお持ちでない方は</Text>
@@ -250,26 +247,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     padding: 0,
     margin: 0,
-  },
-  ctaWrap: {
-    borderRadius: radius.xl,
-    overflow: 'hidden',
-    marginTop: spacing.sm,
-    ...shadow.md,
-  },
-  ctaDisabled: {
-    opacity: 0.5,
-  },
-  cta: {
-    height: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ctaText: {
-    fontSize: fontSize.md,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
   },
   switchRow: {
     flexDirection: 'row',

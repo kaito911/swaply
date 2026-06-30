@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import React, { useState } from 'react'
 import {
-  ActivityIndicator,
   Alert,
   Pressable,
   StyleSheet,
@@ -16,6 +15,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { addWantedCard, checkHandleAvailable, updateProfile } from '@/lib/supabase'
 
@@ -125,12 +125,11 @@ export default function OnboardingScreen({ onComplete }: Props) {
             />
           </View>
 
-          <Pressable
-            style={styles.primaryButton}
+          <PrimaryCTA
+            label="はじめる"
             onPress={() => setStep('handle')}
-          >
-            <Text style={styles.primaryButtonText}>はじめる</Text>
-          </Pressable>
+            size="lg"
+          />
         </View>
       </SafeAreaView>
     )
@@ -165,20 +164,13 @@ export default function OnboardingScreen({ onComplete }: Props) {
             <Text style={styles.errorText}>{handleError}</Text>
           )}
 
-          <Pressable
-            style={[
-              styles.primaryButton,
-              (handle.trim().length < 3 || checkingHandle) && styles.buttonDisabled,
-            ]}
+          <PrimaryCTA
+            label="次へ"
             onPress={handleHandleSubmit}
-            disabled={handle.trim().length < 3 || checkingHandle}
-          >
-            {checkingHandle ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryButtonText}>次へ</Text>
-            )}
-          </Pressable>
+            loading={checkingHandle}
+            disabled={handle.trim().length < 3}
+            size="lg"
+          />
         </View>
       </SafeAreaView>
     )
@@ -204,19 +196,12 @@ export default function OnboardingScreen({ onComplete }: Props) {
           autoFocus
         />
 
-        <Pressable
-          style={[styles.primaryButton, saving && styles.buttonDisabled]}
+        <PrimaryCTA
+          label={cardName.trim() !== '' ? '登録してはじめる' : 'スキップ'}
           onPress={handleWantsSubmit}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.primaryButtonText}>
-              {cardName.trim() !== '' ? '登録してはじめる' : 'スキップ'}
-            </Text>
-          )}
-        </Pressable>
+          loading={saving}
+          size="lg"
+        />
 
         <Pressable
           style={styles.skipButton}
@@ -298,21 +283,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textPrimary,
     fontWeight: '500',
-  },
-  primaryButton: {
-    height: 52,
-    borderRadius: radius.xl,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonText: {
-    fontSize: fontSize.md,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
   },
   wantsHeader: {
     marginBottom: spacing.xl,

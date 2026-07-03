@@ -3241,3 +3241,121 @@ export async function uploadCardImage(params: {
 
   return data.publicUrl
 }
+
+// ─────────────────────────────────────────
+// Trade Reports (Trust 質 PR、β1 は収集のみ・表示なし)
+// migration_trade_reports.sql / migration_rpc_create_trade_report.sql と対応。
+// 申告フォーム UI (Phase 1.5+) から使用予定。
+// ─────────────────────────────────────────
+
+export type TradeReportCategory =
+  | 'state_mismatch'
+  | 'wrong_item'
+  | 'poor_packaging'
+  | 'late_shipping'
+  | 'no_contact'
+  | 'not_received'
+  | 'venue_noshow'
+  | 'other'
+
+export type TradeReport = {
+  id: string
+  reporter_id: string
+  reported_id: string
+  normal_trade_id: string | null
+  venue_trade_id: string | null
+  category: TradeReportCategory
+  note: string | null
+  photo_path: string | null
+  created_at: string
+}
+
+/**
+ * 取引の質への申告を送信する (Trust 質 PR、β1 は収集のみ)。
+ *
+ * reported_id / trade_type はサーバ (RPC create_trade_report) で auth.uid() と
+ * trade_id から導出されるため、クライアントからは渡さない (成りすまし防止)。
+ *
+ * 呼出側は normal_trade_id / venue_trade_id のどちらか一方のみ渡す:
+ *   - 通常取引の申告: normalTradeId を渡す
+ *   - 会場取引の申告: venueTradeId を渡す
+ *
+ * 申告可能条件は RPC 内で二重検証される:
+ *   - 通常 trade: status='completed' かつ completed_at + 7 days > now()
+ *   - venue_trade completed: 同上 (venue_noshow を除く 7 カテゴリ)
+ *   - venue_trade cancelled + venue_noshow: cancel_requested_at + 7 days > now()
+ *
+ * 想定エラー: RPC 側の raise exception 文字列がそのまま error.message に載る。
+ *   AUTH_REQUIRED / TRADE_REF_INVALID / INVALID_CATEGORY /
+ *   VENUE_NOSHOW_INVALID / TRADE_NOT_FOUND / NOT_TRADE_PARTICIPANT /
+ *   TRADE_NOT_ELIGIBLE / SELF_REPORT_NOT_ALLOWED / ALREADY_REPORTED
+ */
+export async function createTradeReport(params: {
+  normalTradeId?: string | null
+  venueTradeId?: string | null
+  category: TradeReportCategory
+  note?: string | null
+  photoPath?: string | null
+}): Promise<TradeReport> {
+  const { data: authData, error: authError } = await supabase.auth.getUser()
+  if (authError) {
+    throw authError
+  }
+  if (authData.user?.id == null) {
+    throw new Error('AUTH_REQUIRED')
+  }
+
+  const normalId = params.normalTradeId ?? null
+  const venueId = params.venueTradeId ?? null
+  if ((normalId == null) === (venueId == null)) {
+    // 両方 NULL / 両方 NOT NULL は RPC でも弾かれるが、往復コストを避けて先に投げる
+    throw new Error('TRADE_REF_INVALID')
+  }
+
+  const { data, error } = await supabase.rpc('create_trade_report', {
+    p_normal_trade_id: normalId,
+    p_venue_trade_id: venueId,
+    p_category: params.category,
+    p_note: params.note ?? null,
+    p_photo_path: params.photoPath ?? null,
+  })
+
+  if (error != null) {
+    throw new Error(error.message !== '' ? error.message : 'CREATE_TRADE_REPORT_FAILED')
+  }
+  return data as TradeReport
+}
+
+// ─────────────────────────────────────────
+// 交換人数 (Trust 質 PR)
+// migration_rpc_get_distinct_partner_count.sql と対応。
+// INVOKER RPC のため、常に呼出者自身の数値のみ返る (他人の数値を取る余地なし)。
+// ソート・ランキングには使わない前提 (「これまでに X 人と交換」の表示専用)。
+// ─────────────────────────────────────────
+
+/**
+ * 自分がこれまでに交換した distinct 相手数を返す。
+ *
+ * 対象:
+ *   - trades.status='completed' の参加者相手
+ *   - venue_trades.status='completed' の参加者相手
+ *   - 両方 UNION の distinct 数
+ *
+ * INVOKER + 引数なしのため、他人の数値を取る余地はゼロ。
+ */
+export async function fetchDistinctPartnerCount(): Promise<number> {
+  const { data: authData, error: authError } = await supabase.auth.getUser()
+  if (authError) {
+    throw authError
+  }
+  if (authData.user?.id == null) {
+    throw new Error('AUTH_REQUIRED')
+  }
+
+  const { data, error } = await supabase.rpc('get_distinct_partner_count')
+
+  if (error != null) {
+    throw new Error(error.message !== '' ? error.message : 'FETCH_PARTNER_COUNT_FAILED')
+  }
+  return typeof data === 'number' ? data : 0
+}

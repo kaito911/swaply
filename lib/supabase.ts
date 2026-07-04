@@ -1,5 +1,7 @@
 // lib/supabase.ts
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { createClient } from '@supabase/supabase-js'
+import { AppState } from 'react-native'
 import { ALL_MEMBERS, MemberMaster } from '../constants/members'
 import {
   Card,
@@ -38,7 +40,50 @@ import { readAsStringAsync } from 'expo-file-system/legacy'
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+// Supabase 公式 React Native パターン (https://supabase.com/docs/reference/javascript/initializing)。
+//
+// storage を明示指定しないと、@supabase/auth-js の GoTrueClient は
+// localStorage 不在の RN 環境で memoryLocalStorageAdapter に fallback する
+// (node_modules/@supabase/auth-js/dist/main/GoTrueClient.js の default storage 選択ロジック)。
+// 結果としてセッションは JS runtime のメモリ内にのみ保持され、
+// アプリを完全終了すると失われ、次回起動でログイン画面に戻される問題が発生する。
+//
+// AsyncStorage を渡すことで session を端末永続ストレージに保存し、
+// (a) アプリ完全終了 → 再起動でも session 復元、
+// (b) refresh_token を永続化して長期セッション継続、
+// を実現する。
+//
+// autoRefreshToken / persistSession は auth-js のデフォルトが true だが、
+// 意図を明示するため冗長に指定する。detectSessionInUrl は RN では意味を持たないため
+// false (ブラウザ環境のみ true が必要)。
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storage: AsyncStorage,
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+})
+
+// Supabase 公式 RN パターン: AppState 遷移で auto-refresh を on/off する。
+//
+// autoRefreshToken=true でも、RN のバックグラウンド中は setInterval が実質停止するため
+// フォアグラウンド復帰時のトークン再取得が自動で走らない。復帰直後に RPC を発火すると
+// 期限切れ access_token で 401 を踏み、home 画面が空表示になる (旧挙動)。
+//
+// active 復帰時に startAutoRefresh() を呼んで即時 refresh + 定期タイマー再開、
+// background/inactive 遷移時に stopAutoRefresh() でタイマー停止 (バッテリー節約 + 予測不能な
+// deferred 実行を回避) することでこの問題を解消する。
+//
+// BadgeProvider も AppState.addEventListener を使うが、AppState は複数リスナー登録可能で
+// 独立に動作する (RN の addEventListener 契約通り)。競合しない。
+AppState.addEventListener('change', (state) => {
+  if (state === 'active') {
+    supabase.auth.startAutoRefresh()
+  } else {
+    supabase.auth.stopAutoRefresh()
+  }
+})
 
 // ─────────────────────────────────────────
 // PR-V1 (venue resilience): 会場モードの読み込み系 fetch 共通タイムアウト

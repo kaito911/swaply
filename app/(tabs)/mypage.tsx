@@ -469,6 +469,15 @@ export default function MyPageScreen() {
               <Text style={styles.devLabel}>オンボーディングリセット [dev]</Text>
               <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
             </Pressable>
+            {/* Phase B (2026-07-05): 出品1ページ化の入口 (entry.tsx → 下書きハブ or single-page)。
+                Phase D で SubmitFab の向き先を切替予定。それまで本 dev 導線経由のみで検証。 */}
+            <Pressable
+              style={styles.devRow}
+              onPress={() => router.push('/listing/new/entry' as never)}
+            >
+              <Text style={styles.devLabel}>出品1ページ化 [dev]</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+            </Pressable>
           </View>
         )}
 

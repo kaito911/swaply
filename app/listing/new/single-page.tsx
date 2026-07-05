@@ -1,0 +1,679 @@
+// app/listing/new/single-page.tsx
+//
+// Phase B: 出品 1 ページ化 本体。
+//
+// 設計:
+//   - useReducer<ListingFormState> で 6 section の値を集約管理
+//     (types.ts の ListingFormState / INITIAL_LISTING_FORM_STATE を single source of truth)
+//   - ScrollView 縦積み、折り畳みなし。並び順は厳守:
+//     Image → Work → Characters → Items → Condition → Want → 出品CTA
+//   - 各 section header に入力済み✓ (バリデーション充足で表示)
+//   - 最下部 PrimaryCTA「出品する」: 全必須充足時のみ有効、未充足なら残り必須を動的案内
+//   - submit は confirm.tsx の DB 処理を完全流用 (cards INSERT + card_wanted_links bulk)
+//
+// 自動下書き保存:
+//   - reducer state 変更を監視、debounce 800ms で saveDraft
+//   - 画面離脱時 (beforeRemove) にも確定保存 + トースト「下書きに保存しました」
+//     (トースト部品なしのため Alert.alert で代替)
+//   - 出品成功時は draft を削除 (ゴミを残さない)
+//   - 新規 (isNew='1') は最初の入力発生時に draft 保存が走り始める
+//     (URL params の draftId を最初から使うため、初回入力で既存 saveDraft が走る)
+//   - 再開 (isNew='0') は URL params の draftId を使い、既存 draft を state hydrate
+//
+// スコープ制約:
+//   - 既存 7 画面 (image/work/characters/items/want/condition/confirm) は無変更
+//   - DB 処理は confirm.tsx の Phase B-2 実装 (cards INSERT + addCardWantedLinks) を流用
+//   - 完全な原子性 (cards + wanted_links の同一トランザクション) は将来 RPC 化で検討
+
+import { PrimaryCTA } from '@/components/PrimaryCTA'
+import { ScreenHeader } from '@/components/ScreenHeader'
+import { CharactersSection } from '@/components/listing/section/CharactersSection'
+import { ConditionSection } from '@/components/listing/section/ConditionSection'
+import { ImageSection } from '@/components/listing/section/ImageSection'
+import { ItemsSection } from '@/components/listing/section/ItemsSection'
+import {
+  INITIAL_LISTING_FORM_STATE,
+  type CharactersSectionValue,
+  type ConditionSectionValue,
+  type ImageSectionValue,
+  type ItemsSectionValue,
+  type ListingFormState,
+  type WantSectionValue,
+  type WorkSectionValue,
+} from '@/components/listing/section/types'
+import { WantSection } from '@/components/listing/section/WantSection'
+import { WorkSection } from '@/components/listing/section/WorkSection'
+import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { useAuth } from '@/hooks/useAuth'
+import { deleteDraft, loadDraft, saveDraft } from '@/lib/listingDrafts'
+import { useToast } from '@/providers/ToastProvider'
+import {
+  getCharacterById,
+  getItemTypeById,
+  getWorkById,
+} from '@/lib/master'
+import {
+  addCardWantedLinks,
+  supabase,
+  uploadCardImage,
+} from '@/lib/supabase'
+import { Ionicons } from '@expo/vector-icons'
+import { router, useLocalSearchParams, useNavigation } from 'expo-router'
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react'
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+
+// ─────────────────────────────────────────
+// reducer
+// ─────────────────────────────────────────
+
+type Action =
+  | { type: 'HYDRATE'; state: ListingFormState }
+  | { type: 'SET_IMAGE'; value: ImageSectionValue }
+  | { type: 'SET_WORK'; value: WorkSectionValue }
+  | { type: 'SET_CHARACTERS'; value: CharactersSectionValue }
+  | { type: 'SET_ITEMS'; value: ItemsSectionValue }
+  | { type: 'SET_CONDITION'; value: ConditionSectionValue }
+  | { type: 'SET_WANT'; value: WantSectionValue }
+
+function reducer(state: ListingFormState, action: Action): ListingFormState {
+  switch (action.type) {
+    case 'HYDRATE':
+      return action.state
+    case 'SET_IMAGE':
+      return { ...state, image: action.value }
+    case 'SET_WORK':
+      return { ...state, work: action.value }
+    case 'SET_CHARACTERS':
+      return { ...state, characters: action.value }
+    case 'SET_ITEMS':
+      return { ...state, itemTypes: action.value }
+    case 'SET_CONDITION':
+      return { ...state, condition: action.value }
+    case 'SET_WANT':
+      return { ...state, want: action.value }
+    default:
+      return state
+  }
+}
+
+// ─────────────────────────────────────────
+// validation (section 完了✓判定 + 必須未充足の動的案内)
+// ─────────────────────────────────────────
+
+/** section ごとの充足判定。true = ✓ 表示、false = 未入力 */
+function isImageDone(v: ImageSectionValue): boolean {
+  return v.frontUri != null && v.frontUri !== ''
+}
+function isWorkDone(v: WorkSectionValue): boolean {
+  return v != null
+}
+function isCharactersDone(v: CharactersSectionValue): boolean {
+  return v.length >= 1
+}
+function isItemsDone(v: ItemsSectionValue): boolean {
+  return v.length >= 1
+}
+function isConditionDone(): boolean {
+  // condition の必須項目は無し (want_description も allows_adjustment も任意)
+  // Phase B では常に✓とする (want.tsx / condition.tsx の既存挙動と整合)
+  return true
+}
+function isWantDone(v: WantSectionValue): boolean {
+  return v.length >= 1
+}
+
+/**
+ * 未充足の必須項目名を配列で返す (順序は section の並び順)。
+ * 空配列なら全必須充足 (submit 可)。
+ */
+function missingRequired(state: ListingFormState): string[] {
+  const missing: string[] = []
+  if (!isImageDone(state.image)) missing.push('写真')
+  if (!isWorkDone(state.work)) missing.push('作品名')
+  if (!isCharactersDone(state.characters)) missing.push('キャラ')
+  if (!isItemsDone(state.itemTypes)) missing.push('種別')
+  if (!isWantDone(state.want)) missing.push('求商品')
+  return missing
+}
+
+/**
+ * PrimaryCTA disabled 時に出す案内文言。詰問調でなく案内調。
+ * 例: 「写真と作品名を入れたら出品できます」
+ */
+function buildMissingHint(missing: string[]): string {
+  if (missing.length === 0) return ''
+  if (missing.length === 1) return `${missing[0]}を入れたら出品できます`
+  if (missing.length === 2) return `${missing[0]}と${missing[1]}を入れたら出品できます`
+  const last = missing[missing.length - 1]
+  const rest = missing.slice(0, -1).join('、')
+  return `${rest}と${last}を入れたら出品できます`
+}
+
+// ─────────────────────────────────────────
+// helpers (submit 変換)
+// ─────────────────────────────────────────
+
+function characterDisplay(id: string): string {
+  return getCharacterById(id)?.display_name_ja ?? id
+}
+function itemTypeDisplay(id: string): string {
+  return getItemTypeById(id)?.display_name_ja ?? id
+}
+
+/**
+ * cards.name 列に投入する表示名を生成する (confirm.tsx の buildSetName を移植)。
+ * 例: 「鬼滅の刃 - 炭治郎、禰豆子、善逸 (アクスタ)」
+ */
+function buildSetName(state: ListingFormState): string {
+  if (state.work == null) return '無題の出品'
+  const work = getWorkById(state.work.workId)
+  const workDisplayName = work?.display_name_ja ?? state.work.workId
+  const charNames = state.characters.map(characterDisplay)
+  const typeNames = state.itemTypes.map(itemTypeDisplay)
+
+  const parts: string[] = []
+  if (workDisplayName !== '') parts.push(workDisplayName)
+  if (charNames.length > 0) {
+    parts.push(
+      charNames.length <= 3
+        ? charNames.join('、')
+        : `${charNames.slice(0, 3).join('、')} 他${charNames.length - 3}名`,
+    )
+  }
+  if (typeNames.length > 0) {
+    parts.push(`(${typeNames.join('・')})`)
+  }
+  return parts.join(' - ')
+}
+
+// ─────────────────────────────────────────
+// screen
+// ─────────────────────────────────────────
+
+const DRAFT_DEBOUNCE_MS = 800
+
+export default function ListingNewSinglePageScreen() {
+  const params = useLocalSearchParams<{
+    draftId: string
+    isNew: string
+  }>()
+  const navigation = useNavigation()
+  const { userId, loading: authLoading } = useAuth()
+  const { showToast } = useToast()
+
+  const draftId = params.draftId
+  const isNew = params.isNew === '1'
+
+  const [state, dispatch] = useReducer(reducer, INITIAL_LISTING_FORM_STATE)
+  const [hydrated, setHydrated] = useState<boolean>(isNew)
+  const [submitting, setSubmitting] = useState(false)
+
+  // reducer state を常に最新の ref で保持 (unmount 時の flush 用)
+  const stateRef = useRef(state)
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
+  // 保存中フラグ (unmount 時の重複保存回避)
+  const submittedRef = useRef(false)
+
+  // ── 1. hydrate ──
+  // 再開の場合は既存 draft を読み込んで state を復元
+  useEffect(() => {
+    if (isNew) return
+    if (draftId == null || draftId === '') return
+    let cancelled = false
+    void loadDraft(draftId).then((draft) => {
+      if (cancelled) return
+      if (draft != null) {
+        dispatch({ type: 'HYDRATE', state: draft.state })
+      }
+      setHydrated(true)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [draftId, isNew])
+
+  // ── 2. debounce 自動保存 ──
+  // hydrate 完了後、state 変更のたびに debounce 800ms で saveDraft
+  useEffect(() => {
+    if (!hydrated) return
+    if (draftId == null || draftId === '') return
+    const t = setTimeout(() => {
+      void saveDraft(draftId, state)
+    }, DRAFT_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [state, hydrated, draftId])
+
+  // ── 3. 離脱時の確定保存 + トースト ──
+  // navigation の beforeRemove で保存 (戻る / スワイプ / router.back 全部拾う)。
+  // 保存完了後に showToast で軽量通知 (OK タップ不要、2.5s で自動消滅)。
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      // 出品成功 (submittedRef=true) では draft は既に削除済のため保存しない
+      if (submittedRef.current) return
+      if (draftId == null || draftId === '') return
+      void saveDraft(draftId, stateRef.current).then(() => {
+        showToast('下書きに保存しました')
+      })
+    })
+    return unsubscribe
+  }, [navigation, draftId, showToast])
+
+  // ── 4. submit ──
+  const handleSubmit = useCallback(async () => {
+    if (submitting || authLoading) return
+    if (userId == null) {
+      Alert.alert('エラー', 'ログイン情報が取得できません')
+      return
+    }
+    const missing = missingRequired(state)
+    if (missing.length > 0) return
+    if (state.work == null) return // TS narrowing (missingRequired が保証済)
+
+    try {
+      setSubmitting(true)
+
+      // 表面画像アップロード
+      let resolvedImageUrl: string | null = null
+      const frontUri = state.image.frontUri
+      if (frontUri != null && frontUri !== '' && !frontUri.startsWith('http')) {
+        try {
+          resolvedImageUrl = await uploadCardImage({ userId, imageUri: frontUri })
+        } catch (error) {
+          console.error('[single-page] uploadCardImage failed', error)
+          resolvedImageUrl = null
+        }
+      } else if (frontUri != null && frontUri.startsWith('http')) {
+        resolvedImageUrl = frontUri
+      }
+
+      // 裏面画像アップロード (任意)
+      let resolvedImageBackUrl: string | null = null
+      const backUri = state.image.backUri
+      if (backUri != null && backUri !== '') {
+        if (!backUri.startsWith('http')) {
+          try {
+            resolvedImageBackUrl = await uploadCardImage({
+              userId,
+              imageUri: backUri,
+              fileName: `back-${Date.now()}.jpg`,
+            })
+          } catch (error) {
+            console.error('[single-page] uploadCardImage (back) failed', error)
+            resolvedImageBackUrl = null
+          }
+        } else {
+          resolvedImageBackUrl = backUri
+        }
+      }
+
+      // cards INSERT (confirm.tsx toInsertRow と同構造)
+      const row = {
+        owner_user_id: userId,
+        name: buildSetName(state),
+        category: state.work.category,
+        work_id: state.work.workId,
+        characters: state.characters,
+        item_types: state.itemTypes,
+        image_url: resolvedImageUrl,
+        image_back_url: resolvedImageBackUrl,
+        description: null,
+        status: 'active',
+        condition: null,
+        want_description:
+          state.condition.want_description !== ''
+            ? state.condition.want_description
+            : null,
+        allows_mail: true,
+        allows_handoff: false,
+        allows_adjustment: state.condition.allows_adjustment,
+        adjustment_max: state.condition.allows_adjustment
+          ? state.condition.adjustment_max
+          : null,
+        // 求の構造化 (案 X: card_wanted_links を正、want_* は空配列)
+        want_works: [] as string[],
+        want_characters: [] as string[],
+        want_item_types: [] as string[],
+        // legacy K-POP 列
+        group_name: null,
+        member_name: null,
+        series: null,
+      }
+
+      const { data: createdCard, error: cardError } = await supabase
+        .from('cards')
+        .insert(row)
+        .select()
+        .single()
+      if (cardError) throw cardError
+      if (createdCard == null) {
+        throw new Error('cards INSERT did not return a row')
+      }
+
+      // card_wanted_links bulk INSERT
+      try {
+        await addCardWantedLinks({
+          cardId: createdCard.id as string,
+          wantedCardIds: state.want,
+          ownerUserId: userId,
+        })
+      } catch (linkErr) {
+        console.error(
+          '[single-page][addCardWantedLinks]',
+          linkErr,
+        )
+        // partial success: card は作成済、link 失敗
+        submittedRef.current = true
+        await deleteDraft(draftId)
+        Alert.alert(
+          '一部完了',
+          '出品は作成されましたが、求商品の紐づけに失敗しました。求リスト画面から再設定してください。',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.replace('/(tabs)/mypage' as never),
+            },
+          ],
+        )
+        return
+      }
+
+      // 全成功: draft 削除 → 出品完了 → mypage
+      submittedRef.current = true
+      await deleteDraft(draftId)
+      Alert.alert('出品完了', '出品が完了しました。', [
+        {
+          text: 'OK',
+          onPress: () => router.replace('/(tabs)/mypage' as never),
+        },
+      ])
+    } catch (err) {
+      console.error('[single-page][handleSubmit]', err)
+      const message =
+        typeof err === 'object' &&
+        err != null &&
+        'message' in err &&
+        typeof (err as { message: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : '出品に失敗しました。'
+      Alert.alert('出品エラー', message)
+    } finally {
+      setSubmitting(false)
+    }
+  }, [submitting, authLoading, userId, state, draftId])
+
+  // ── derive ──
+  const missing = useMemo(() => missingRequired(state), [state])
+  const canSubmit = missing.length === 0 && !submitting
+  const missingHint = buildMissingHint(missing)
+
+  const workIdForCharacters = state.work?.workId ?? ''
+
+  // hydrate 中はスピナー (再開経路のみ)
+  if (!hydrated) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScreenHeader title="出品" />
+        <View style={styles.centerBox}>
+          <Ionicons
+            name="hourglass-outline"
+            size={24}
+            color={colors.textTertiary}
+          />
+          <Text style={styles.hintText}>下書きを読み込んでいます</Text>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  return (
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <ScreenHeader title="出品" />
+      <KeyboardAvoidingView
+        style={styles.kav}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={80}
+      >
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* ① 写真 */}
+          <SectionHeader
+            index={1}
+            title="写真"
+            done={isImageDone(state.image)}
+          />
+          <ImageSection
+            value={state.image}
+            onChange={(v) => dispatch({ type: 'SET_IMAGE', value: v })}
+          />
+
+          <View style={styles.sectionDivider} />
+
+          {/* ② 作品 */}
+          <SectionHeader
+            index={2}
+            title="作品 / グループ"
+            done={isWorkDone(state.work)}
+          />
+          <WorkSection
+            value={state.work}
+            onChange={(v) => dispatch({ type: 'SET_WORK', value: v })}
+          />
+
+          <View style={styles.sectionDivider} />
+
+          {/* ③ キャラ */}
+          <SectionHeader
+            index={3}
+            title="キャラ"
+            done={isCharactersDone(state.characters)}
+          />
+          <CharactersSection
+            value={state.characters}
+            onChange={(v) => dispatch({ type: 'SET_CHARACTERS', value: v })}
+            workId={workIdForCharacters}
+            userId={userId}
+          />
+
+          <View style={styles.sectionDivider} />
+
+          {/* ④ 種別 */}
+          <SectionHeader
+            index={4}
+            title="種別"
+            done={isItemsDone(state.itemTypes)}
+          />
+          <ItemsSection
+            value={state.itemTypes}
+            onChange={(v) => dispatch({ type: 'SET_ITEMS', value: v })}
+            userId={userId}
+          />
+
+          <View style={styles.sectionDivider} />
+
+          {/* ⑤ 状態・調整金 */}
+          <SectionHeader
+            index={5}
+            title="求の詳細・調整金"
+            done={isConditionDone()}
+            optional
+          />
+          <ConditionSection
+            value={state.condition}
+            onChange={(v) => dispatch({ type: 'SET_CONDITION', value: v })}
+          />
+
+          <View style={styles.sectionDivider} />
+
+          {/* ⑥ 求 (最後) */}
+          <SectionHeader
+            index={6}
+            title="求"
+            done={isWantDone(state.want)}
+          />
+          <WantSection
+            value={state.want}
+            onChange={(v) => dispatch({ type: 'SET_WANT', value: v })}
+            userId={userId}
+          />
+
+          {/* 出品 CTA */}
+          <View style={styles.submitWrap}>
+            {!canSubmit && missingHint !== '' && (
+              <Text style={styles.missingHint}>{missingHint}</Text>
+            )}
+            <PrimaryCTA
+              label="出品する"
+              onPress={handleSubmit}
+              loading={submitting}
+              disabled={!canSubmit}
+              size="lg"
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  )
+}
+
+// ─────────────────────────────────────────
+// sub-components
+// ─────────────────────────────────────────
+
+function SectionHeader({
+  index,
+  title,
+  done,
+  optional = false,
+}: {
+  index: number
+  title: string
+  done: boolean
+  optional?: boolean
+}) {
+  return (
+    <View style={sectionHeaderStyles.wrap}>
+      <View style={sectionHeaderStyles.numberBadge}>
+        <Text style={sectionHeaderStyles.numberText}>{index}</Text>
+      </View>
+      <Text style={sectionHeaderStyles.title}>{title}</Text>
+      {optional && (
+        <Text style={sectionHeaderStyles.optional}>（任意）</Text>
+      )}
+      {done && (
+        <View style={sectionHeaderStyles.checkBadge}>
+          <Ionicons
+            name="checkmark-circle"
+            size={20}
+            color={colors.primary}
+          />
+        </View>
+      )}
+    </View>
+  )
+}
+
+const sectionHeaderStyles = StyleSheet.create({
+  wrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  numberBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  numberText: {
+    fontSize: 12,
+    fontWeight: fontWeight.bold,
+    color: colors.textSecondary,
+  },
+  title: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  optional: {
+    fontSize: 12,
+    color: colors.textTertiary,
+  },
+  checkBadge: {
+    marginLeft: 'auto',
+  },
+})
+
+// ─────────────────────────────────────────
+// styles
+// ─────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  kav: {
+    flex: 1,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.md,
+    paddingBottom: spacing['2xl'],
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: colors.borderLight,
+    marginVertical: spacing.xl,
+  },
+  submitWrap: {
+    marginTop: spacing.xl,
+    gap: spacing.sm,
+  },
+  missingHint: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.backgroundMuted,
+    borderRadius: radius.md,
+  },
+  centerBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  hintText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+  },
+})

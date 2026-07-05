@@ -4,6 +4,7 @@ import { PushNotificationResponseHandler } from '@/components/PushNotificationRe
 import { AuthProvider, useAuthContext } from '@/providers/AuthProvider'
 import { BadgeProvider } from '@/providers/BadgeProvider'
 import { MasterCacheProvider } from '@/providers/MasterCacheProvider'
+import { ToastProvider } from '@/providers/ToastProvider'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import OnboardingScreen, { ONBOARDING_DONE_KEY } from './onboarding'
@@ -232,11 +233,15 @@ export default function RootLayout() {
     <AuthProvider>
       <BadgeProvider>
         <MasterCacheProvider>
-          {/* PR4-c: Push 通知 tap → deep-link 遷移を担う副作用 component。
-              UI は返さず、cold start / foreground / background tap を listen する。
-              auth/onboarding gate の外でマウントすることで cold start を取り逃さない。 */}
-          <PushNotificationResponseHandler />
-          <RootNavigator />
+          {/* Phase B (2026-07-05): 軽量トースト用 Provider。他 Provider に依存しない
+              ため最深部に配置。Toast overlay は本 Provider の子ツリー上に render される。 */}
+          <ToastProvider>
+            {/* PR4-c: Push 通知 tap → deep-link 遷移を担う副作用 component。
+                UI は返さず、cold start / foreground / background tap を listen する。
+                auth/onboarding gate の外でマウントすることで cold start を取り逃さない。 */}
+            <PushNotificationResponseHandler />
+            <RootNavigator />
+          </ToastProvider>
         </MasterCacheProvider>
       </BadgeProvider>
     </AuthProvider>

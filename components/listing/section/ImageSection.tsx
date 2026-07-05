@@ -3,17 +3,31 @@
 // Phase A: 出品 1 ページ化 section 抽出。
 // 元: app/listing/new/image.tsx の入力 UI 部 (front + back 画像選択)。
 //
-// 再利用/書き換え比率: 再利用 ~85% / 書き換え ~15%
-//   - pickFromCamera / pickFromLibrary helper: 完全流用
-//   - Slot tab / preview / pick buttons: 完全流用
-//   - 削除: SafeAreaView / ScreenHeader / handleCancel / handleNext / PrimaryCTA
-//     → 親画面の責務に移譲
-//   - 追加: controlled component 化 (value + onChange props)
+// Phase B UI 微修正 (2026-07-05):
+//   旧レイアウト (aspectRatio 3:4 の大 preview + tab + カメラ/アルバムボタン) は
+//   写真セクションが 1 画面を占有し「下に入力が続く」ことが視覚的に伝わらなかった。
+//   → メルカリ型の小サイズサムネイル横並び (2 スロット, ~88x88 sq) に変更。
+//   1 行に 3-4 個入るサイズ感で、下に入力が続くことが縦スクロールを促す。
+//
+//   変更点:
+//     - Tab (front/back 切替) 廃止 — 2 スロットが常時見えて slot 単位で操作可能に
+//     - 大 preview (aspectRatio) 廃止 — 小サムネイル 2 個の Row
+//     - カメラ/アルバム 2 ボタン廃止 — スロット tap 時に Alert.alert で action sheet
+//     - 既存: pickFromCamera / pickFromLibrary helper は完全流用
+//     - 既存: value = {frontUri, backUri} 契約は不変 (親 reducer への影響ゼロ)
 
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
+import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
-import React, { useState } from 'react'
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native'
+import React from 'react'
+import {
+  Alert,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 
 import type { ImageSectionValue } from './types'
 
@@ -67,177 +81,182 @@ async function pickFromLibrary(): Promise<string | null> {
 }
 
 export function ImageSection({ value, onChange }: ImageSectionProps) {
-  const [activeSlot, setActiveSlot] = useState<Slot>('front')
-
-  const currentUri = activeSlot === 'front' ? value.frontUri : value.backUri
-
-  const setSlot = (uri: string) => {
-    if (activeSlot === 'front') {
+  const applyToSlot = (slot: Slot, uri: string | null) => {
+    if (slot === 'front') {
       onChange({ ...value, frontUri: uri })
-      // 表面選択直後、裏面が空なら自動でタブ移動 (元 UX 継承)
-      if (value.backUri == null) setActiveSlot('back')
     } else {
       onChange({ ...value, backUri: uri })
     }
   }
 
-  const handleCamera = async () => {
-    const uri = await pickFromCamera()
-    if (uri != null) setSlot(uri)
+  const openPicker = (slot: Slot) => {
+    Alert.alert(
+      slot === 'front' ? '表面の写真を選ぶ' : '裏面の写真を選ぶ',
+      undefined,
+      [
+        {
+          text: 'カメラで撮る',
+          onPress: async () => {
+            const uri = await pickFromCamera()
+            if (uri != null) applyToSlot(slot, uri)
+          },
+        },
+        {
+          text: 'アルバムから選ぶ',
+          onPress: async () => {
+            const uri = await pickFromLibrary()
+            if (uri != null) applyToSlot(slot, uri)
+          },
+        },
+        { text: 'キャンセル', style: 'cancel' },
+      ],
+    )
   }
-  const handleLibrary = async () => {
-    const uri = await pickFromLibrary()
-    if (uri != null) setSlot(uri)
+
+  const removeSlot = (slot: Slot) => {
+    applyToSlot(slot, null)
   }
 
   return (
-    <View style={styles.wrap}>
-      {/* Slot tabs */}
-      <View style={styles.tabRow}>
-        <Pressable
-          style={[styles.tab, activeSlot === 'front' && styles.tabActive]}
-          onPress={() => setActiveSlot('front')}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              activeSlot === 'front' && styles.tabTextActive,
-            ]}
-          >
-            表面 {value.frontUri ? '✓' : ''}
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeSlot === 'back' && styles.tabActive]}
-          onPress={() => setActiveSlot('back')}
-        >
-          <Text
-            style={[
-              styles.tabText,
-              activeSlot === 'back' && styles.tabTextActive,
-            ]}
-          >
-            裏面 {value.backUri ? '✓' : '（任意）'}
-          </Text>
-        </Pressable>
-      </View>
-
-      {/* Preview (3:4 比率、ImagePicker で crop 済) */}
-      <View style={styles.previewWrap}>
-        {currentUri ? (
-          <Image
-            source={{ uri: currentUri }}
-            style={styles.previewImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={styles.previewPlaceholder}>
-            <Text style={styles.placeholderIcon}>📷</Text>
-            <Text style={styles.placeholderText}>
-              {activeSlot === 'front'
-                ? '表面の写真を選んでください'
-                : '裏面の写真を選んでください（任意）'}
-            </Text>
-          </View>
-        )}
-      </View>
-
-      {/* Pick buttons */}
-      <View style={styles.btnRow}>
-        <Pressable style={styles.pickBtn} onPress={handleCamera}>
-          <Text style={styles.pickBtnIcon}>📸</Text>
-          <Text style={styles.pickBtnLabel}>カメラで撮る</Text>
-        </Pressable>
-        <View style={styles.btnDivider} />
-        <Pressable style={styles.pickBtn} onPress={handleLibrary}>
-          <Text style={styles.pickBtnIcon}>🖼️</Text>
-          <Text style={styles.pickBtnLabel}>アルバムから選ぶ</Text>
-        </Pressable>
-      </View>
+    <View style={styles.row}>
+      <Thumbnail
+        slot="front"
+        uri={value.frontUri}
+        label="表面"
+        required
+        onPress={() => openPicker('front')}
+        onRemove={() => removeSlot('front')}
+      />
+      <Thumbnail
+        slot="back"
+        uri={value.backUri}
+        label="裏面"
+        onPress={() => openPicker('back')}
+        onRemove={() => removeSlot('back')}
+      />
     </View>
   )
 }
 
+// ─────────────────────────────────────────
+// sub-component: 小サイズサムネイル 1 個 (~88x88 sq)
+// ─────────────────────────────────────────
+
+function Thumbnail({
+  uri,
+  label,
+  required = false,
+  onPress,
+  onRemove,
+}: {
+  slot: Slot
+  uri: string | null
+  label: string
+  required?: boolean
+  onPress: () => void
+  onRemove: () => void
+}) {
+  const hasImage = uri != null && uri !== ''
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.thumb,
+        hasImage && styles.thumbFilled,
+        pressed && styles.thumbPressed,
+      ]}
+    >
+      {hasImage ? (
+        <>
+          <Image
+            source={{ uri }}
+            style={styles.thumbImage}
+            resizeMode="cover"
+          />
+          {/* 削除 (× 小ボタン、右上) */}
+          <Pressable
+            onPress={onRemove}
+            hitSlop={8}
+            style={styles.removeBadge}
+          >
+            <Ionicons name="close" size={12} color={colors.textInverse} />
+          </Pressable>
+        </>
+      ) : (
+        <View style={styles.thumbPlaceholder}>
+          <Ionicons name="add" size={22} color={colors.primary} />
+          <Text style={styles.thumbLabel}>
+            {label}
+            {!required && <Text style={styles.optional}>{'\n'}（任意）</Text>}
+          </Text>
+        </View>
+      )}
+    </Pressable>
+  )
+}
+
+// ─────────────────────────────────────────
+// styles
+// ─────────────────────────────────────────
+
+const THUMB_SIZE = 88
+
 const styles = StyleSheet.create({
-  wrap: {
+  row: {
+    flexDirection: 'row',
     gap: spacing.sm,
+    flexWrap: 'wrap',
   },
-  tabRow: {
-    flexDirection: 'row',
+  thumb: {
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
     borderRadius: radius.md,
-    borderWidth: 1,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
     borderColor: colors.border,
     backgroundColor: colors.backgroundCard,
-    overflow: 'hidden',
-  },
-  tab: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.sm,
-  },
-  tabActive: {
-    backgroundColor: colors.primary,
-  },
-  tabText: {
-    fontSize: 13,
-    fontWeight: fontWeight.semibold,
-    color: colors.textSecondary,
-  },
-  tabTextActive: {
-    color: colors.textInverse,
-  },
-  previewWrap: {
-    aspectRatio: 3 / 4,
-    borderRadius: radius.lg,
     overflow: 'hidden',
-    backgroundColor: colors.backgroundMuted,
-    borderWidth: 1,
+  },
+  thumbFilled: {
+    borderStyle: 'solid',
     borderColor: colors.border,
   },
-  previewImage: {
-    flex: 1,
+  thumbPressed: {
+    opacity: 0.7,
+  },
+  thumbImage: {
     width: '100%',
+    height: '100%',
   },
-  previewPlaceholder: {
-    flex: 1,
+  thumbPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: 4,
   },
-  placeholderIcon: {
-    fontSize: 48,
-    marginBottom: spacing.md,
-  },
-  placeholderText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    fontWeight: fontWeight.medium,
-  },
-  btnRow: {
-    flexDirection: 'row',
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.backgroundCard,
-    overflow: 'hidden',
-  },
-  pickBtn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.lg,
-  },
-  btnDivider: {
-    width: 1,
-    backgroundColor: colors.border,
-  },
-  pickBtnIcon: {
-    fontSize: 24,
-    marginBottom: spacing.xs,
-  },
-  pickBtnLabel: {
-    fontSize: 13,
+  thumbLabel: {
+    fontSize: 11,
     fontWeight: fontWeight.semibold,
-    color: colors.textPrimary,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  optional: {
+    fontSize: 10,
+    fontWeight: fontWeight.medium,
+    color: colors.textTertiary,
+  },
+  removeBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 })

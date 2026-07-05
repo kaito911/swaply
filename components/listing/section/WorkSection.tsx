@@ -83,6 +83,15 @@ export function WorkSection({ value, onChange }: WorkSectionProps) {
   const [freeTextCategory, setFreeTextCategory] = useState<MasterCategory | null>(
     initial.freeTextCategory,
   )
+  // Phase B UI 微修正 (2026-07-05): 候補リストを常時展開ではなく、入力欄フォーカス時のみ展開。
+  // 画面を無駄に長くする問題を解消。onBlur は 150ms 遅延して Pressable onPress が
+  // 先に発火するようにする (候補タップと blur の競合回避)。
+  const [isFocused, setIsFocused] = useState(false)
+
+  const handleFocus = () => setIsFocused(true)
+  const handleBlur = () => {
+    setTimeout(() => setIsFocused(false), 150)
+  }
 
   const trimmedInput = input.trim()
 
@@ -166,6 +175,8 @@ export function WorkSection({ value, onChange }: WorkSectionProps) {
       <TextInput
         value={input}
         onChangeText={handleInputChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         placeholder="例: TREASURE、鬼滅の刃、サンリオ"
         placeholderTextColor={colors.textTertiary}
         style={styles.input}
@@ -174,8 +185,8 @@ export function WorkSection({ value, onChange }: WorkSectionProps) {
         maxLength={MAX_FREE_TEXT_WORK_ID_LENGTH}
       />
 
-      {/* マスタ候補 */}
-      {selectedWork == null && suggestions.length > 0 && (
+      {/* マスタ候補: フォーカス時のみ展開 */}
+      {isFocused && selectedWork == null && suggestions.length > 0 && (
         <View style={styles.suggestionList}>
           {suggestions.map((w) => (
             <Pressable
@@ -197,8 +208,8 @@ export function WorkSection({ value, onChange }: WorkSectionProps) {
         </View>
       )}
 
-      {/* 自由入力 registration UI */}
-      {canRegisterFreeText && (
+      {/* 自由入力 registration UI: フォーカス時のみ展開 */}
+      {isFocused && canRegisterFreeText && (
         <View style={styles.freeTextSection}>
           <Text style={styles.freeTextHeader}>
             候補にない場合: 「{trimmedInput}」で登録して進む
@@ -232,8 +243,9 @@ export function WorkSection({ value, onChange }: WorkSectionProps) {
         </View>
       )}
 
-      {/* 候補ゼロ + 入力ゼロ時の空状態 */}
-      {selectedWork == null &&
+      {/* 候補ゼロ + 入力ゼロ時の空状態: フォーカス時のみ展開 (未 focus 時は section 短く) */}
+      {isFocused &&
+        selectedWork == null &&
         trimmedInput === '' &&
         suggestions.length === 0 && (
           <View style={styles.emptyState}>

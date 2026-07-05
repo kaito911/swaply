@@ -448,36 +448,50 @@ export default function MyPageScreen() {
           {renderTabContent()}
         </View>
 
-        {/* ── DEV + ログアウト ── */}
-        {FEATURE_FLAGS.DEV_FEATURES && (
+        {/* ── DEV + ログアウト ──
+            Phase B 検証 (2026-07-05): section 外側の gate は DEV_FEATURES と
+            LISTING_SINGLE_PAGE_PREVIEW のどちらかで開く。内側の 3 導線は個別 gate:
+              - 成立ログ / オンボリセット: DEV_FEATURES のみ (production 非公開のまま)
+              - 出品1ページ化 [dev]: DEV_FEATURES または LISTING_SINGLE_PAGE_PREVIEW
+                (TestFlight production 検証で露出させる) */}
+        {(FEATURE_FLAGS.DEV_FEATURES ||
+          FEATURE_FLAGS.LISTING_SINGLE_PAGE_PREVIEW) && (
           <View style={styles.devSection}>
-            <Pressable
-              style={styles.devRow}
-              onPress={() => router.push('/offer-insights' as never)}
-            >
-              <Text style={styles.devLabel}>成立ログ [dev]</Text>
-              <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
-            </Pressable>
-            <Pressable
-              style={styles.devRow}
-              onPress={async () => {
-                const { resetOnboardingForDebug } = await import('../onboarding')
-                await resetOnboardingForDebug()
-                Alert.alert('リセット完了', 'アプリを再起動してください')
-              }}
-            >
-              <Text style={styles.devLabel}>オンボーディングリセット [dev]</Text>
-              <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
-            </Pressable>
+            {FEATURE_FLAGS.DEV_FEATURES && (
+              <>
+                <Pressable
+                  style={styles.devRow}
+                  onPress={() => router.push('/offer-insights' as never)}
+                >
+                  <Text style={styles.devLabel}>成立ログ [dev]</Text>
+                  <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+                </Pressable>
+                <Pressable
+                  style={styles.devRow}
+                  onPress={async () => {
+                    const { resetOnboardingForDebug } = await import('../onboarding')
+                    await resetOnboardingForDebug()
+                    Alert.alert('リセット完了', 'アプリを再起動してください')
+                  }}
+                >
+                  <Text style={styles.devLabel}>オンボーディングリセット [dev]</Text>
+                  <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+                </Pressable>
+              </>
+            )}
             {/* Phase B (2026-07-05): 出品1ページ化の入口 (entry.tsx → 下書きハブ or single-page)。
-                Phase D で SubmitFab の向き先を切替予定。それまで本 dev 導線経由のみで検証。 */}
-            <Pressable
-              style={styles.devRow}
-              onPress={() => router.push('/listing/new/entry' as never)}
-            >
-              <Text style={styles.devLabel}>出品1ページ化 [dev]</Text>
-              <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
-            </Pressable>
+                Phase D で SubmitFab の向き先を切替予定。それまで本 dev 導線経由のみで検証。
+                LISTING_SINGLE_PAGE_PREVIEW=true の間は production build でも露出。 */}
+            {(FEATURE_FLAGS.DEV_FEATURES ||
+              FEATURE_FLAGS.LISTING_SINGLE_PAGE_PREVIEW) && (
+              <Pressable
+                style={styles.devRow}
+                onPress={() => router.push('/listing/new/entry' as never)}
+              >
+                <Text style={styles.devLabel}>出品1ページ化 [dev]</Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+              </Pressable>
+            )}
           </View>
         )}
 

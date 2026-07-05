@@ -29,4 +29,11 @@ export const FEATURE_FLAGS = {
   // 例: mypage の開発機能セクション（offer-insights、onboarding リセット 等）
   // __DEV__ は Expo / Metro が自動で true (dev) / false (release build) を割り当てる
   DEV_FEATURES: __DEV__,
+
+  // TEMP (2026-07-05): Phase B production 検証用。TestFlight で「出品1ページ化 [dev]」
+  // 導線だけを production build にも露出させるための一時フラグ。
+  // 検証完了後は false 化 or 本行削除で production 非公開に戻す。
+  // 他の dev 導線 (成立ログ / オンボリセット) は本フラグでは露出しない
+  // (mypage.tsx で個別に FEATURE_FLAGS.DEV_FEATURES gate で分離)。
+  LISTING_SINGLE_PAGE_PREVIEW: true,
 } as const

@@ -1728,18 +1728,21 @@ export async function fetchShippingAddress(userId: string): Promise<{
   address_line1: string | null
   address_line2: string | null
 } | null> {
+  // 住所分離 Step C-1 (2026-07-06): 住所は profiles から user_shipping_addresses に分離。
+  //   本人限定 RLS のテーブルを参照。未登録ユーザーは 0 行のため single() ではなく
+  //   maybeSingle() を使い、行が無くても error にせず null を返す (呼出側は ?? '' 空表示済)。
   const { data, error } = await supabase
-    .from('profiles')
+    .from('user_shipping_addresses')
     .select('shipping_name, postal_code, address_line1, address_line2')
-    .eq('id', userId)
-    .single()
+    .eq('user_id', userId)
+    .maybeSingle()
 
   if (error) {
     console.error('[fetchShippingAddress]', error)
     return null
   }
 
-  return data
+  return data ?? null
 }
 
 export async function updateShippingAddress(params: {
@@ -1749,15 +1752,21 @@ export async function updateShippingAddress(params: {
   addressLine1: string
   addressLine2: string | null
 }): Promise<void> {
+  // 住所分離 Step C-2 (2026-07-06): 住所は user_shipping_addresses に分離。
+  //   旧 .update().eq() は「profiles 行が必ず存在」前提だったが、新テーブルは
+  //   初回未登録で行が無いため upsert (user_id を conflict target) に変更。
   const { error } = await supabase
-    .from('profiles')
-    .update({
-      shipping_name: params.shippingName,
-      postal_code: params.postalCode,
-      address_line1: params.addressLine1,
-      address_line2: params.addressLine2 ?? null,
-    })
-    .eq('id', params.userId)
+    .from('user_shipping_addresses')
+    .upsert(
+      {
+        user_id: params.userId,
+        shipping_name: params.shippingName,
+        postal_code: params.postalCode,
+        address_line1: params.addressLine1,
+        address_line2: params.addressLine2 ?? null,
+      },
+      { onConflict: 'user_id' },
+    )
 
   if (error) {
     throw error

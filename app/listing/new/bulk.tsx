@@ -24,11 +24,22 @@ import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { CharactersSection } from '@/components/listing/section/CharactersSection'
 import { ItemsSection } from '@/components/listing/section/ItemsSection'
-import type { WorkSectionValue } from '@/components/listing/section/types'
+import type {
+  WantSectionValue,
+  WorkSectionValue,
+} from '@/components/listing/section/types'
+import { WantSection } from '@/components/listing/section/WantSection'
 import { WorkSection } from '@/components/listing/section/WorkSection'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
-import { fetchListingKeywordHistory, recordListingKeyword } from '@/lib/master'
+import {
+  fetchListingKeywordHistory,
+  getCharacterById,
+  getItemTypeById,
+  getWorkById,
+  recordListingKeyword,
+} from '@/lib/master'
+import { addCardWantedLinks, supabase, uploadCardImage } from '@/lib/supabase'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { router } from 'expo-router'
@@ -133,6 +144,44 @@ function computeContainRect(
   return { x, y, w, h }
 }
 
+// master ID → 表示名、未ヒットなら raw text (ハイブリッドマスタ fallback)。
+function characterDisplay(id: string): string {
+  return getCharacterById(id)?.display_name_ja ?? id
+}
+function itemTypeDisplay(id: string): string {
+  return getItemTypeById(id)?.display_name_ja ?? id
+}
+
+/**
+ * 1 点 = 1 商品の cards.name を生成 (single-page buildSetName と同型、点ごとの属性で)。
+ * 例: 「Snow Man - 岩本 (アクスタ)」。作品は共通 work、メンバー/種類は点固有。
+ */
+function buildPointName(
+  work: WorkSectionValue,
+  characters: string[],
+  itemTypes: string[],
+): string {
+  const parts: string[] = []
+  if (work != null) {
+    const w = getWorkById(work.workId)
+    const workName = w?.display_name_ja ?? work.workId
+    if (workName !== '') parts.push(workName)
+  }
+  const charNames = characters.map(characterDisplay)
+  if (charNames.length > 0) {
+    parts.push(
+      charNames.length <= 3
+        ? charNames.join('、')
+        : `${charNames.slice(0, 3).join('、')} 他${charNames.length - 3}名`,
+    )
+  }
+  const typeNames = itemTypes.map(itemTypeDisplay)
+  if (typeNames.length > 0) {
+    parts.push(`(${typeNames.join('・')})`)
+  }
+  return parts.length > 0 ? parts.join(' - ') : '無題の出品'
+}
+
 async function pickFromCamera(): Promise<PickedImage | null> {
   const perm = await ImagePicker.requestCameraPermissionsAsync()
   if (!perm.granted) {
@@ -172,12 +221,18 @@ export default function ListingNewBulkScreen() {
   const [image, setImage] = useState<PickedImage | null>(null)
   // 作品/グループ: 冒頭で 1 回選択、N 商品で共通 (案 a)。
   const [work, setWork] = useState<WorkSectionValue>(null)
+  // 求: N 商品共通 (複数可・1 件以上必須)。全 cards に同じ card_wanted_links を紐づける。
+  //   作品確定後・タップ前に 1 回選択 (グッズごとには分けない)。
+  const [wantIds, setWantIds] = useState<WantSectionValue>([])
+  // 求ステップを完了したか (作品 → 求 → タップ の進行管理)。
+  const [wantDone, setWantDone] = useState(false)
   const [points, setPoints] = useState<TapPoint[]>([])
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
   // 属性シートを開いている点の id (null = 閉じている)。
   const [activePointId, setActivePointId] = useState<string | null>(null)
-  // 補足チップ用の履歴 (自分の listing_input keyword、直近 unique)。
+  // 補足チップ用の履歴 (自分の listing_note keyword、直近 unique)。
   const [history, setHistory] = useState<string[]>([])
+  const [submitting, setSubmitting] = useState(false)
 
   // 履歴を初回取得 (userId 確定後)。
   useEffect(() => {
@@ -289,12 +344,116 @@ export default function ListingNewBulkScreen() {
     handlePickImage()
   }
 
-  const handleNext = () => {
-    // Phase 2-3 (補足欄) → 2-4 (N insert) で接続予定。現状は手触り確認用の暫定ブリッジ。
-    Alert.alert(
-      '次のステップは準備中です',
-      `${points.length}点。補足の入力と確定 (N商品の一括出品) は次のステップで実装します。`,
-    )
+  // 確定: N 商品を一括 insert。画像は 1 回だけアップし N 行で共有。
+  //   配列 insert = 単一 INSERT 文 = 原子的。部分失敗なら 0 件 (一部だけ入る状態を作らない)。
+  const handleSubmit = async () => {
+    if (submitting) return
+    if (userId == null) {
+      Alert.alert('エラー', 'ログイン情報が取得できません')
+      return
+    }
+    if (image == null || work == null || !canProceed) return
+
+    try {
+      setSubmitting(true)
+
+      // 画像を 1 回だけアップロード (バイト重複なし、N 行で image_url を共有)。
+      let imageUrl: string | null = null
+      if (image.uri.startsWith('http')) {
+        imageUrl = image.uri
+      } else {
+        // アップロード失敗は throw → catch で全体エラー (cards は 1 件も作らない)。
+        imageUrl = await uploadCardImage({ userId, imageUri: image.uri })
+      }
+
+      // 各点 → 1 cards row。single-page の row 形状に準拠。
+      //   bbox_x/y = 元画像基準のタップ割合 (contain 変換済)。bbox_w/h・image_url_cropped は NULL。
+      //   want_* は空 (一括フローは求の選択ステップを持たない、card_wanted_links なし)。
+      const rows = points.map((pt) => ({
+        owner_user_id: userId,
+        name: buildPointName(work, pt.characters, pt.itemTypes),
+        category: work.category,
+        work_id: work.workId,
+        characters: pt.characters,
+        item_types: pt.itemTypes,
+        image_url: imageUrl,
+        image_back_url: null,
+        description: null,
+        status: 'active',
+        condition: null,
+        want_description: pt.note.trim() !== '' ? pt.note.trim() : null,
+        allows_mail: true,
+        allows_handoff: false,
+        allows_adjustment: false,
+        adjustment_max: null,
+        want_works: [] as string[],
+        want_characters: [] as string[],
+        want_item_types: [] as string[],
+        group_name: null,
+        member_name: null,
+        series: null,
+        bbox_x: pt.xPct,
+        bbox_y: pt.yPct,
+        bbox_w: null,
+        bbox_h: null,
+        image_url_cropped: null,
+      }))
+
+      // 配列 insert = 単一 INSERT 文 = 原子的 (全成功 or 全ロールバック)。
+      //   .select() で挿入行 (id 含む) を取得 → 各 cards に共通求を紐づける。
+      const { data: createdCards, error } = await supabase
+        .from('cards')
+        .insert(rows)
+        .select('id')
+      if (error) throw error
+      if (createdCards == null || createdCards.length !== rows.length) {
+        throw new Error('cards INSERT が想定件数を返しませんでした')
+      }
+
+      // N 商品それぞれに共通求 (wantIds、複数可) を card_wanted_links で紐づける。
+      //   single-page 同様のクライアント 2 段階保存。link 失敗は partial-success として通知。
+      try {
+        for (const c of createdCards as { id: string }[]) {
+          await addCardWantedLinks({
+            cardId: c.id,
+            wantedCardIds: wantIds,
+            ownerUserId: userId,
+          })
+        }
+      } catch (linkErr) {
+        console.error('[bulk][addCardWantedLinks]', linkErr)
+        Alert.alert(
+          '一部完了',
+          `${rows.length}点は出品されましたが、求商品の紐づけに一部失敗しました。求リスト画面から再設定してください。`,
+          [
+            {
+              text: 'OK',
+              onPress: () => router.replace('/(tabs)/mypage' as never),
+            },
+          ],
+        )
+        return
+      }
+
+      Alert.alert('出品完了', `${rows.length}点を出品しました。`, [
+        {
+          text: 'OK',
+          onPress: () => router.replace('/(tabs)/mypage' as never),
+        },
+      ])
+    } catch (err) {
+      console.error('[bulk][handleSubmit]', err)
+      const message =
+        typeof err === 'object' &&
+        err != null &&
+        'message' in err &&
+        typeof (err as { message: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : '出品に失敗しました。'
+      Alert.alert('出品エラー', message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   // 属性シートを閉じる。補足が入っていれば履歴に記録して育てる。
@@ -310,9 +469,15 @@ export default function ListingNewBulkScreen() {
     setActivePointId(null)
   }
 
-  // step-back: タップ画面 → 作品選択 (点の属性はリセット、座標は残す)、
-  //   作品選択 → 写真選択、写真選択 → choose へ戻る。
+  // step-back: タップ → 求 → 作品 → 写真 → choose の順に 1 段ずつ戻る。
+  //   タップ画面の戻り = 求ステップへ (点はそのまま保持、求を編集し直せる)。
   const backFromTap = () => {
+    setActivePointId(null)
+    setWantDone(false)
+  }
+  // 求ステップの戻り = 作品選択へ。作品を変えると求フィルタ前提が崩れるわけではないが、
+  //   点の属性 (旧 work のメンバー) が残るため、属性ありなら Alert で確認しリセット。
+  const backFromWant = () => {
     const hasAttrs = points.some(
       (p) => p.characters.length + p.itemTypes.length > 0 || p.note.trim() !== '',
     )
@@ -349,7 +514,8 @@ export default function ListingNewBulkScreen() {
   const allPointsHaveAttrs =
     points.length > 0 &&
     points.every((p) => p.characters.length + p.itemTypes.length >= 1)
-  const canProceed = allPointsHaveAttrs
+  // 出品可能: 全点に属性 AND 共通求が 1 件以上 (single-page と対称、求なし出品は不可)。
+  const canProceed = allPointsHaveAttrs && wantIds.length > 0
 
   // ── STEP 1: 写真未選択 → ピッカー起動画面 ──
   if (image == null) {
@@ -395,6 +561,40 @@ export default function ListingNewBulkScreen() {
             <WorkSection value={work} onChange={setWork} />
           </ScrollView>
         </KeyboardAvoidingView>
+      </SafeAreaView>
+    )
+  }
+
+  // ── STEP 2.5: 求を選択 (N 商品共通・複数可・1 件以上必須) ──
+  if (!wantDone) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScreenHeader title="求める商品を選ぶ" onBack={backFromWant} />
+        <View style={styles.flex}>
+          <View style={styles.wantIntro}>
+            <Text style={styles.workLead}>この出品で受け付けたい「求」は?</Text>
+            <Text style={styles.workSub}>
+              この写真から出品するすべてのグッズに共通の求です。複数選べます (どれか1つでもOK)。
+            </Text>
+          </View>
+          {/* WantSection 内に一覧 + 簡易追加 + スクロールを内包 */}
+          <View style={styles.flex}>
+            <WantSection value={wantIds} onChange={setWantIds} userId={userId} />
+          </View>
+          <View style={styles.ctaWrap}>
+            {wantIds.length === 0 && (
+              <Text style={styles.emptyHint}>求商品を1件以上選んでください</Text>
+            )}
+            <PrimaryCTA
+              label={
+                wantIds.length > 0 ? `次へ（求 ${wantIds.length}件）` : '次へ'
+              }
+              onPress={() => setWantDone(true)}
+              disabled={wantIds.length === 0}
+              size="lg"
+            />
+          </View>
+        </View>
       </SafeAreaView>
     )
   }
@@ -473,9 +673,10 @@ export default function ListingNewBulkScreen() {
           </Text>
         )}
         <PrimaryCTA
-          label={canProceed ? `次へ（${points.length}点）` : '次へ'}
-          onPress={handleNext}
+          label={canProceed ? `${points.length}点を出品する` : '出品する'}
+          onPress={handleSubmit}
           disabled={!canProceed}
+          loading={submitting}
           size="lg"
         />
       </View>
@@ -612,6 +813,12 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 19,
     marginBottom: spacing.sm,
+  },
+  wantIntro: {
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
+    gap: spacing.xs,
   },
   // 写真未選択
   pickWrap: {

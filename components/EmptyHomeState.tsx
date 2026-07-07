@@ -16,7 +16,7 @@ export function EmptyHomeState() {
       <View style={styles.ctaWrap}>
         <PrimaryCTA
           label="カードを出品する"
-          onPress={() => router.push('/listing/new/image' as never)}
+          onPress={() => router.push('/listing/new/choose' as never)}
           size="lg"
         />
         <PrimaryCTA

@@ -9,12 +9,12 @@
 // 配置:
 //   - 下部タブ (CustomTabBar) の上に absolute で overlay
 //   - right: spacing.base、bottom: tab bar 高さ + safe area + 余白
-//   - 通常タブ画面では SubmitFab (デフォルト): /listing/new/image へ遷移、tab bar 上に配置
+//   - 通常タブ画面では SubmitFab (デフォルト): /listing/new/choose (2択分岐) へ遷移、tab bar 上に配置
 //   - 会場詳細画面では SubmitFab を hasTabBar={false} + label/onPress 上書きで再利用、
 //     その会場の供給板に出品する form を開く動線として機能
 //
 // 文脈別の使い分け:
-//   - 通常: ラベル '出品'、router.push('/listing/new/image')、hasTabBar=true (default)
+//   - 通常: ラベル '出品'、router.push('/listing/new/choose') (出品フロー刷新 Phase 1)、hasTabBar=true (default)
 //   - 会場: ラベル 'この会場で出す'、setLane('supply') + setShowPostForm(true)、hasTabBar=false
 //     (会場詳細は (tabs) の外、Stack push された画面なので tab bar の overlap がない)
 
@@ -41,7 +41,7 @@ const HIDDEN_GLOBAL_FAB_ROUTES: readonly string[] = ['/venue-tab', '/trades']
 type SubmitFabProps = {
   /** ボタン上のラベル文字列。default: '出品' */
   label?: string
-  /** タップ時の挙動。default: /listing/new/image へ遷移 */
+  /** タップ時の挙動。default: /listing/new/choose (2択分岐) へ遷移 */
   onPress?: () => void
   /**
    * 下部タブバーがある画面か (true なら tab bar の上に配置、false なら safe area 直上に配置)。
@@ -76,7 +76,7 @@ export function SubmitFab(props: SubmitFabProps = {}) {
   }
 
   const handlePress =
-    onPress ?? (() => router.push('/listing/new/image' as never))
+    onPress ?? (() => router.push('/listing/new/choose' as never))
 
   // 通常タブ画面: tab bar 上に余白 16px を置く (tab bar 自身が safe area bottom を吸収)。
   // タブバーなし画面 (会場詳細など): safe area bottom 上に余白 16px のみ。

@@ -380,13 +380,21 @@ export function getSearchSuggestionSubLabel(s: SearchSuggestion): string {
 // user_keyword_history 記録
 // ─────────────────────────────────────────
 
+// user_keyword_history.source のうち出品系で使う値。
+//   - 'listing_input': メンバー/種類のフリーテキスト (master 未マッチ、運営の master 追加判断材料)
+//   - 'listing_note' : 出品補足の定型句 (補足チップ用。メンバー/種類とプールを分離)
+//   DB CHECK は ('search','listing_input','listing_note') を許可 (additive DDL 適用済)。
+type ListingKeywordSource = 'listing_input' | 'listing_note'
+
 /**
- * 出品時のフリーテキスト入力 (master 未マッチ) を user_keyword_history に記録。
- * source='listing_input' で search 履歴と区別。運営は集計から master 追加判断。
+ * 出品時のフリーテキスト入力を user_keyword_history に記録。
+ * デフォルト source='listing_input' (メンバー/種類の free text)。search 履歴と区別。
+ * 補足の定型句は source='listing_note' を渡して別プールに記録する (補足チップ用)。
  */
 export async function recordListingKeyword(
   userId: string,
   keyword: string,
+  source: ListingKeywordSource = 'listing_input',
 ): Promise<void> {
   const trimmed = keyword.trim()
   if (trimmed === '') return
@@ -394,8 +402,47 @@ export async function recordListingKeyword(
   const { error } = await supabase.from('user_keyword_history').insert({
     user_id: userId,
     keyword: trimmed,
-    source: 'listing_input',
+    source,
   })
 
   if (error) console.error('[recordListingKeyword]', error)
+}
+
+/**
+ * 出品補足の履歴チップ用に、自分の補足履歴 (source='listing_note') を取得する。
+ *
+ * 方式 (fetch 条件): user_id 一致 + source='listing_note' を searched_at 降順で最大 50 行取得し、
+ *   クライアント側で keyword 重複を除去 (最初の出現=最新を優先) して直近 unique の上位 limit 件を返す。
+ *   → 「直近によく打った補足」の近似。頻度順の集約 (group by) は PostgREST 単体では不可のため、
+ *     RPC を足さず「直近 unique」で代替する (native 依存も RPC も増やさない)。
+ *   ★source='listing_note' 絞りにより、メンバー/種類 free text (listing_input) は混じらない。
+ *   列名は keyword (text ではない)。
+ */
+export async function fetchListingKeywordHistory(
+  userId: string,
+  limit = 10,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('user_keyword_history')
+    .select('keyword')
+    .eq('user_id', userId)
+    .eq('source', 'listing_note')
+    .order('searched_at', { ascending: false })
+    .limit(50)
+
+  if (error) {
+    console.error('[fetchListingKeywordHistory]', error)
+    return []
+  }
+
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const row of (data ?? []) as { keyword: string }[]) {
+    const k = row.keyword
+    if (k == null || k === '' || seen.has(k)) continue
+    seen.add(k)
+    result.push(k)
+    if (result.length >= limit) break
+  }
+  return result
 }

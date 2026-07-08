@@ -573,6 +573,37 @@ export function computeTrustBadge(
   return 'green'
 }
 
+// ─────────────────────────────────────────
+// トラブル状態 (β1 表示専用・暫定導出)
+// ─────────────────────────────────────────
+
+// 0 = 通常 (全員デフォルト) / 1 = 一度トラブル / 2 = 二度以上トラブル
+export type TroubleStage = 0 | 1 | 2
+
+/**
+ * トラブル状態の暫定導出 (β1 表示専用)。
+ *
+ * ★これは computeTrustBadge (実績4ランクの文言バッジ) とは「別概念」。
+ *   - 実績 (交換人数/取引回数/発送率/返信速度) = 「どんな取引者か」を示す情報。
+ *   - トラブル状態 = 「今この人は警戒が要るか」の信号。普段は主張せず問題時だけ静かに沈む。
+ *   マイページではヒーロー層に色サインとして置き、「信頼の記録」の1指標にはしない
+ *   (格下げされ警告の重みが消えるため)。
+ *
+ * ★暫定マッピング (β1): profiles.trouble_count から素朴に導出する。
+ *   Phase 1.5 で trouble_stage 列 (状態遷移: 連続無事故で一段回復 / 運営裁定で上昇 /
+ *   通常復帰でチャラ) に置換予定。それまでは累積 count からの暫定値であることに注意。
+ *   累積 count は「一度トラブった人が健全化しても下がらない」問題があるため、
+ *   β1 の表示は暫定であり、Phase 1.5 の状態機械で正式化する。
+ */
+export function computeTroubleStage(
+  profile: Pick<Profile, 'trouble_count'>
+): TroubleStage {
+  const n = profile.trouble_count ?? 0
+  if (n >= 2) return 2
+  if (n >= 1) return 1
+  return 0
+}
+
 export const CONDITION_LABELS: Record<CardCondition, string> = {
   mint: '美品',
   near_mint: 'ほぼ美品',

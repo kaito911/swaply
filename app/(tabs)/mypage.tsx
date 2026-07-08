@@ -4,6 +4,7 @@ import { HeaderActions } from '@/components/HeaderActions'
 import { PioneerBadge } from '@/components/PioneerBadge'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import {
+  fetchDistinctPartnerCount,
   fetchMyOffers,
   fetchProfile,
   fetchShelfItems,
@@ -72,6 +73,9 @@ export default function MyPageScreen() {
   const [cards, setCards] = useState<Card[]>([])
   const [shelfItems, setShelfItems] = useState<ShelfItem[]>([])
   const [historyOffers, setHistoryOffers] = useState<Offer[]>([])
+  // 交換人数: get_distinct_partner_count RPC (INVOKER・引数なし)。
+  // completed な trades / venue_trades の distinct 相手数。「信頼の記録」で表示。
+  const [partnerCount, setPartnerCount] = useState(0)
   const [dataLoading, setDataLoading] = useState(true)
 
   useFocusEffect(
@@ -83,10 +87,13 @@ export default function MyPageScreen() {
         fetchUserCards(userId, 'active'),
         fetchShelfItems(userId),
         fetchMyOffers(userId),
-      ]).then(([p, c, s, offers]) => {
+        // 交換人数 RPC。失敗しても他データ表示を止めないよう個別に握り潰す (0 fallback)。
+        fetchDistinctPartnerCount().catch(() => 0),
+      ]).then(([p, c, s, offers, partners]) => {
         if (p != null) setProfile(p)
         setCards(c)
         setShelfItems(s)
+        setPartnerCount(partners)
         setHistoryOffers(
           offers.filter(
             (o) =>
@@ -415,10 +422,11 @@ export default function MyPageScreen() {
           {/* 統計グリッド */}
           <View style={styles.statsGrid}>
             {([
+              // 交換人数 (get_distinct_partner_count) を接続。M2 で「信頼の記録」5指標へ再編予定。
+              { label: '交換', value: `${partnerCount}人`, color: colors.primary },
               { label: '取引', value: `${tc}回`, color: colors.primary },
               { label: '発送率', value: `${sr}%`, color: colors.success },
               { label: '返信', value: rh < 999 ? `${rh}h` : '—', color: '#0891B2' },
-              { label: '出品中', value: `${cards.length}件`, color: '#D97706' },
             ] as const).map((stat, i, arr) => (
               <View key={stat.label} style={[styles.statsCell, i < arr.length - 1 && styles.statsCellBorder]}>
                 <Text style={[styles.statsValue, { color: stat.color }]}>{stat.value}</Text>

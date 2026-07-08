@@ -27,7 +27,6 @@ import {
   VenueTrade,
   VenueTradeMessage,
   VenueTradeRead,
-  VenueTradeStatus,
   VenueTradeUnreadCountRow,
   WantedCard,
   WantMatchScore,
@@ -2734,12 +2733,14 @@ export async function declineVenueHold(
   holdId: string,
   userId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('venue_holds')
-    .update({ status: 'declined', updated_at: new Date().toISOString() })
-    .eq('id', holdId)
-    .eq('status', 'pending')
-    .eq('receiver_id', userId)
+  // Critical③ ③-A: 直接 UPDATE を廃し decline_venue_hold DEFINER RPC に集約。
+  //   actor は サーバが auth.uid() から導出 (userId 引数はシグネチャ互換のため残すが未送信)。
+  //   既存ガード (受信者本人 + pending) は RPC 内に移植済。
+  //   docs/migration_rpc_venue_holds_trades_writes.sql
+  void userId
+  const { error } = await supabase.rpc('decline_venue_hold', {
+    p_hold_id: holdId,
+  })
 
   if (error) throw error
 }
@@ -2752,12 +2753,14 @@ export async function cancelVenueHold(
   holdId: string,
   userId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('venue_holds')
-    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-    .eq('id', holdId)
-    .eq('status', 'pending')
-    .eq('proposer_id', userId)
+  // Critical③ ③-A: 直接 UPDATE を廃し cancel_venue_hold DEFINER RPC に集約。
+  //   actor は サーバが auth.uid() から導出 (userId 引数はシグネチャ互換のため残すが未送信)。
+  //   既存ガード (申請者本人 + pending) は RPC 内に移植済。
+  //   docs/migration_rpc_venue_holds_trades_writes.sql
+  void userId
+  const { error } = await supabase.rpc('cancel_venue_hold', {
+    p_hold_id: holdId,
+  })
 
   if (error) throw error
 }
@@ -2956,28 +2959,18 @@ export async function createVenueHold(params: {
   // 詳細: docs/migration_venue_holds_add_proposer_image_url.sql
   proposerImageUrl?: string | null
 }): Promise<VenueHold> {
-  const { data: venue, error: venueError } = await supabase
-    .from('venues')
-    .select('event_date')
-    .eq('id', params.venueId)
-    .single()
-  if (venueError) throw venueError
-  const expiresAt = computeVenueExpiry(venue)
-
-  const { data, error } = await supabase
-    .from('venue_holds')
-    .insert({
-      venue_id: params.venueId,
-      proposer_id: params.proposerId,
-      receiver_id: params.receiverId,
-      proposer_card: params.proposerCard,
-      receiver_card: params.receiverCard,
-      supply_post_id: params.supplyPostId,
-      proposer_image_url: params.proposerImageUrl ?? null,
-      expires_at: expiresAt,
-    })
-    .select()
-    .single()
+  // Critical③ ③-A: 直接 INSERT を廃し create_venue_hold DEFINER RPC に集約。
+  //   - proposer_id はサーバが auth.uid() 固定 (params.proposerId は送らない = なりすまし排除)。
+  //   - expires_at はサーバ側計算 (event_date の JST 23:59:59 → UTC)。
+  //   docs/migration_rpc_venue_holds_trades_writes.sql
+  const { data, error } = await supabase.rpc('create_venue_hold', {
+    p_venue_id: params.venueId,
+    p_receiver_id: params.receiverId,
+    p_proposer_card: params.proposerCard,
+    p_receiver_card: params.receiverCard,
+    p_supply_post_id: params.supplyPostId,
+    p_proposer_image_url: params.proposerImageUrl ?? null,
+  })
 
   if (error) {
     throw error
@@ -3042,52 +3035,17 @@ export async function confirmVenueTrade(
   userId: string,
   role: 'proposer' | 'receiver'
 ): Promise<void> {
-  const now = new Date().toISOString()
-  const field =
-    role === 'proposer' ? 'proposer_confirmed_at' : 'receiver_confirmed_at'
-  const userIdField = role === 'proposer' ? 'proposer_id' : 'receiver_id'
-
-  // 当事者であることを fetch 時点でも確認 (二重防御の最初の壁)
-  const { data: trade, error: fetchError } = await supabase
-    .from('venue_trades')
-    .select('*')
-    .eq('id', tradeId)
-    .eq(userIdField, userId)
-    .single()
-
-  if (fetchError) throw fetchError
-
-  // 既に終端状態 → no-op (冪等、二重押し / 古いボタンタップを吸収)
-  if (trade.status === 'completed' || trade.status === 'cancelled') {
-    return
-  }
-
-  // 自分側の timestamp が既に立っている → no-op (二重押し対策)
-  const myTimestamp: string | null =
-    role === 'proposer' ? trade.proposer_confirmed_at : trade.receiver_confirmed_at
-  if (myTimestamp != null) {
-    return
-  }
-
-  // 相手側 timestamp で派生 status を決定
-  const otherTimestamp: string | null =
-    role === 'proposer' ? trade.receiver_confirmed_at : trade.proposer_confirmed_at
-  const newStatus: VenueTradeStatus =
-    otherTimestamp != null ? 'completed' : 'partially_confirmed'
-  const completedAt = newStatus === 'completed' ? now : null
-
-  // UPDATE クエリ側で当事者条件 + 非終端状態を再強制 (race 防御)
-  const { error } = await supabase
-    .from('venue_trades')
-    .update({
-      [field]: now,
-      status: newStatus,
-      ...(completedAt != null ? { completed_at: completedAt } : {}),
-      updated_at: now,
-    })
-    .eq('id', tradeId)
-    .eq(userIdField, userId)
-    .in('status', ['pending', 'partially_confirmed'])
+  // Critical③ ③-A: SELECT+UPDATE の対称確定を confirm_venue_trade DEFINER RPC に集約。
+  //   - role はサーバが auth.uid() から導出 (判断点2: クライアント role を信用しない)。
+  //     userId / role 引数はシグネチャ互換のため残すが未送信。
+  //   - 冪等性 (終端状態 / 自分側確定済は no-op)、対称派生 status
+  //     (片方→partially_confirmed / 両方→completed)、race 防御は RPC 内に移植済。
+  //   docs/migration_rpc_venue_holds_trades_writes.sql
+  void userId
+  void role
+  const { error } = await supabase.rpc('confirm_venue_trade', {
+    p_trade_id: tradeId,
+  })
 
   if (error) throw error
 }

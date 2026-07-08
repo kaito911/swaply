@@ -21,12 +21,12 @@ import {
 } from '@/lib/supabase'
 import {
   Card,
-  computeTrustBadge,
+  computeTroubleStage,
   formatLastActive,
   Offer,
   Profile,
   ShelfItem,
-  TrustBadgeLevel,
+  TroubleStage,
 } from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { SUPPORT_MAILTO, LEGAL_MAILTO } from '@/constants/contact'
@@ -48,12 +48,29 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { useBadge } from '@/providers/BadgeProvider'
-import { TrustBadge } from '@/components/TrustBadge'
 
 // 各セクションのプレビュー表示上限 (超過分は「すべて見る」で専用画面へ)。
 // 出品中は専用一覧画面が未整備のため上限を設けず全件横スクロール表示 (β1 は件数少)。
 const SHELF_PREVIEW_LIMIT = 8
 const HISTORY_PREVIEW_LIMIT = 5
+
+// トラブル色サイン (文言なし)。実績バッジ (新規/お試し/安定/高信頼) の断定的ラベルは
+// 烙印・序列化になるためマイページからは撤去し、無文言の色サインに置き換える。
+//   0 = 通常 (全員デフォルト、緑=健全で静かに沈む)
+//   1 = 一度トラブル (amber で surface) / 2 = 二度以上 (red で surface)
+// 色は既存の状態色トークンを流用 (新規トークン不要)。
+const TROUBLE_SIGN_COLOR: Record<TroubleStage, string> = {
+  0: colors.success,
+  1: colors.warning,
+  2: colors.error,
+}
+// 色のみだと非表示情報になるため、a11y (画面読み上げ) 用の中立ラベルのみ添える。
+// 視覚上は文言を出さない方針を維持しつつ、色覚・読み上げ利用者に状態を伝える。
+const TROUBLE_SIGN_A11Y: Record<TroubleStage, string> = {
+  0: '取引状態: 良好',
+  1: '取引状態: 注意',
+  2: '取引状態: 要確認',
+}
 
 // ─────────────────────────────────────────
 // screen
@@ -149,7 +166,8 @@ export default function MyPageScreen() {
   const displayName = profile?.display_name ?? null
   const avatarChar = ((handle || displayName || 'U').slice(0, 1)).toUpperCase()
   const avatarUrl = profile?.avatar_url ?? null
-  const trustLevel: TrustBadgeLevel = profile != null ? computeTrustBadge(profile) : 'green'
+  // トラブル色サイン用の暫定ステージ (0/1/2)。実績ランク文言は表示しない。
+  const troubleStage: TroubleStage = profile != null ? computeTroubleStage(profile) : 0
   const tc = profile?.trade_count ?? 0
   const sr = profile?.ship_rate ?? 100
   const rh = profile?.reply_median_hours ?? 24
@@ -360,25 +378,37 @@ export default function MyPageScreen() {
             M3 でトラブル色サインをここに追加予定。M2 時点はアバター+名前+バッジのみ。 */}
         <View style={styles.hero}>
           <View style={styles.heroInner}>
-            <View style={styles.avatar}>
-              {avatarUrl != null ? (
-                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
-              ) : (
-                <Text style={styles.avatarText}>{avatarChar}</Text>
-              )}
+            <View style={styles.avatarWrap}>
+              <View style={styles.avatar}>
+                {avatarUrl != null ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                ) : (
+                  <Text style={styles.avatarText}>{avatarChar}</Text>
+                )}
+              </View>
+              {/* トラブル色サイン (文言なし)。通常=緑(健全)で静かに沈み、問題時に amber/red で surface。
+                  β1 は computeTroubleStage の暫定導出 (Phase 1.5 で trouble_stage 状態機械に置換)。 */}
+              <View
+                style={[styles.troubleDot, { backgroundColor: TROUBLE_SIGN_COLOR[troubleStage] }]}
+                accessible
+                accessibilityLabel={TROUBLE_SIGN_A11Y[troubleStage]}
+              />
             </View>
             <View style={styles.heroMeta}>
               <Text style={styles.heroHandle}>{handle ?? displayName ?? 'ユーザー'}</Text>
-              <View style={styles.heroBadgeRow}>
-                {profile?.is_pioneer === true && (
+              {/* Pioneer は早期参加者の事実称号 (実績ランク文言とは別物) のため維持。 */}
+              {profile?.is_pioneer === true && (
+                <View style={styles.heroBadgeRow}>
                   <PioneerBadge
                     pioneerNumber={profile.pioneer_number ?? null}
                     showNumber
                     size="sm"
                   />
-                )}
-                <TrustBadge level={trustLevel} size="sm" />
-              </View>
+                </View>
+              )}
+              {/* 将来の器 (β1 非表示): ここにフォロー/フォロワー行を追加できる。
+                  dead な「0 フォロー」UI は「0を突きつけない」空状態方針に反するため
+                  β1 では描画しない。構造 (heroMeta 内) だけ空けておく。 */}
             </View>
             <Pressable
               style={styles.settingsButton}
@@ -474,7 +504,9 @@ export default function MyPageScreen() {
 
         {/* 設定リンク群 (アカウント関連)
             Phase A (2026-06): いいね (liked_cards) と求リスト (wanted_cards) は別概念のため
-            mypage に明示的に並列リンクを置く。 */}
+            mypage に明示的に並列リンクを置く。
+            将来の器 (M3): サブスク (Swaply プラス) / 代理出品 は {label, path} を配列に
+            足すだけで増やせる。β1 では課金・機能未実装のため出さない。 */}
         <View style={styles.settingsSection}>
           {([
             { label: 'プロフィール編集', path: '/profile-edit' },
@@ -572,6 +604,11 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.base,
   },
+  avatarWrap: {
+    width: 64,
+    height: 64,
+    flexShrink: 0,
+  },
   avatar: {
     width: 64,
     height: 64,
@@ -584,7 +621,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
-    flexShrink: 0,
+  },
+  // トラブル色サイン: アバター右下の status dot。白リングで縁を切り、どの写真上でも視認可能。
+  troubleDot: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2.5,
+    borderColor: colors.backgroundCard,
   },
   avatarImage: {
     width: 64,

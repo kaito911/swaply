@@ -39,7 +39,13 @@ import {
   getWorkById,
   recordListingKeyword,
 } from '@/lib/master'
-import { addCardWantedLinks, supabase, uploadCardImage } from '@/lib/supabase'
+import {
+  addCardWantedLinks,
+  fetchMyWantedCards,
+  supabase,
+  uploadCardImage,
+} from '@/lib/supabase'
+import type { WantedCard } from '@/lib/types'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { router } from 'expo-router'
@@ -233,6 +239,10 @@ export default function ListingNewBulkScreen() {
   // 補足チップ用の履歴 (自分の listing_note keyword、直近 unique)。
   const [history, setHistory] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
+  // 出品前の最終確認画面を表示中か (STEP 4)。
+  const [reviewMode, setReviewMode] = useState(false)
+  // 求 (wanted_cards) の id → 名前 解決用。確認画面で求名を出すため保持。
+  const [myWants, setMyWants] = useState<WantedCard[]>([])
 
   // 履歴を初回取得 (userId 確定後)。
   useEffect(() => {
@@ -240,6 +250,18 @@ export default function ListingNewBulkScreen() {
     let cancelled = false
     void fetchListingKeywordHistory(userId, 10).then((list) => {
       if (!cancelled) setHistory(list)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [userId])
+
+  // 求リストを初回取得 (確認画面での求名解決用。WantSection とは別 fetch)。
+  useEffect(() => {
+    if (userId == null) return
+    let cancelled = false
+    void fetchMyWantedCards(userId).then((list) => {
+      if (!cancelled) setMyWants(list)
     })
     return () => {
       cancelled = true
@@ -599,6 +621,138 @@ export default function ListingNewBulkScreen() {
     )
   }
 
+  // ── STEP 4: 出品前の最終確認 (全量をまとめて確認、各項目から修正へ戻れる) ──
+  if (reviewMode) {
+    const wantNames = wantIds
+      .map((id) => myWants.find((w) => w.id === id)?.card_name ?? '(求商品)')
+    const workName =
+      work != null ? getWorkById(work.workId)?.display_name_ja ?? work.workId : ''
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScreenHeader
+          title="出品内容の確認"
+          subtitle={`${points.length}点`}
+          onBack={() => setReviewMode(false)}
+        />
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.reviewContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* 元写真 + バッジ (タップで STEP3 の編集へ戻る) */}
+          <Pressable
+            style={styles.reviewImageWrap}
+            onLayout={(ev: LayoutChangeEvent) =>
+              setContainerSize({
+                width: ev.nativeEvent.layout.width,
+                height: ev.nativeEvent.layout.height,
+              })
+            }
+            onPress={() => setReviewMode(false)}
+          >
+            {image != null && (
+              <Image
+                source={{ uri: image.uri }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="contain"
+              />
+            )}
+            {rect.w > 0 &&
+              points.map((pt, idx) => (
+                <View
+                  key={pt.id}
+                  style={[
+                    styles.badge,
+                    {
+                      left: rect.x + pt.xPct * rect.w - BADGE_SIZE / 2,
+                      top: rect.y + pt.yPct * rect.h - BADGE_SIZE / 2,
+                    },
+                  ]}
+                >
+                  <Text style={styles.badgeText}>{idx + 1}</Text>
+                </View>
+              ))}
+          </Pressable>
+
+          {/* 作品 (共通) */}
+          <View style={styles.reviewSummaryRow}>
+            <Text style={styles.reviewSummaryLabel}>作品・グループ</Text>
+            <Text style={styles.reviewSummaryValue} numberOfLines={1}>
+              {workName}
+            </Text>
+          </View>
+
+          {/* 各商品 (タップで該当の属性シートへ) */}
+          <Text style={styles.reviewSectionTitle}>出品するグッズ ({points.length}点)</Text>
+          {points.map((pt, idx) => {
+            const memberNames = pt.characters.map((c) => getCharacterById(c)?.display_name_ja ?? c)
+            const typeNames = pt.itemTypes.map((t) => getItemTypeById(t)?.display_name_ja ?? t)
+            return (
+              <Pressable
+                key={pt.id}
+                style={styles.reviewItemRow}
+                onPress={() => {
+                  setReviewMode(false)
+                  setActivePointId(pt.id)
+                }}
+              >
+                <View style={styles.reviewItemBadge}>
+                  <Text style={styles.badgeText}>{idx + 1}</Text>
+                </View>
+                <View style={styles.reviewItemBody}>
+                  <Text style={styles.reviewItemMain} numberOfLines={1}>
+                    {memberNames.length > 0 ? memberNames.join('、') : '(メンバー未設定)'}
+                  </Text>
+                  {typeNames.length > 0 && (
+                    <Text style={styles.reviewItemSub} numberOfLines={1}>
+                      {typeNames.join('・')}
+                    </Text>
+                  )}
+                  {pt.note.trim() !== '' && (
+                    <Text style={styles.reviewItemNote} numberOfLines={2}>
+                      補足: {pt.note.trim()}
+                    </Text>
+                  )}
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+              </Pressable>
+            )
+          })}
+
+          {/* 共通の求 (タップで求ステップへ) */}
+          <Pressable
+            style={styles.reviewWantRow}
+            onPress={() => {
+              setReviewMode(false)
+              setWantDone(false)
+            }}
+          >
+            <View style={styles.reviewItemBody}>
+              <Text style={styles.reviewSectionTitle}>求める商品（共通・{wantIds.length}件）</Text>
+              <Text style={styles.reviewItemSub} numberOfLines={3}>
+                {wantNames.join('、')}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </Pressable>
+        </ScrollView>
+
+        {/* 出品する (ここで初めて N insert) */}
+        <View style={styles.ctaWrap}>
+          <Text style={styles.reviewConfirmHint}>
+            {points.length}点をまとめて出品します。この操作で全商品が公開されます。
+          </Text>
+          <PrimaryCTA
+            label={`${points.length}点を出品する`}
+            onPress={handleSubmit}
+            loading={submitting}
+            size="lg"
+          />
+        </View>
+      </SafeAreaView>
+    )
+  }
+
   // ── STEP 3: 写真上をタップ → 点追加 → 各点の属性シート ──
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -663,7 +817,7 @@ export default function ListingNewBulkScreen() {
         <Text style={styles.retakeText}>写真を選び直す</Text>
       </Pressable>
 
-      {/* 次へ */}
+      {/* 確認へ進む */}
       <View style={styles.ctaWrap}>
         {!canProceed && (
           <Text style={styles.emptyHint}>
@@ -673,10 +827,9 @@ export default function ListingNewBulkScreen() {
           </Text>
         )}
         <PrimaryCTA
-          label={canProceed ? `${points.length}点を出品する` : '出品する'}
-          onPress={handleSubmit}
+          label={canProceed ? `確認へ進む（${points.length}点）` : '確認へ進む'}
+          onPress={() => setReviewMode(true)}
           disabled={!canProceed}
-          loading={submitting}
           size="lg"
         />
       </View>
@@ -733,9 +886,9 @@ export default function ListingNewBulkScreen() {
                   <View style={styles.sheetDivider} />
 
                   <Text style={styles.sheetSectionLabel}>
-                    補足<Text style={styles.sheetOptional}>（任意）</Text>
+                    商品の状態・補足<Text style={styles.sheetOptional}>（任意）</Text>
                   </Text>
-                  {/* 履歴チップ: 直近によく打った補足。タップで補足欄に挿入。 */}
+                  {/* 履歴チップ: 直近によく打った商品補足。タップで補足欄に挿入。 */}
                   {history.length > 0 && (
                     <View style={styles.chipsRow}>
                       {history.map((h) => (
@@ -758,7 +911,7 @@ export default function ListingNewBulkScreen() {
                     style={styles.noteInput}
                     value={activePoint.note}
                     onChangeText={(v) => updatePoint(activePoint.id, { note: v })}
-                    placeholder="例: 美品希望、未所持優先、異種交換も相談OK"
+                    placeholder="例: 傷なし、未開封、スリーブ付き、初回盤特典"
                     placeholderTextColor={colors.textTertiary}
                     multiline
                     textAlignVertical="top"
@@ -819,6 +972,102 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
     paddingBottom: spacing.sm,
     gap: spacing.xs,
+  },
+  // 確認画面 (STEP 4)
+  reviewContent: {
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
+    gap: spacing.md,
+  },
+  reviewImageWrap: {
+    height: 240,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    backgroundColor: '#1A1A1A',
+    borderWidth: 1,
+    borderColor: colors.border,
+    position: 'relative',
+  },
+  reviewSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  reviewSummaryLabel: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+  },
+  reviewSummaryValue: {
+    flex: 1,
+    textAlign: 'right',
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+    color: colors.textPrimary,
+  },
+  reviewSectionTitle: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  reviewItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  reviewItemBadge: {
+    width: BADGE_SIZE,
+    height: BADGE_SIZE,
+    borderRadius: BADGE_SIZE / 2,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  reviewItemBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  reviewItemMain: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+    color: colors.textPrimary,
+  },
+  reviewItemSub: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+  },
+  reviewItemNote: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    lineHeight: 16,
+  },
+  reviewWantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+    marginTop: spacing.sm,
+  },
+  reviewConfirmHint: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
   },
   // 写真未選択
   pickWrap: {

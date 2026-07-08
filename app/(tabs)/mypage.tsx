@@ -1,4 +1,12 @@
 // app/(tabs)/mypage.tsx
+//
+// マイページ再設計 (2026-07): タブ廃止 → 縦1画面スクロール。
+// セクション構成 (上から): ヒーロー / 信頼の記録 / 出品中 / 商品棚 / 取引履歴 / 設定リンク群。
+//   - 実績 (交換人数/取引回数/発送率/返信速度/直近活動) = 「信頼の記録」に5指標均等で集約。
+//     数字はこの1箇所のみ (ヒーローや他セクションに再掲しない)。
+//   - トラブル状態は「信頼の記録」に入れない (実績とは階層が違う信号のため)。M3 で
+//     ヒーローに色サインとして追加予定。M2 時点ではヒーローはアバター+名前+バッジのみ。
+//   - 出品中と商品棚は「別セクション」(トグルにしない)。商品棚 = 手札置き場。
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { HeaderActions } from '@/components/HeaderActions'
 import { PioneerBadge } from '@/components/PioneerBadge'
@@ -42,19 +50,10 @@ import { useAuthContext } from '@/providers/AuthProvider'
 import { useBadge } from '@/providers/BadgeProvider'
 import { TrustBadge } from '@/components/TrustBadge'
 
-// ─────────────────────────────────────────
-// タブ定義
-// ─────────────────────────────────────────
-
-type MainTab = 'overview' | 'cards' | 'trust' | 'history'
-type CardToggle = 'listings' | 'shelf'
-
-const MAIN_TABS: { key: MainTab; label: string }[] = [
-  { key: 'overview', label: '概要' },
-  { key: 'cards', label: 'カード' },
-  { key: 'trust', label: 'Trust' },
-  { key: 'history', label: '履歴' },
-]
+// 各セクションのプレビュー表示上限 (超過分は「すべて見る」で専用画面へ)。
+// 出品中は専用一覧画面が未整備のため上限を設けず全件横スクロール表示 (β1 は件数少)。
+const SHELF_PREVIEW_LIMIT = 8
+const HISTORY_PREVIEW_LIMIT = 5
 
 // ─────────────────────────────────────────
 // screen
@@ -64,8 +63,6 @@ export default function MyPageScreen() {
   const { session } = useAuthContext()
   const { refreshBadge } = useBadge()
   const [logoutLoading, setLogoutLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<MainTab>('overview')
-  const [cardToggle, setCardToggle] = useState<CardToggle>('listings')
 
   const userId = useMemo(() => session?.user?.id ?? null, [session])
 
@@ -156,170 +153,155 @@ export default function MyPageScreen() {
   const tc = profile?.trade_count ?? 0
   const sr = profile?.ship_rate ?? 100
   const rh = profile?.reply_median_hours ?? 24
-  const trouble = profile?.trouble_count ?? 0
+  const lastActiveText = formatLastActive(profile?.last_active_at ?? null)
+  // 実績が1つでもあれば「信頼の記録」を数値表示。全くなければ「これから育つ場所」として提示。
+  const hasTradeRecord = tc > 0 || partnerCount > 0
+
+  const shelfPreview = shelfItems.slice(0, SHELF_PREVIEW_LIMIT)
+  const historyPreview = historyOffers.slice(0, HISTORY_PREVIEW_LIMIT)
 
   // ─────────────────────────────────────────
-  // タブコンテンツ
+  // 信頼の記録 (5指標均等 or 空状態)
   // ─────────────────────────────────────────
-
-  const renderOverview = () => (
-    <View style={styles.tabContent}>
-      <Text style={styles.sectionTitle}>行動データ（確定事実のみ）</Text>
-      <View style={styles.dataCard}>
-        {/* β1: ADJUSTMENT_MONEY_ENABLED=false 中は「調整金平均」行を除外 */}
-        {([
-          { label: '成立回数', value: `${tc}回`, color: colors.primary },
-          { label: '発送遵守率', value: `${sr}%`, color: colors.success },
-          { label: '返信速度', value: rh < 999 ? `${rh}h` : '—', color: '#0891B2' },
-          { label: 'トラブル', value: `${trouble}件`, color: trouble === 0 ? colors.success : colors.error },
-          ...(FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED
-            ? [{ label: '調整金平均', value: profile?.adjustment_avg != null ? `¥${profile.adjustment_avg}` : '—', color: '#D97706' }]
-            : []),
-        ] as const).map((item, i, arr) => (
-          <View key={item.label} style={[styles.dataRow, i < arr.length - 1 && styles.dataRowBorder]}>
-            <Text style={styles.dataLabel}>{item.label}</Text>
-            <Text style={[styles.dataValue, { color: item.color }]}>{item.value}</Text>
+  const renderTrustRecord = () => {
+    if (!hasTradeRecord) {
+      return (
+        <View style={styles.trustEmpty}>
+          <Text style={styles.trustEmptyTitle}>
+            交換を重ねると、ここに信頼の記録が刻まれていきます
+          </Text>
+          <Text style={styles.trustEmptySub}>
+            数字を後から盛ることはできない — だから信頼になる
+          </Text>
+        </View>
+      )
+    }
+    const metrics = [
+      { label: '交換', value: `${partnerCount}人` },
+      { label: '取引', value: `${tc}回` },
+      { label: '発送率', value: `${sr}%` },
+      { label: '返信', value: rh < 999 ? `${rh}h` : '—' },
+      { label: '直近', value: lastActiveText },
+    ] as const
+    return (
+      <View style={styles.trustGrid}>
+        {metrics.map((m, i, arr) => (
+          <View
+            key={m.label}
+            style={[styles.trustCell, i < arr.length - 1 && styles.trustCellBorder]}
+          >
+            <Text style={styles.trustValue} numberOfLines={1} adjustsFontSizeToFit>
+              {m.value}
+            </Text>
+            <Text style={styles.trustLabel}>{m.label}</Text>
           </View>
         ))}
-      </View>
-      <Text style={styles.noteText}>※ 感情レビュー・星評価・ランキングは使用しません</Text>
-    </View>
-  )
-
-  const renderCards = () => (
-    <View style={styles.tabContent}>
-      {/* ピル型トグル */}
-      <View style={styles.toggleRow}>
-        <Pressable
-          style={[styles.togglePill, cardToggle === 'listings' && styles.togglePillActive]}
-          onPress={() => setCardToggle('listings')}
-        >
-          <Text style={[styles.toggleText, cardToggle === 'listings' && styles.toggleTextActive]}>
-            出品中 {cards.length > 0 ? `(${cards.length})` : ''}
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.togglePill, cardToggle === 'shelf' && styles.togglePillActive]}
-          onPress={() => setCardToggle('shelf')}
-        >
-          <Text style={[styles.toggleText, cardToggle === 'shelf' && styles.toggleTextActive]}>
-            商品棚 {shelfItems.length > 0 ? `(${shelfItems.length})` : ''}
-          </Text>
-        </Pressable>
-      </View>
-
-      {dataLoading ? (
-        <ActivityIndicator color={colors.primary} style={styles.loader} />
-      ) : cardToggle === 'listings' ? (
-        cards.length === 0 ? (
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>出品中のカードはありません</Text>
-            <Text style={styles.emptySub}>「出品」タブからカードを出品してみましょう</Text>
-          </View>
-        ) : (
-          cards.map((card, i) => (
-            <Pressable
-              key={card.id}
-              style={[styles.cardRow, i < cards.length - 1 && styles.rowBorder]}
-              onPress={() => router.push({ pathname: '/listing/[id]', params: { id: card.id } } as never)}
-            >
-              {card.image_url != null ? (
-                <Image source={{ uri: card.image_url }} style={styles.cardThumb} resizeMode="cover" />
-              ) : (
-                <View style={[styles.cardThumb, styles.cardThumbEmpty]} />
-              )}
-              <View style={styles.cardMeta}>
-                {(card.series != null || card.member_name != null) && (
-                  <Text style={styles.cardSub} numberOfLines={1}>
-                    {[card.series, card.member_name].filter(Boolean).join(' · ')}
-                  </Text>
-                )}
-                <Text style={styles.cardName} numberOfLines={1}>{card.name}</Text>
-                {card.want_description != null && (
-                  <Text style={styles.cardWant} numberOfLines={1}>求: {card.want_description}</Text>
-                )}
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-            </Pressable>
-          ))
-        )
-      ) : (
-        shelfItems.length === 0 ? (
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>商品棚にカードが登録されていません</Text>
-            <Pressable onPress={() => router.push('/shelf' as never)}>
-              <Text style={styles.emptyLink}>＋ カードを登録する</Text>
-            </Pressable>
-          </View>
-        ) : (
-          shelfItems.map((item, i) => (
-            <View key={item.id} style={[styles.shelfRow, i < shelfItems.length - 1 && styles.rowBorder]}>
-              <View style={styles.cardMeta}>
-                {(item.group_name != null || item.member_name != null) && (
-                  <Text style={styles.cardSub} numberOfLines={1}>
-                    {[item.group_name, item.member_name].filter(Boolean).join(' · ')}
-                  </Text>
-                )}
-                <Text style={styles.cardName} numberOfLines={1}>{item.card_name}</Text>
-                {item.series != null && (
-                  <Text style={styles.cardSub} numberOfLines={1}>{item.series}</Text>
-                )}
-              </View>
-            </View>
-          ))
-        )
-      )}
-    </View>
-  )
-
-  const renderTrust = () => {
-    const lastActiveText = formatLastActive(profile?.last_active_at ?? null)
-
-    return (
-      <View style={styles.tabContent}>
-        <View style={styles.trustHeaderRow}>
-          <Text style={styles.trustHeaderLabel}>現在のバッジ</Text>
-          <TrustBadge level={trustLevel} size="md" />
-        </View>
-
-        <Text style={styles.sectionTitle}>あなたの取引履歴</Text>
-        <View style={styles.dataCard}>
-          {([
-            { label: '取引件数', value: `${tc}件` },
-            { label: '発送遵守率', value: `${sr}%` },
-            { label: '返信中央値', value: rh < 999 ? `${rh}時間` : '—' },
-            { label: 'トラブル件数', value: `${trouble}件` },
-            { label: '直近活動', value: lastActiveText },
-          ] as const).map((item, i, arr) => (
-            <View
-              key={item.label}
-              style={[styles.dataRow, i < arr.length - 1 && styles.dataRowBorder]}
-            >
-              <Text style={styles.dataLabel}>{item.label}</Text>
-              <Text style={[styles.dataValue, { color: colors.textPrimary }]}>
-                {item.value}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        <Text style={styles.noteText}>
-          バッジは優遇権ではなく信頼証明です。発送順・露出順には影響しません。
-        </Text>
       </View>
     )
   }
 
-  const renderHistory = () => (
-    <View style={styles.tabContent}>
-      {dataLoading ? (
-        <ActivityIndicator color={colors.primary} style={styles.loader} />
-      ) : historyOffers.length === 0 ? (
+  // ─────────────────────────────────────────
+  // 出品中 (画像タイル横スクロール)
+  // ─────────────────────────────────────────
+  const renderListings = () => {
+    if (dataLoading) {
+      return <ActivityIndicator color={colors.primary} style={styles.loader} />
+    }
+    if (cards.length === 0) {
+      return (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyText}>まだ出品がありません</Text>
+          <Text style={styles.emptySub}>右下の「＋」からカードを出品できます</Text>
+        </View>
+      )
+    }
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.hScrollContent}
+      >
+        {cards.map((card) => (
+          <Pressable
+            key={card.id}
+            style={styles.hCard}
+            onPress={() => router.push({ pathname: '/listing/[id]', params: { id: card.id } } as never)}
+          >
+            {card.image_url != null ? (
+              <Image source={{ uri: card.image_url }} style={styles.hCardImage} resizeMode="cover" />
+            ) : (
+              <View style={[styles.hCardImage, styles.hCardImageEmpty]} />
+            )}
+            <Text style={styles.hCardName} numberOfLines={1}>{card.name}</Text>
+            {(card.series != null || card.member_name != null) && (
+              <Text style={styles.hCardSub} numberOfLines={1}>
+                {[card.series, card.member_name].filter(Boolean).join(' · ')}
+              </Text>
+            )}
+          </Pressable>
+        ))}
+      </ScrollView>
+    )
+  }
+
+  // ─────────────────────────────────────────
+  // 商品棚 (テキストタイル横スクロール、画像なし)
+  // ─────────────────────────────────────────
+  const renderShelf = () => {
+    if (dataLoading) {
+      return <ActivityIndicator color={colors.primary} style={styles.loader} />
+    }
+    if (shelfItems.length === 0) {
+      return (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyText}>商品棚は空です</Text>
+          <Pressable onPress={() => router.push('/shelf' as never)}>
+            <Text style={styles.emptyLink}>＋ 手札を登録する</Text>
+          </Pressable>
+        </View>
+      )
+    }
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.hScrollContent}
+      >
+        {shelfPreview.map((item) => (
+          <View key={item.id} style={styles.shelfTile}>
+            {(item.group_name != null || item.member_name != null) && (
+              <Text style={styles.shelfTileSub} numberOfLines={1}>
+                {[item.group_name, item.member_name].filter(Boolean).join(' · ')}
+              </Text>
+            )}
+            <Text style={styles.shelfTileName} numberOfLines={2}>{item.card_name}</Text>
+            {item.series != null && (
+              <Text style={styles.shelfTileSub} numberOfLines={1}>{item.series}</Text>
+            )}
+          </View>
+        ))}
+      </ScrollView>
+    )
+  }
+
+  // ─────────────────────────────────────────
+  // 取引履歴 (縦リスト、最新のみ)
+  // ─────────────────────────────────────────
+  const renderHistory = () => {
+    if (dataLoading) {
+      return <ActivityIndicator color={colors.primary} style={styles.loader} />
+    }
+    if (historyOffers.length === 0) {
+      return (
         <View style={styles.emptyBox}>
           <Text style={styles.emptyText}>取引履歴はまだありません</Text>
+          <Text style={styles.emptySub}>交換が成立すると、ここに記録されます</Text>
         </View>
-      ) : (
-        historyOffers.map((offer, i) => {
+      )
+    }
+    return (
+      <View>
+        {historyPreview.map((offer, i) => {
           const isProposer = offer.proposer_user_id === userId
           const counterHandle = isProposer
             ? (offer.target_card?.owner?.handle ?? '相手')
@@ -340,10 +322,13 @@ export default function MyPageScreen() {
           const statusBg =
             statusLabel === '完了' ? colors.successBg :
             statusLabel === 'キャンセル' || statusLabel === '辞退' ? colors.errorBg :
-            '#EEF2FF'
+            colors.tagInfoBg
 
           return (
-            <View key={offer.id} style={[styles.historyRow, i < historyOffers.length - 1 && styles.rowBorder]}>
+            <View
+              key={offer.id}
+              style={[styles.historyRow, i < historyPreview.length - 1 && styles.rowBorder]}
+            >
               <View style={styles.cardMeta}>
                 <Text style={styles.cardSub}>
                   {new Date(offer.created_at).toLocaleDateString('ja-JP')}
@@ -355,18 +340,9 @@ export default function MyPageScreen() {
               </View>
             </View>
           )
-        })
-      )}
-    </View>
-  )
-
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'overview': return renderOverview()
-      case 'cards': return renderCards()
-      case 'trust': return renderTrust()
-      case 'history': return renderHistory()
-    }
+        })}
+      </View>
+    )
   }
 
   return (
@@ -380,22 +356,17 @@ export default function MyPageScreen() {
         {/* ── β版表示 (Apple 審査向け期待値補正) ── */}
         <BetaBadge />
 
-        {/* ── ヒーロー ── */}
+        {/* ── ヒーロー (アイデンティティ層) ──
+            M3 でトラブル色サインをここに追加予定。M2 時点はアバター+名前+バッジのみ。 */}
         <View style={styles.hero}>
           <View style={styles.heroInner}>
-            {/* アバター */}
             <View style={styles.avatar}>
               {avatarUrl != null ? (
-                <Image
-                  source={{ uri: avatarUrl }}
-                  style={styles.avatarImage}
-                  resizeMode="cover"
-                />
+                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
               ) : (
                 <Text style={styles.avatarText}>{avatarChar}</Text>
               )}
             </View>
-            {/* 名前・バッジ (Pioneer + Trust) */}
             <View style={styles.heroMeta}>
               <Text style={styles.heroHandle}>{handle ?? displayName ?? 'ユーザー'}</Text>
               <View style={styles.heroBadgeRow}>
@@ -409,7 +380,6 @@ export default function MyPageScreen() {
                 <TrustBadge level={trustLevel} size="sm" />
               </View>
             </View>
-            {/* 設定ボタン */}
             <Pressable
               style={styles.settingsButton}
               onPress={() => router.push('/profile-edit' as never)}
@@ -418,95 +388,93 @@ export default function MyPageScreen() {
               <Ionicons name="settings-outline" size={22} color={colors.textTertiary} />
             </Pressable>
           </View>
+        </View>
 
-          {/* 統計グリッド */}
-          <View style={styles.statsGrid}>
-            {([
-              // 交換人数 (get_distinct_partner_count) を接続。M2 で「信頼の記録」5指標へ再編予定。
-              { label: '交換', value: `${partnerCount}人`, color: colors.primary },
-              { label: '取引', value: `${tc}回`, color: colors.primary },
-              { label: '発送率', value: `${sr}%`, color: colors.success },
-              { label: '返信', value: rh < 999 ? `${rh}h` : '—', color: '#0891B2' },
-            ] as const).map((stat, i, arr) => (
-              <View key={stat.label} style={[styles.statsCell, i < arr.length - 1 && styles.statsCellBorder]}>
-                <Text style={[styles.statsValue, { color: stat.color }]}>{stat.value}</Text>
-                <Text style={styles.statsLabel}>{stat.label}</Text>
-              </View>
-            ))}
+        {/* ── 信頼の記録 (5指標均等 / 空状態) ── */}
+        <View style={styles.sectionBlock}>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>信頼の記録</Text>
           </View>
+          {renderTrustRecord()}
         </View>
 
-        {/* ── タブバー（アンダーライン型） ── */}
-        <View style={styles.tabBar}>
-          {MAIN_TABS.map((tab) => (
-            <Pressable
-              key={tab.key}
-              style={[styles.tabItem, activeTab === tab.key && styles.tabItemActive]}
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <Text style={[styles.tabLabel, activeTab === tab.key && styles.tabLabelActive]}>
-                {tab.label}
-              </Text>
-            </Pressable>
-          ))}
+        {/* ── 出品中 ── */}
+        <View style={styles.sectionBlock}>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>
+              出品中{cards.length > 0 ? ` (${cards.length})` : ''}
+            </Text>
+          </View>
+          {renderListings()}
         </View>
 
-        {/* ── タブコンテンツ ── */}
-        <View style={styles.contentCard}>
-          {renderTabContent()}
-        </View>
-
-        {/* ── DEV + ログアウト ──
-            Phase B 検証 (2026-07-05): section 外側の gate は DEV_FEATURES と
-            LISTING_SINGLE_PAGE_PREVIEW のどちらかで開く。内側の 3 導線は個別 gate:
-              - 成立ログ / オンボリセット: DEV_FEATURES のみ (production 非公開のまま)
-              - 出品1ページ化 [dev]: DEV_FEATURES または LISTING_SINGLE_PAGE_PREVIEW
-                (TestFlight production 検証で露出させる) */}
-        {(FEATURE_FLAGS.DEV_FEATURES ||
-          FEATURE_FLAGS.LISTING_SINGLE_PAGE_PREVIEW) && (
-          <View style={styles.devSection}>
-            {FEATURE_FLAGS.DEV_FEATURES && (
-              <>
-                <Pressable
-                  style={styles.devRow}
-                  onPress={() => router.push('/offer-insights' as never)}
-                >
-                  <Text style={styles.devLabel}>成立ログ [dev]</Text>
-                  <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
-                </Pressable>
-                <Pressable
-                  style={styles.devRow}
-                  onPress={async () => {
-                    const { resetOnboardingForDebug } = await import('../onboarding')
-                    await resetOnboardingForDebug()
-                    Alert.alert('リセット完了', 'アプリを再起動してください')
-                  }}
-                >
-                  <Text style={styles.devLabel}>オンボーディングリセット [dev]</Text>
-                  <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
-                </Pressable>
-              </>
-            )}
-            {/* Phase B (2026-07-05): 出品1ページ化の入口 (entry.tsx → 下書きハブ or single-page)。
-                Phase D で SubmitFab の向き先を切替予定。それまで本 dev 導線経由のみで検証。
-                LISTING_SINGLE_PAGE_PREVIEW=true の間は production build でも露出。 */}
-            {(FEATURE_FLAGS.DEV_FEATURES ||
-              FEATURE_FLAGS.LISTING_SINGLE_PAGE_PREVIEW) && (
-              <Pressable
-                style={styles.devRow}
-                onPress={() => router.push('/listing/new/entry' as never)}
-              >
-                <Text style={styles.devLabel}>出品1ページ化 [dev]</Text>
-                <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+        {/* ── 商品棚 (手札置き場・独立セクション) ── */}
+        <View style={styles.sectionBlock}>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>
+              商品棚{shelfItems.length > 0 ? ` (${shelfItems.length})` : ''}
+            </Text>
+            {shelfItems.length > 0 && (
+              <Pressable style={styles.seeAll} onPress={() => router.push('/shelf' as never)} hitSlop={6}>
+                <Text style={styles.seeAllText}>すべて見る</Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.primary} />
               </Pressable>
             )}
+          </View>
+          <Text style={styles.shelfHint}>
+            交換を提案するとき、ここから手札として出せます
+          </Text>
+          {renderShelf()}
+        </View>
+
+        {/* ── 取引履歴 ── */}
+        <View style={styles.sectionBlock}>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>取引履歴</Text>
+            {historyOffers.length > 0 && (
+              <Pressable
+                style={styles.seeAll}
+                onPress={() => router.push('/(tabs)/trades' as never)}
+                hitSlop={6}
+              >
+                <Text style={styles.seeAllText}>すべて見る</Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+              </Pressable>
+            )}
+          </View>
+          {renderHistory()}
+        </View>
+
+        {/* ── DEV セクション ──
+            マイページ再設計 M2 (2026-07): LISTING_SINGLE_PAGE_PREVIEW 導線を除去。
+            単品出品は Phase 1 で /listing/new/choose に本導線化済みのため dev preview 不要。
+            残る dev 導線は DEV_FEATURES 限定 (production 非公開)。 */}
+        {FEATURE_FLAGS.DEV_FEATURES && (
+          <View style={styles.devSection}>
+            <Pressable
+              style={styles.devRow}
+              onPress={() => router.push('/offer-insights' as never)}
+            >
+              <Text style={styles.devLabel}>成立ログ [dev]</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+            </Pressable>
+            <Pressable
+              style={[styles.devRow, styles.devRowLast]}
+              onPress={async () => {
+                const { resetOnboardingForDebug } = await import('../onboarding')
+                await resetOnboardingForDebug()
+                Alert.alert('リセット完了', 'アプリを再起動してください')
+              }}
+            >
+              <Text style={styles.devLabel}>オンボーディングリセット [dev]</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+            </Pressable>
           </View>
         )}
 
         {/* 設定リンク群 (アカウント関連)
             Phase A (2026-06): いいね (liked_cards) と求リスト (wanted_cards) は別概念のため
-            mypage に明示的に並列リンクを置く。HeaderActions ♡ アイコンは /likes へ遷移するが、
-            mypage では「求リスト」も同列に並べて責務分離を可視化する。 */}
+            mypage に明示的に並列リンクを置く。 */}
         <View style={styles.settingsSection}>
           {([
             { label: 'プロフィール編集', path: '/profile-edit' },
@@ -603,7 +571,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.base,
-    paddingBottom: spacing.md,
   },
   avatar: {
     width: 64,
@@ -649,145 +616,145 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
 
-  // ── stats grid ──
-  statsGrid: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  statsCell: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-  },
-  statsCellBorder: {
-    borderRightWidth: 1,
-    borderRightColor: colors.border,
-  },
-  statsValue: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-  },
-  statsLabel: {
-    fontSize: 10,
-    color: colors.textTertiary,
-    marginTop: 2,
-  },
-
-  // ── tab bar (underline) ──
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: colors.backgroundCard,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  tabItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: spacing.sm + 2,
-    borderBottomWidth: 2.5,
-    borderBottomColor: 'transparent',
-  },
-  tabItemActive: {
-    borderBottomColor: colors.primary,
-  },
-  tabLabel: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.textTertiary,
-  },
-  tabLabelActive: {
-    color: colors.primary,
-    fontWeight: fontWeight.bold,
-  },
-
-  // ── content card ──
-  contentCard: {
+  // ── section (共通) ──
+  sectionBlock: {
     backgroundColor: colors.backgroundCard,
     marginHorizontal: spacing.base,
     marginTop: spacing.md,
     borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  tabContent: {
     padding: spacing.base,
   },
-  loader: {
-    marginVertical: spacing.xl,
-  },
-  sectionTitle: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: colors.textSecondary,
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
+  sectionTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  seeAll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  seeAllText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+  },
+  loader: {
+    marginVertical: spacing.lg,
+  },
 
-  // ── overview ──
-  dataCard: {
+  // ── 信頼の記録 ──
+  trustGrid: {
+    flexDirection: 'row',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.lg,
     overflow: 'hidden',
   },
-  dataRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  trustCell: {
+    flex: 1,
     alignItems: 'center',
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: spacing.md,
+    paddingHorizontal: 2,
+  },
+  trustCellBorder: {
+    borderRightWidth: 1,
+    borderRightColor: colors.borderLight,
+  },
+  trustValue: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  trustLabel: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    marginTop: 3,
+  },
+  trustEmpty: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.lg,
     paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    gap: spacing.xs,
   },
-  dataRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  dataLabel: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-  },
-  dataValue: {
+  trustEmptyTitle: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
   },
-  noteText: {
+  trustEmptySub: {
     fontSize: fontSize.xs,
     color: colors.textTertiary,
-    lineHeight: 18,
-    marginTop: spacing.sm,
+    textAlign: 'center',
   },
 
-  // ── card toggle (pill) ──
-  toggleRow: {
-    flexDirection: 'row',
-    backgroundColor: colors.backgroundMuted,
-    borderRadius: radius.full,
-    padding: 3,
-    marginBottom: spacing.md,
+  // ── 横スクロールカード (出品中) ──
+  hScrollContent: {
+    gap: spacing.sm,
+    paddingVertical: 2,
   },
-  togglePill: {
-    flex: 1,
-    height: 34,
-    borderRadius: radius.full,
+  hCard: {
+    width: 108,
+  },
+  hCardImage: {
+    width: 108,
+    height: 108,
+    borderRadius: radius.lg,
+    backgroundColor: colors.backgroundMuted,
+  },
+  hCardImageEmpty: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  togglePillActive: {
-    backgroundColor: colors.backgroundCard,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  toggleText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.textTertiary,
-  },
-  toggleTextActive: {
-    color: colors.textPrimary,
+  hCardName: {
+    fontSize: fontSize.xs,
     fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    marginTop: spacing.xs,
+  },
+  hCardSub: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    marginTop: 1,
+  },
+
+  // ── 商品棚タイル (画像なし) ──
+  shelfHint: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    marginBottom: spacing.sm,
+    lineHeight: 16,
+  },
+  shelfTile: {
+    width: 132,
+    minHeight: 84,
+    backgroundColor: colors.backgroundMuted,
+    borderRadius: radius.lg,
+    padding: spacing.sm,
+    justifyContent: 'center',
+    gap: 2,
+  },
+  shelfTileName: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  shelfTileSub: {
+    fontSize: 10,
+    color: colors.textTertiary,
   },
 
   // ── shared row ──
@@ -796,7 +763,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderLight,
   },
   emptyBox: {
-    paddingVertical: spacing.xl,
+    paddingVertical: spacing.lg,
     alignItems: 'center',
     gap: spacing.xs,
   },
@@ -816,22 +783,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
 
-  // ── card rows ──
-  cardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
-  },
-  cardThumb: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.md,
-    flexShrink: 0,
-  },
-  cardThumbEmpty: {
-    backgroundColor: colors.backgroundMuted,
-  },
+  // ── card meta (history) ──
   cardMeta: {
     flex: 1,
     minWidth: 0,
@@ -845,34 +797,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
-  },
-  cardWant: {
-    fontSize: fontSize.xs,
-    color: colors.primary,
-  },
-
-  // ── shelf row ──
-  shelfRow: {
-    paddingVertical: spacing.sm,
-  },
-
-  // ── trust ──
-  trustHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.base,
-    marginBottom: spacing.md,
-    backgroundColor: colors.backgroundCard,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  trustHeaderLabel: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    fontWeight: fontWeight.medium,
   },
 
   // ── history ──
@@ -932,6 +856,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,
+  },
+  devRowLast: {
+    borderBottomWidth: 0,
   },
   devLabel: {
     fontSize: fontSize.xs,

@@ -1,6 +1,13 @@
 // app/shelf.tsx
 // 商品棚画面
-// マイページ → 商品棚 で遷移
+//
+// ⚠️ β1 スコープ外・到達不能 (2026-07-09):
+//   商品棚 (顔2) は density を "増幅" する機能で "創る" 機能ではないため β1 から外した
+//   (shelf_items 本番0行 = 顔1 は誰も使っていない)。マイページの商品棚セクションと
+//   /shelf への全遷移を除去済み。ルート登録 (app/_layout.tsx) は残すが、どこからも
+//   遷移しないため到達不能。★削除しない — 設計は完成済で density 到達後に復活する。
+//   本画面の「登録すると成立しやすい交換候補に優先表示されます」は未実装 (顔2+顔3 で実装)。
+//   設計の全体像・復活手順: docs/design_shelf_and_is_public.md
 import { addShelfItem, deleteShelfItem, fetchShelfItems, fetchUserOshi } from '@/lib/supabase'
 import { ShelfItem, UserOshi } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'

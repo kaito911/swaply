@@ -1,12 +1,13 @@
 // app/(tabs)/mypage.tsx
 //
 // マイページ再設計 (2026-07): タブ廃止 → 縦1画面スクロール。
-// セクション構成 (上から): ヒーロー / 信頼の記録 / 出品中 / 商品棚 / 取引履歴 / 設定リンク群。
+// セクション構成 (上から): ヒーロー / 信頼の記録 / 出品中 / 取引履歴 / 設定リンク群。
 //   - 実績 (交換人数/取引回数/発送率/返信速度/直近活動) = 「信頼の記録」に5指標均等で集約。
 //     数字はこの1箇所のみ (ヒーローや他セクションに再掲しない)。
-//   - トラブル状態は「信頼の記録」に入れない (実績とは階層が違う信号のため)。M3 で
-//     ヒーローに色サインとして追加予定。M2 時点ではヒーローはアバター+名前+バッジのみ。
-//   - 出品中と商品棚は「別セクション」(トグルにしない)。商品棚 = 手札置き場。
+//   - トラブル状態は「信頼の記録」に入れない (実績とは階層が違う信号のため)。
+//     ヒーローに色サインとして表示。
+//   - 商品棚 (顔2) は β1 スコープ外のため UI から除去 (2026-07-09)。設計は
+//     docs/design_shelf_and_is_public.md に記録。density 到達後に復活予定。
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { HeaderActions } from '@/components/HeaderActions'
 import { PioneerBadge } from '@/components/PioneerBadge'
@@ -15,7 +16,6 @@ import {
   fetchDistinctPartnerCount,
   fetchMyOffers,
   fetchProfile,
-  fetchShelfItems,
   fetchUserCards,
   supabase,
 } from '@/lib/supabase'
@@ -25,7 +25,6 @@ import {
   formatLastActive,
   Offer,
   Profile,
-  ShelfItem,
   TroubleStage,
 } from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
@@ -51,7 +50,6 @@ import { useBadge } from '@/providers/BadgeProvider'
 
 // 各セクションのプレビュー表示上限 (超過分は「すべて見る」で専用画面へ)。
 // 出品中は専用一覧画面が未整備のため上限を設けず全件横スクロール表示 (β1 は件数少)。
-const SHELF_PREVIEW_LIMIT = 8
 const HISTORY_PREVIEW_LIMIT = 5
 
 // トラブル色サイン (文言なし)。実績バッジ (新規/お試し/安定/高信頼) の断定的ラベルは
@@ -85,7 +83,6 @@ export default function MyPageScreen() {
 
   const [profile, setProfile] = useState<Profile | null>(null)
   const [cards, setCards] = useState<Card[]>([])
-  const [shelfItems, setShelfItems] = useState<ShelfItem[]>([])
   const [historyOffers, setHistoryOffers] = useState<Offer[]>([])
   // 交換人数: get_distinct_partner_count RPC (INVOKER・引数なし)。
   // completed な trades / venue_trades の distinct 相手数。「信頼の記録」で表示。
@@ -99,14 +96,12 @@ export default function MyPageScreen() {
       Promise.all([
         fetchProfile(userId),
         fetchUserCards(userId, 'active'),
-        fetchShelfItems(userId),
         fetchMyOffers(userId),
         // 交換人数 RPC。失敗しても他データ表示を止めないよう個別に握り潰す (0 fallback)。
         fetchDistinctPartnerCount().catch(() => 0),
-      ]).then(([p, c, s, offers, partners]) => {
+      ]).then(([p, c, offers, partners]) => {
         if (p != null) setProfile(p)
         setCards(c)
-        setShelfItems(s)
         setPartnerCount(partners)
         setHistoryOffers(
           offers.filter(
@@ -175,7 +170,6 @@ export default function MyPageScreen() {
   // 実績が1つでもあれば「信頼の記録」を数値表示。全くなければ「これから育つ場所」として提示。
   const hasTradeRecord = tc > 0 || partnerCount > 0
 
-  const shelfPreview = shelfItems.slice(0, SHELF_PREVIEW_LIMIT)
   const historyPreview = historyOffers.slice(0, HISTORY_PREVIEW_LIMIT)
 
   // ─────────────────────────────────────────
@@ -257,46 +251,6 @@ export default function MyPageScreen() {
               </Text>
             )}
           </Pressable>
-        ))}
-      </ScrollView>
-    )
-  }
-
-  // ─────────────────────────────────────────
-  // 商品棚 (テキストタイル横スクロール、画像なし)
-  // ─────────────────────────────────────────
-  const renderShelf = () => {
-    if (dataLoading) {
-      return <ActivityIndicator color={colors.primary} style={styles.loader} />
-    }
-    if (shelfItems.length === 0) {
-      return (
-        <View style={styles.emptyBox}>
-          <Text style={styles.emptyText}>商品棚は空です</Text>
-          <Pressable onPress={() => router.push('/shelf' as never)}>
-            <Text style={styles.emptyLink}>＋ 手札を登録する</Text>
-          </Pressable>
-        </View>
-      )
-    }
-    return (
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.hScrollContent}
-      >
-        {shelfPreview.map((item) => (
-          <View key={item.id} style={styles.shelfTile}>
-            {(item.group_name != null || item.member_name != null) && (
-              <Text style={styles.shelfTileSub} numberOfLines={1}>
-                {[item.group_name, item.member_name].filter(Boolean).join(' · ')}
-              </Text>
-            )}
-            <Text style={styles.shelfTileName} numberOfLines={2}>{item.card_name}</Text>
-            {item.series != null && (
-              <Text style={styles.shelfTileSub} numberOfLines={1}>{item.series}</Text>
-            )}
-          </View>
         ))}
       </ScrollView>
     )
@@ -438,24 +392,8 @@ export default function MyPageScreen() {
           {renderListings()}
         </View>
 
-        {/* ── 商品棚 (手札置き場・独立セクション) ── */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>
-              商品棚{shelfItems.length > 0 ? ` (${shelfItems.length})` : ''}
-            </Text>
-            {shelfItems.length > 0 && (
-              <Pressable style={styles.seeAll} onPress={() => router.push('/shelf' as never)} hitSlop={6}>
-                <Text style={styles.seeAllText}>すべて見る</Text>
-                <Ionicons name="chevron-forward" size={14} color={colors.primary} />
-              </Pressable>
-            )}
-          </View>
-          <Text style={styles.shelfHint}>
-            交換を提案するとき、ここから手札として出せます
-          </Text>
-          {renderShelf()}
-        </View>
+        {/* 商品棚 (顔2) は β1 スコープ外のため UI から除去 (2026-07-09)。
+            設計は docs/design_shelf_and_is_public.md。density 到達後に復活予定。 */}
 
         {/* ── 取引履歴 ── */}
         <View style={styles.sectionBlock}>
@@ -776,32 +714,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textTertiary,
     marginTop: 1,
-  },
-
-  // ── 商品棚タイル (画像なし) ──
-  shelfHint: {
-    fontSize: fontSize.xs,
-    color: colors.textTertiary,
-    marginBottom: spacing.sm,
-    lineHeight: 16,
-  },
-  shelfTile: {
-    width: 132,
-    minHeight: 84,
-    backgroundColor: colors.backgroundMuted,
-    borderRadius: radius.lg,
-    padding: spacing.sm,
-    justifyContent: 'center',
-    gap: 2,
-  },
-  shelfTileName: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-  },
-  shelfTileSub: {
-    fontSize: 10,
-    color: colors.textTertiary,
   },
 
   // ── shared row ──

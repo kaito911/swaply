@@ -337,6 +337,7 @@ export default function ListingNewSinglePageScreen() {
         image_back_url: resolvedImageBackUrl,
         description: null,
         status: 'active',
+        is_public: true, // 顔2: 通常出品は公開 (商品棚=false は顔2本体で別途)
         condition: null,
         want_description:
           state.condition.want_description !== ''

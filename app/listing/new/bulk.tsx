@@ -402,6 +402,7 @@ export default function ListingNewBulkScreen() {
         image_back_url: null,
         description: null,
         status: 'active',
+        is_public: true, // 顔2: 通常出品は公開 (商品棚=false は顔2本体で別途)
         condition: null,
         want_description: pt.note.trim() !== '' ? pt.note.trim() : null,
         allows_mail: true,

@@ -229,6 +229,8 @@ export async function fetchNewCards(
     .from('cards')
     .select('*, owner:profiles(*)')
     .eq('status', 'active')
+    // 顔2 (is_public): 公開出品のみをフィードに出す。商品棚 (is_public=false) は除外。
+    .eq('is_public', true)
 
   if (excludeOwnerIds.length > 0) {
     query = query.not('owner_user_id', 'in', `(${excludeOwnerIds.join(',')})`)
@@ -317,6 +319,7 @@ export async function fetchEasyCards(
     .from('cards')
     .select('*, owner:profiles(*)')
     .eq('status', 'active')
+    .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     .eq('allows_adjustment', false)
 
   if (userId != null) {
@@ -347,6 +350,7 @@ export async function fetchRecommendedCards(
     .from('cards')
     .select('*, owner:profiles(*)')
     .eq('status', 'active')
+    .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     .neq('owner_user_id', userId)
 
   if (excludeOwnerIds.length > 0) {
@@ -664,6 +668,7 @@ export async function searchDirectMatch(params: {
     .select('*, owner:profiles!cards_owner_user_id_fkey(*)')
     .ilike('name', `%${userWants}%`)
     .eq('status', 'active')
+    .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     .order('created_at', { ascending: false })
     .limit(100)
 
@@ -903,6 +908,7 @@ export async function createCard(params: {
     image_url: params.imageUrl,
     description: params.description,
     status: 'active',
+    is_public: true, // 顔2: 通常出品は公開 (商品棚=false は顔2本体で別途)
     condition: null,
     want_description: params.wantDescription,
     allows_adjustment: false,
@@ -1869,6 +1875,7 @@ export async function searchCards(params: {
       .from('cards')
       .select('*, owner:profiles(*)')
       .eq('status', 'active')
+      .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     if (characterIds.length > 0) qA = qA.overlaps('characters', characterIds)
     if (itemTypeIds.length > 0) qA = qA.overlaps('item_types', itemTypeIds)
     if (workIds.length > 0) qA = qA.in('work_id', workIds)
@@ -1914,6 +1921,7 @@ export async function searchCards(params: {
         .from('cards')
         .select('*, owner:profiles(*)')
         .eq('status', 'active')
+        .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
       if (characterIds.length > 0) qB = qB.overlaps('characters', characterIds)
       if (itemTypeIds.length > 0) qB = qB.overlaps('item_types', itemTypeIds)
       qB = qB.or(ilikeClauses.join(','))
@@ -1957,6 +1965,7 @@ export async function searchCards(params: {
       .from('cards')
       .select('*, owner:profiles(*)')
       .eq('status', 'active')
+      .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
       .overlaps('characters', matchedCharIds)
     if (excludeFilter != null) q = q.not('owner_user_id', 'in', excludeFilter)
     queries.push(
@@ -1972,6 +1981,7 @@ export async function searchCards(params: {
       .from('cards')
       .select('*, owner:profiles(*)')
       .eq('status', 'active')
+      .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
       .overlaps('item_types', matchedItemTypeIds)
     if (excludeFilter != null) q = q.not('owner_user_id', 'in', excludeFilter)
     queries.push(
@@ -1987,6 +1997,7 @@ export async function searchCards(params: {
       .from('cards')
       .select('*, owner:profiles(*)')
       .eq('status', 'active')
+      .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
       .or(
         `name.ilike.%${query}%,group_name.ilike.%${query}%,member_name.ilike.%${query}%,series.ilike.%${query}%`,
       )
@@ -2069,6 +2080,7 @@ export async function getGroupsForMember(
     .from('cards')
     .select('group_name')
     .eq('status', 'active')
+    .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     .or(memberAliasOrClause(member))
     .not('group_name', 'is', null)
 
@@ -2100,6 +2112,7 @@ export async function getSeriesOptions(
     .from('cards')
     .select('series')
     .eq('status', 'active')
+    .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     .or(memberAliasOrClause(member))
     .not('series', 'is', null)
 
@@ -2142,6 +2155,7 @@ export async function searchCardsByMember(
     .from('cards')
     .select('*, owner:profiles(*)')
     .eq('status', 'active')
+    .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     .or(memberAliasOrClause(member))
 
   if (group != null && group.trim() !== '') {

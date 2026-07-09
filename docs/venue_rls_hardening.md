@@ -136,11 +136,46 @@ RLS と GRANT の**二重防御**で不可能になった。read は当事者限
 
 ---
 
+## ③-A 補完: create_venue_hold の宛先/supply_post 検証 (本番適用済 2026-07-09)
+
+### 背景
+③-A で venue write を DEFINER RPC に集約した際、`create_venue_hold` は `proposer_id = auth.uid()` は
+固定したが、`receiver_id` / `receiver_card` / `supply_post_id` / `proposer_image_url` を
+クライアント自己申告のまま INSERT していた (β1 レビュー H-2)。DEFINER で RLS もバイパスするため、
+認証ユーザーが任意宛に任意テキスト + 任意画像 URL の pending hold を無制限生成できる穴があった
+(griefing / 不適切画像送りつけ経路)。
+
+### 是正 (CREATE OR REPLACE・引数シグネチャ不変 = クライアント変更不要)
+`accept_venue_hold` のガードパターンを移植:
+- `p_supply_post_id` 必須化 (NULL → `SUPPLY_POST_REQUIRED`)
+- supply_post を `FOR SHARE` で引き、存在確認 (`SUPPLY_POST_NOT_FOUND`)
+- `status = 'active'` 強制 (held / withdrawn 拒否、`SUPPLY_POST_NOT_ACTIVE:<status>`)
+- venue 整合確認 (`VENUE_MISMATCH`)
+- self-hold 拒否 (`supply_post.user_id = auth.uid()` → `SELF_HOLD`)
+- ★核心: `receiver_id` / `receiver_card` をサーバ側で `supply_post.user_id` / `card_name` から
+  導出。クライアントが渡した `p_receiver_id` / `p_receiver_card` は破棄 (注入不能化)
+- `proposer_image_url` は storage INSERT policy (第 1 階層 = userid 強制) で保護済のため変更なし
+
+### 前提 (本番実体で確認済)
+- `venue_supply_posts` 列: `id` / `user_id` / `card_name` / `status` (status 値: active / held / withdrawn)
+- 正規クライアント (`app/venue/[id].tsx:762`) は `receiver_id` / `card` / `supply_post_id` を
+  同一 supply_post から渡す = 上書きしても正規フローの挙動は不変 (実機確認済)
+
+### 検証
+- 正規フロー (会場 hold 申請 → accept → completed) が是正後も成功 (実機確認)
+- 引数シグネチャ不変のため `lib/supabase.ts` ラッパー・呼び出し元は無変更、**OTA 不要**
+
+### 結果
+venue hold 作成が「**supply_post を真実の源とする**」設計になり、宛先/商品名のクライアント注入が
+構造的に不能。③-A の集約で残った検証欠落を補完。
+
+---
+
 ## 関連する未解決 (β1 レビューで別途指摘済み)
 
-③-C は「当事者による write バイパス」を塞いだが、DEFINER RPC 内のロジック検証漏れは別問題として残る:
-- **create_venue_hold の宛先/supply_post 未検証** (β1 レビュー High) — 任意宛 Hold・テキスト/画像注入が
-  可能。RLS 収束とは独立に RPC 内バリデーションの追加が必要。`docs/migration_rpc_venue_holds_trades_writes.sql`
-  の create_venue_hold 参照。
+③-C は「当事者による write バイパス」を、上記 ③-A 補完は「宛先/商品名の注入」を塞いだ。
+以下の **read 側の論点は未解決** として β1 レビューに記録済み:
+- **checkin 偽装** (位置検証なしの INSERT) + **参加者 user_id の全体公開** (`Anyone can read` プライバシー)
+- **venue_supply_posts SELECT の命名/条件乖離** (「Checked-in users」名だが checkin 非ゲートの疑い、要本番確認)
 
-read 側の追加論点 (checkin 偽装・参加者 user_id 公開・supply_post SELECT 命名乖離) も β1 レビューに記録。
+これらは write 経路ではなく閲覧/プライバシー面の課題で、③ 三部作 + ③-A 補完とは独立に対応する。

@@ -400,11 +400,15 @@ export default function ListingNewBulkScreen() {
         item_types: pt.itemTypes,
         image_url: imageUrl,
         image_back_url: null,
-        description: null,
+        // 「商品の状態・補足」note は商品説明カラム description に格納する。
+        // (want_description は「求」の自由記述カラムであり、商品状態を入れると検索一覧で
+        //  「求: 美品」と誤表示されるため。bulk の求は card_wanted_links に紐づく。)
+        description: pt.note.trim() !== '' ? pt.note.trim() : null,
         status: 'active',
         is_public: true, // 顔2: 通常出品は公開 (商品棚=false は顔2本体で別途)
         condition: null,
-        want_description: pt.note.trim() !== '' ? pt.note.trim() : null,
+        // bulk に「求の詳細フリーテキスト」欄は無い (求は STEP2.5 WantSection → card_wanted_links)。
+        want_description: null,
         allows_mail: true,
         allows_handoff: false,
         allows_adjustment: false,

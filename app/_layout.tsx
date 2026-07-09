@@ -202,6 +202,14 @@ function RootNavigator() {
           }}
         />
         <Stack.Screen
+          name="venue/post"
+          options={{ headerShown: false }} // 画面内 ScreenHeader (VenueComposerScreen)
+        />
+        <Stack.Screen
+          name="venue/hold"
+          options={{ headerShown: false }} // 画面内 ScreenHeader (VenueComposerScreen)
+        />
+        <Stack.Screen
           name="venue/trade/[id]"
           options={{ headerShown: false }} // 画面内 ScreenHeader 統一 (3.5a 規約)
         />

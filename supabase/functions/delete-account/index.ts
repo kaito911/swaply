@@ -94,14 +94,58 @@ Deno.serve(async (req) => {
     return jsonResponse(500, { error: 'INTERNAL_ERROR' })
   }
 
-  // ─────────────────────────────────────────
-  // Step B: auth.users 削除 (service_role 経由)
-  //   RPC は成功済 (匿名化完了)。ここで失敗してもユーザー側は再 invoke で完了可能。
-  // ─────────────────────────────────────────
+  // service_role クライアント: storage 実ファイル削除 (Step A2) と auth 削除 (Step B) で共用。
   const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   })
 
+  // ─────────────────────────────────────────
+  // Step A2: Storage 実ファイル削除 (best-effort・abort しない)
+  //   RPC は DB の image_url を null 化するが Storage オブジェクト実体は残るため、
+  //   ここで card-images/${userId}/** と avatars/${userId}.jpg を物理削除する。
+  //   ★列挙はパスベースなので RPC の image_url null 化後でも独立に実行可能。
+  //   ★失敗しても Step B (auth 削除) を必ず実行する (アカウント消滅を優先)。
+  //     残存パスは console.error に出し、後日 GC で回収する (backlog: 恒久 GC)。
+  //   ★冪等: 削除済みファイルの再 remove は無害 → AUTH_DELETE_FAILED 再 invoke でも安全。
+  // ─────────────────────────────────────────
+  try {
+    const cardImagePaths = await listAllStorageFiles(
+      supabaseAdmin,
+      'card-images',
+      userId,
+    )
+    if (cardImagePaths.length > 0) {
+      const { error } = await supabaseAdmin.storage
+        .from('card-images')
+        .remove(cardImagePaths)
+      if (error != null) {
+        console.error('[delete-account] card-images remove failed', {
+          userId,
+          paths: cardImagePaths,
+          error,
+        })
+      }
+    }
+  } catch (err) {
+    console.error('[delete-account] card-images cleanup threw', { userId, err })
+  }
+
+  try {
+    // avatars は単一ファイル固定パス (app/profile-edit.tsx: `${userId}.jpg`)。
+    const { error } = await supabaseAdmin.storage
+      .from('avatars')
+      .remove([`${userId}.jpg`])
+    if (error != null) {
+      console.error('[delete-account] avatar remove failed', { userId, error })
+    }
+  } catch (err) {
+    console.error('[delete-account] avatar cleanup threw', { userId, err })
+  }
+
+  // ─────────────────────────────────────────
+  // Step B: auth.users 削除 (service_role 経由)
+  //   RPC は成功済 (匿名化完了)。ここで失敗してもユーザー側は再 invoke で完了可能。
+  // ─────────────────────────────────────────
   const { error: deleteAuthError } =
     await supabaseAdmin.auth.admin.deleteUser(userId)
 
@@ -126,4 +170,45 @@ function jsonResponse(status: number, body: unknown): Response {
       'Access-Control-Allow-Origin': '*',
     },
   })
+}
+
+// ─────────────────────────────────────────
+// Storage 再帰列挙 (汎用 (b) 方式)
+//   Supabase Storage の .list(prefix) は「即時の子」のみ返す (非再帰)。
+//   file と folder は entry.id で判別できる: 実ファイルは id!=null、
+//   フォルダ (プレフィックス) は id==null で返るため、それを検出したら再帰する。
+//   これにより card-images/${userId}/venue-supply · venue-hold · wants 等の
+//   サブフォルダ配下も含め、全実ファイルの完全パスを収集する。
+//   将来サブフォルダが増えても自動追従する (既知フォルダのハードコード不要)。
+//
+//   戻り値: bucket ルートからの相対パス配列 (.remove() にそのまま渡せる形)。
+// ─────────────────────────────────────────
+async function listAllStorageFiles(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  bucket: string,
+  prefix: string,
+): Promise<string[]> {
+  const { data, error } = await admin.storage.from(bucket).list(prefix, {
+    limit: 1000,
+    sortBy: { column: 'name', order: 'asc' },
+  })
+  if (error != null) {
+    console.error('[delete-account] storage list failed', { bucket, prefix, error })
+    return []
+  }
+  if (data == null || data.length === 0) return []
+
+  const paths: string[] = []
+  for (const entry of data) {
+    const childPath = `${prefix}/${entry.name}`
+    // id==null = フォルダ (プレフィックス) → 再帰。id!=null = 実ファイル → 収集。
+    if (entry.id == null) {
+      const nested = await listAllStorageFiles(admin, bucket, childPath)
+      paths.push(...nested)
+    } else {
+      paths.push(childPath)
+    }
+  }
+  return paths
 }

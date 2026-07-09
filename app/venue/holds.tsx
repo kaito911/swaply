@@ -71,6 +71,14 @@ function isConvertedLike(hold: VenueHoldWithRelations): boolean {
   return hold.status === 'held' || hold.status === 'converted'
 }
 
+// declined / cancelled は「解決済みで以後アクション不能」= 終端非アクティブ。
+// 受信 / 送信リストから除外する (cancelled と同じ扱いで declined も消す)。
+// 注: expired (= pending だが期限切れ) は意図的に残す (「期限切れ」表示 + ボタン無効で
+//     申請者に状態を伝えるため、isPendingExpired 側で処理)。ここでは巻き込まない。
+function isInactiveHold(hold: VenueHoldWithRelations): boolean {
+  return hold.status === 'declined' || hold.status === 'cancelled'
+}
+
 function counterpartName(
   profile: { handle: string | null; display_name: string | null } | null | undefined
 ): string {
@@ -176,8 +184,10 @@ export default function VenueHoldsScreen() {
   const matchTab = (h: VenueHoldWithRelations, t: Tab): boolean => {
     if (userId == null) return false
     if (t === 'converted') return isConvertedLike(h)
-    if (t === 'received') return h.receiver_id === userId && !isConvertedLike(h)
-    if (t === 'sent') return h.proposer_id === userId && !isConvertedLike(h)
+    if (t === 'received')
+      return h.receiver_id === userId && !isConvertedLike(h) && !isInactiveHold(h)
+    if (t === 'sent')
+      return h.proposer_id === userId && !isConvertedLike(h) && !isInactiveHold(h)
     return false
   }
 
@@ -483,12 +493,17 @@ export default function VenueHoldsScreen() {
                     ? trade.proposer_confirmed_at != null
                     : trade.receiver_confirmed_at != null)
                 : false
-            const showConfirmTrade =
+            const confirmEligible =
               tab === 'converted' &&
               trade != null &&
               trade.status !== 'completed' &&
               trade.status !== 'cancelled' &&
               !myConfirmed
+            // バグ2 修正: キャンセル申請中は完了系アクションを隠す (誤って手渡し完了しない)。
+            // 申請が拒否/取下げされ cancel_requested_at が NULL に戻ると reload で復活する。
+            const showConfirmTrade = confirmEligible && !isCancelRequested
+            // 完全な無表示は避け、「申請中は完了できない」ことを一文で伝える (案Y)。
+            const showCancelBlockedHint = confirmEligible && isCancelRequested
 
             return (
               <View key={hold.id} style={styles.holdCard}>
@@ -682,6 +697,13 @@ export default function VenueHoldsScreen() {
                       </Text>
                     )}
                   </Pressable>
+                )}
+
+                {/* バグ2 修正 (案Y): キャンセル申請中は完了ボタンを隠し、理由を一文で明示。 */}
+                {showCancelBlockedHint && (
+                  <Text style={styles.cancelBlockedHint}>
+                    キャンセル申請中のため、手渡し完了はできません
+                  </Text>
                 )}
 
                 {/* PR5: 成立済タブから venue_trade 専用 DM へ遷移。
@@ -1015,6 +1037,12 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
   },
   expiredHint: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    fontStyle: 'italic',
+  },
+  // バグ2 修正 (案Y): キャンセル申請中に完了ボタンの代わりに出す説明テキスト。
+  cancelBlockedHint: {
     fontSize: fontSize.xs,
     color: colors.textTertiary,
     fontStyle: 'italic',

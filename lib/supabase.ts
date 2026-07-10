@@ -221,13 +221,20 @@ function isNetworkErrorObject(error: unknown): boolean {
 // Home screen
 // ─────────────────────────────────────────
 
+// カード一覧/検索の共通 select。owner profile に加え、構造化求 (card_wanted_links →
+// wanted_cards) を join して、カード表示 (formatCardTitle の【求】行) を want_description
+// legacy 非依存で組めるようにする。DB スキーマ変更なし (nested SELECT のみ)。
+const CARD_WANT_LINKS_SELECT =
+  'card_wanted_links(wanted_card:wanted_cards(card_name, group_name, member_name, series))'
+const CARD_FEED_SELECT = `*, owner:profiles(*), ${CARD_WANT_LINKS_SELECT}`
+
 export async function fetchNewCards(
   limit = 20,
   excludeOwnerIds: string[] = [],
 ): Promise<Card[]> {
   let query = supabase
     .from('cards')
-    .select('*, owner:profiles(*)')
+    .select(CARD_FEED_SELECT)
     .eq('status', 'active')
     // 顔2 (is_public): 公開出品のみをフィードに出す。商品棚 (is_public=false) は除外。
     .eq('is_public', true)
@@ -313,11 +320,15 @@ export async function fetchEasyCards(
   userId?: string,
   myWants: WantedCard[] = [],
   excludeOwnerIds: string[] = [],
+  limit = 20,
 ): Promise<Card[]> {
-  // 多めに取得してクライアントサイドでスコアソート後に20件に絞る
+  // スコアソートの質のため slice の 2 倍 (最低 40) を DB から取得してから絞る。
+  // 既存呼出 (limit 省略) は 40 取得 → 20 slice で従来挙動と一致。「すべて見る」一覧は
+  // limit を上げて全件寄りに取得する (app/list/[section].tsx)。
+  const fetchLimit = Math.max(limit * 2, 40)
   let query = supabase
     .from('cards')
-    .select('*, owner:profiles(*)')
+    .select(CARD_FEED_SELECT)
     .eq('status', 'active')
     .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     .eq('allows_adjustment', false)
@@ -331,14 +342,35 @@ export async function fetchEasyCards(
 
   const { data, error } = await query
     .order('created_at', { ascending: false })
-    .limit(40)
+    .limit(fetchLimit)
 
   if (error) {
     console.error('[fetchEasyCards]', error)
     return []
   }
 
-  return sortEasyCards((data ?? []) as Card[], myWants).slice(0, 20)
+  return sortEasyCards((data ?? []) as Card[], myWants).slice(0, limit)
+}
+
+// 「いいねした交換」一覧用: liked_cards ⨝ cards で自分がいいねしたカードを全件取得。
+// home のロード済近似 (rec/easy/new から抽出) と異なり、liked_cards テーブルを正として
+// 全件返す。owner profile も join。DB スキーマ変更なし (SELECT のみ)。
+export async function fetchLikedCards(userId: string): Promise<Card[]> {
+  const { data, error } = await supabase
+    .from('liked_cards')
+    .select(`card:cards(${CARD_FEED_SELECT})`)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[fetchLikedCards]', error)
+    return []
+  }
+  const rows = (data ?? []) as unknown as { card: Card | null }[]
+  // 判断1: active な出品のみ (traded/inactive になった過去いいねは一覧から除外)。
+  return rows
+    .map((r) => r.card)
+    .filter((c): c is Card => c != null && c.status === 'active')
 }
 
 export async function fetchRecommendedCards(
@@ -348,7 +380,7 @@ export async function fetchRecommendedCards(
 ): Promise<Card[]> {
   let query = supabase
     .from('cards')
-    .select('*, owner:profiles(*)')
+    .select(CARD_FEED_SELECT)
     .eq('status', 'active')
     .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     .neq('owner_user_id', userId)
@@ -376,7 +408,7 @@ export async function fetchRecommendedCards(
 export async function fetchCard(cardId: string): Promise<Card | null> {
   const { data, error } = await supabase
     .from('cards')
-    .select('*, owner:profiles(*)')
+    .select(CARD_FEED_SELECT)
     .eq('id', cardId)
     .single()
 
@@ -411,7 +443,10 @@ export async function fetchUserCards(
   userId: string,
   statusFilter: 'active' | 'all' = 'active'
 ): Promise<Card[]> {
-  let query = supabase.from('cards').select('*').eq('owner_user_id', userId)
+  let query = supabase
+    .from('cards')
+    .select(`*, ${CARD_WANT_LINKS_SELECT}`)
+    .eq('owner_user_id', userId)
 
   if (statusFilter === 'active') {
     query = query.eq('status', 'active')
@@ -665,7 +700,7 @@ export async function searchDirectMatch(params: {
   // Step 1: cards (相手が持っている、検索者が欲しい商品名) を取得
   let cardsQuery = supabase
     .from('cards')
-    .select('*, owner:profiles!cards_owner_user_id_fkey(*)')
+    .select(`*, owner:profiles!cards_owner_user_id_fkey(*), ${CARD_WANT_LINKS_SELECT}`)
     .ilike('name', `%${userWants}%`)
     .eq('status', 'active')
     .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
@@ -1873,7 +1908,7 @@ export async function searchCards(params: {
   if (characterIds.length > 0 || itemTypeIds.length > 0 || workIds.length > 0) {
     let qA = supabase
       .from('cards')
-      .select('*, owner:profiles(*)')
+      .select(CARD_FEED_SELECT)
       .eq('status', 'active')
       .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     if (characterIds.length > 0) qA = qA.overlaps('characters', characterIds)
@@ -1919,7 +1954,7 @@ export async function searchCards(params: {
     if (ilikeClauses.length > 0) {
       let qB = supabase
         .from('cards')
-        .select('*, owner:profiles(*)')
+        .select(CARD_FEED_SELECT)
         .eq('status', 'active')
         .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
       if (characterIds.length > 0) qB = qB.overlaps('characters', characterIds)
@@ -1963,7 +1998,7 @@ export async function searchCards(params: {
   if (matchedCharIds.length > 0) {
     let q = supabase
       .from('cards')
-      .select('*, owner:profiles(*)')
+      .select(CARD_FEED_SELECT)
       .eq('status', 'active')
       .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
       .overlaps('characters', matchedCharIds)
@@ -1979,7 +2014,7 @@ export async function searchCards(params: {
   if (matchedItemTypeIds.length > 0) {
     let q = supabase
       .from('cards')
-      .select('*, owner:profiles(*)')
+      .select(CARD_FEED_SELECT)
       .eq('status', 'active')
       .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
       .overlaps('item_types', matchedItemTypeIds)
@@ -1995,7 +2030,7 @@ export async function searchCards(params: {
   {
     let q = supabase
       .from('cards')
-      .select('*, owner:profiles(*)')
+      .select(CARD_FEED_SELECT)
       .eq('status', 'active')
       .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
       .or(
@@ -2153,7 +2188,7 @@ export async function searchCardsByMember(
 
   let query = supabase
     .from('cards')
-    .select('*, owner:profiles(*)')
+    .select(CARD_FEED_SELECT)
     .eq('status', 'active')
     .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
     .or(memberAliasOrClause(member))

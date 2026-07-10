@@ -202,6 +202,10 @@ function RootNavigator() {
           }}
         />
         <Stack.Screen
+          name="list/[section]"
+          options={{ headerShown: false }} // 画面内 ScreenHeader (すべて見るグリッド一覧)
+        />
+        <Stack.Screen
           name="venue/post"
           options={{ headerShown: false }} // 画面内 ScreenHeader (VenueComposerScreen)
         />

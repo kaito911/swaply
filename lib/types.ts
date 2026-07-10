@@ -145,6 +145,17 @@ export interface Card {
   bbox_w?: number | null
   bbox_h?: number | null
   image_url_cropped?: string | null
+
+  // カード一覧/検索の join 用 (CARD_FEED_SELECT で card_wanted_links → wanted_cards を
+  // nested 取得)。formatCardTitle の【求】行を構造化求から組む。未 join の経路では undefined。
+  card_wanted_links?: {
+    wanted_card: {
+      card_name: string
+      group_name: string | null
+      member_name: string | null
+      series: string | null
+    } | null
+  }[]
 }
 
 // ─────────────────────────────────────────
@@ -602,6 +613,28 @@ export function computeTroubleStage(
   if (n >= 2) return 2
   if (n >= 1) return 1
   return 0
+}
+
+// カード表示の譲/求タイトル様式 (案A・現場フォーマット準拠)。
+//   give: 【譲】{group_name} {name}
+//   want: 【求】{構造化求を card_wanted_links から組む}。求未登録なら null (譲のみ表示)。
+// ★求は card_wanted_links (構造化) を正とし、want_description(legacy) には依存しない。
+// give/want は同じ文字サイズで 2 行併記する (表示側の責務)。
+export function formatCardTitle(
+  card: Pick<Card, 'name' | 'group_name' | 'card_wanted_links'>
+): { give: string; want: string | null } {
+  const give = '【譲】' + [card.group_name, card.name].filter((s) => s != null && s !== '').join(' ')
+
+  const wantParts = (card.card_wanted_links ?? [])
+    .map((l) => l.wanted_card)
+    .filter((w): w is NonNullable<typeof w> => w != null)
+    .map((w) =>
+      [w.group_name, w.member_name, w.card_name].filter((s) => s != null && s !== '').join(' '),
+    )
+    .filter((s) => s !== '')
+
+  const want = wantParts.length > 0 ? '【求】' + wantParts.join('・') : null
+  return { give, want }
 }
 
 export const CONDITION_LABELS: Record<CardCondition, string> = {

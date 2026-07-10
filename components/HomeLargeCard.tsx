@@ -7,13 +7,12 @@
 import { LikeButton } from '@/components/LikeButton'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
-import { Card } from '@/lib/types'
+import { Card, formatCardTitle } from '@/lib/types'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import React from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { PrimaryCTA } from './PrimaryCTA'
 
 interface HomeLargeCardProps {
   card: Card
@@ -91,32 +90,26 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
       {/* Body */}
       {/* ★ 機能 H 真意 v2 (3.5a fix): 機能 H は Trust ホーム削除のみ。求の過剰強調は撤回、
           表示順は商品名 → 求の自然な視覚読み順、サイズは同じ、求は補助色控えめ */}
-      <View style={styles.body}>
-        {card.group_name != null && (
-          <Text style={styles.group} numberOfLines={1}>
-            {card.group_name}
-          </Text>
-        )}
-
-        <Text style={styles.name} numberOfLines={2}>
-          {card.name}
-        </Text>
-
-        {card.want_description != null && (
-          <Text style={styles.want} numberOfLines={2}>
-            求: {card.want_description}
-          </Text>
-        )}
-
-        <PrimaryCTA
-          label={isOwn ? '自分の出品' : '提案する'}
-          size="sm"
-          onPress={handlePress}
-          disabled={isOwn}
-          style={styles.cta}
-        />
-      </View>
+      <HomeLargeTitle card={card} />
     </Pressable>
+  )
+}
+
+// 【譲】/【求】2行併記 (同サイズ・現場フォーマット準拠、求は card_wanted_links を正)。
+// 「提案する」CTA は撤去済 (詳細遷移がカード全体と同一で独自機能なし)。
+function HomeLargeTitle({ card }: { card: Card }) {
+  const { give, want } = formatCardTitle(card)
+  return (
+    <View style={styles.body}>
+      <Text style={styles.line} numberOfLines={2}>
+        {give}
+      </Text>
+      {want != null && (
+        <Text style={styles.line} numberOfLines={2}>
+          {want}
+        </Text>
+      )}
+    </View>
   )
 }
 
@@ -186,28 +179,12 @@ const styles = StyleSheet.create({
   body: {
     padding: spacing.md,
   },
-  group: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    fontWeight: fontWeight.medium,
-  },
-  // 商品名 (メイン情報): 通常見出しサイズ + 太字
-  name: {
+  // 【譲】【求】は同サイズ (対等・現場フォーマット)。2 行併記。
+  line: {
     fontSize: 15,
-    fontWeight: fontWeight.bold,
+    fontWeight: fontWeight.semibold,
     color: colors.textPrimary,
     lineHeight: 20,
     marginTop: spacing.xs,
-  },
-  // 求 (補助情報): 商品名と同サイズ、太字控えめ、secondary 色
-  want: {
-    fontSize: 15,
-    fontWeight: fontWeight.medium,
-    color: colors.textSecondary,
-    lineHeight: 20,
-    marginTop: spacing.xs,
-  },
-  cta: {
-    marginTop: spacing.md,
   },
 })

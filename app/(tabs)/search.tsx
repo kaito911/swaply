@@ -25,7 +25,7 @@ import {
   type DirectMatchResult,
   type WantedCardWithOwner,
 } from '@/lib/supabase'
-import { Card, computeTrustBadge, MasterCharacter, MasterItemType, MasterWork, type SearchMode } from '@/lib/types'
+import { Card, computeTrustBadge, formatCardTitle, MasterCharacter, MasterItemType, MasterWork, type SearchMode } from '@/lib/types'
 import { TrustBadge } from '@/components/TrustBadge'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
@@ -658,10 +658,17 @@ function ResultArea({
               {[item.series, item.member_name].filter(Boolean).join(' · ')}
             </Text>
           )}
-          <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
-          {item.want_description != null && (
-            <Text style={styles.cardWant} numberOfLines={1}>求: {item.want_description}</Text>
-          )}
+          {(() => {
+            const { give, want } = formatCardTitle(item)
+            return (
+              <>
+                <Text style={styles.cardName} numberOfLines={2}>{give}</Text>
+                {want != null && (
+                  <Text style={styles.cardName} numberOfLines={2}>{want}</Text>
+                )}
+              </>
+            )
+          })()}
           <Text style={styles.cardOwner} numberOfLines={1}>
             {isOwn ? '自分の出品' : `@${ownerHandle}`}
           </Text>

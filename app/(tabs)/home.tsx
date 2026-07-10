@@ -263,7 +263,9 @@ export default function HomeScreen() {
                 <LaneSectionLabel
                   title="いいねした交換"
                   sub="すべて見る"
-                  onSubPress={() => router.push('/wants')}
+                  onSubPress={() =>
+                    router.push({ pathname: '/list/[section]', params: { section: 'liked' } } as never)
+                  }
                 />
                 <ScrollView
                   horizontal
@@ -279,7 +281,9 @@ export default function HomeScreen() {
             <LaneSectionLabel
               title="あなたへのおすすめ"
               sub="すべて見る"
-              onSubPress={() => router.push('/(tabs)/search')}
+              onSubPress={() =>
+                router.push({ pathname: '/list/[section]', params: { section: 'recommended' } } as never)
+              }
             />
             <ScrollView
               horizontal
@@ -292,7 +296,10 @@ export default function HomeScreen() {
             {/* Lane 3: 新着の交換 — LargeCard (ラベル「新着」→「新着の交換」) */}
             <LaneSectionLabel
               title="新着の交換"
-              sub="更新順"
+              sub="すべて見る"
+              onSubPress={() =>
+                router.push({ pathname: '/list/[section]', params: { section: 'new' } } as never)
+              }
             />
             <ScrollView
               horizontal
@@ -305,7 +312,10 @@ export default function HomeScreen() {
             {/* Lane 4: 成立しやすい交換 — LargeCard (3.5a commit 3 で Small→Large 化) */}
             <LaneSectionLabel
               title="成立しやすい交換"
-              sub="初心者でも"
+              sub="すべて見る"
+              onSubPress={() =>
+                router.push({ pathname: '/list/[section]', params: { section: 'easy' } } as never)
+              }
             />
             {/* レーン全体の意味を伝える補足文 */}
             <Text style={styles.laneSubNote} numberOfLines={1}>

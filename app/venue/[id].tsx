@@ -944,7 +944,7 @@ export default function VenueHomeScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* 右下 FAB「この会場で出す」(β1 主 CTA、brand 色 #4B3BD6):
+      {/* 右下 FAB「この会場で出す」(主 CTA)。色レイヤー分離 (D): 操作 CTA は coral。
           会場詳細は (tabs) の外で通常 FAB が表示されないため本画面専用に配置。
           β1: 出品 form を開く動線はこの FAB のみに一本化 (inline 「＋」ボタンは廃止)。
           出品/Hold はフル画面ルート化したため overlay 競合はなく、FAB は常時表示。 */}
@@ -952,7 +952,7 @@ export default function VenueHomeScreen() {
         label="この会場で出す"
         onPress={handleOpenVenuePostForm}
         hasTabBar={false}
-        backgroundColor={VENUE_COLORS.brand}
+        backgroundColor={colors.primary}
         accessibilityLabel="この会場の当日供給板に出品"
       />
 
@@ -1450,12 +1450,13 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: VENUE_COLORS.hint,
   },
-  // β1 投稿カード主 CTA「Holdする」(brand 色 #4B3BD6)
+  // 投稿カード主 CTA「Holdする」。色レイヤー分離 (D): 操作系 CTA は coral (colors.primary)。
+  // 世界観 (背景/ヘッダー/会場識別) は VENUE_COLORS の紫を維持する。
   holdCta: {
     marginTop: spacing.xs,
     height: 44,
     borderRadius: radius.lg,
-    backgroundColor: VENUE_COLORS.brand,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },

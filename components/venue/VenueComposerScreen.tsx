@@ -12,6 +12,7 @@
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, spacing } from '@/constants/theme'
+import { LinearGradient } from 'expo-linear-gradient'
 import React from 'react'
 import {
   KeyboardAvoidingView,
@@ -21,6 +22,11 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+
+// 段階3-C: 会場フォームの上部を紫トーンに沈め「会場の世界の続き」であることを示す。
+// 深いステージ紫ではなく淡いトーン (入力=白の器/写真主役を邪魔しない)。
+const VENUE_FORM_GRADIENT = ['#EDE4FA', '#F6F0FA', colors.background] as const
+const VENUE_FORM_LOCATIONS = [0, 0.28, 0.6] as const
 
 type VenueComposerScreenProps = {
   title: string
@@ -42,8 +48,15 @@ export function VenueComposerScreen({
   const insets = useSafeAreaInsets()
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title={title} />
+    <View style={styles.root}>
+      {/* 段階3-C: 上部を淡い紫に沈める世界観レイヤー。下方は app 背景に馴染ませる。 */}
+      <LinearGradient
+        colors={[...VENUE_FORM_GRADIENT]}
+        locations={[...VENUE_FORM_LOCATIONS]}
+        style={StyleSheet.absoluteFill}
+      />
+      <SafeAreaView style={styles.safeTransparent} edges={['top']}>
+      <ScreenHeader title={title} transparent />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -73,12 +86,15 @@ export function VenueComposerScreen({
           />
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
+  root: { flex: 1, backgroundColor: colors.background },
+  safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   flex: { flex: 1 },
   scrollContent: {
     padding: spacing.base,

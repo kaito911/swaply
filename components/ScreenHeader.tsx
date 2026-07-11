@@ -20,12 +20,16 @@ export function ScreenHeader({
   onBack,
   rightActions,
   showBackButton = true,
+  transparent = false,
 }: {
   title: string
   subtitle?: string
   onBack?: () => void
   rightActions?: React.ReactNode
   showBackButton?: boolean
+  // 段階3-C: 背景グラデ (会場世界観) を透かすため、背景色・下線を消すオプション。
+  // 既定 false = 従来どおり不透明。会場フォーム等グラデ上に置く画面でのみ true。
+  transparent?: boolean
 }) {
   const handleBack = () => {
     if (onBack != null) {
@@ -38,7 +42,7 @@ export function ScreenHeader({
   }
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, transparent && styles.wrapTransparent]}>
       {showBackButton ? (
         <Pressable
           onPress={handleBack}
@@ -79,6 +83,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.background,
+  },
+  wrapTransparent: {
+    backgroundColor: 'transparent',
+    borderBottomWidth: 0,
   },
   btn: {
     width: 40,

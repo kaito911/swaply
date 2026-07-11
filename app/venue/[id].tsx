@@ -684,7 +684,7 @@ export default function VenueHomeScreen() {
           {/* ── 当日供給板 (β1 主画面) ── */}
           <View style={styles.supplyHeader}>
             <View style={styles.supplyHeaderText}>
-              <Text style={styles.supplyTitle}>いま出ている募集</Text>
+              <Text style={styles.supplyTitle}>いま会場に出ている交換</Text>
               <Text style={styles.supplySub}>
                 {loadingSupply
                   ? '読み込み中…'
@@ -771,9 +771,9 @@ export default function VenueHomeScreen() {
             </View>
           ) : supplyPosts.length === 0 ? (
             <View style={styles.emptyBox}>
-              <Text style={styles.emptyTitle}>まだ募集がありません</Text>
+              <Text style={styles.emptyTitle}>まだ交換が出ていません</Text>
               <Text style={styles.emptyBody}>
-                右下の「この会場で出す」から最初の出品を投稿できます。
+                右下の「この会場で出す」から、譲れる・探しているグッズを出してみましょう。
               </Text>
             </View>
           ) : filteredPosts.length === 0 ? (

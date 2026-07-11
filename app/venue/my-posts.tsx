@@ -152,7 +152,7 @@ export default function VenueMyPostsScreen() {
           <View style={styles.emptyBox}>
             <Text style={styles.emptyTitle}>まだ投稿がありません</Text>
             <Text style={styles.emptyBody}>
-              会場ホームの「＋ 会場で交換に出す」から投稿できます
+              会場ホームの「この会場で出す」から投稿できます
             </Text>
           </View>
         ) : (

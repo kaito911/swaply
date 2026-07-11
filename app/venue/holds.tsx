@@ -448,7 +448,7 @@ export default function VenueHoldsScreen() {
             {tab === 'received'
               ? 'あなたの会場投稿に届いたHoldがここに表示されます'
               : tab === 'sent'
-              ? '当日供給板からHold申請を送るとここに表示されます'
+              ? '会場で気になる相手にHoldを送ると、ここに表示されます'
               : '承認したHoldがここに集まります'}
           </Text>
         </View>

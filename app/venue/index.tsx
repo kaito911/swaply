@@ -142,10 +142,10 @@ export default function VenueListScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         {/* 説明バナー */}
         <View style={styles.banner}>
-          <Text style={styles.bannerTitle}>会場交換モード</Text>
+          <Text style={styles.bannerTitle}>会場で、いま交換</Text>
           <Text style={styles.bannerBody}>
-            ライブ会場でのダブりカード交換に特化したモード。{'\n'}
-            当日供給板・会場商品棚を中心に、会場での交換を探せます。{'\n'}
+            会場にいる人と、今すぐ交換。譲・求をすばやくマッチ、その場で手渡し。{'\n'}
+            いま会場に出ている「譲ります／探しています」から、交換相手を探せます。{'\n'}
             <Text style={styles.bannerAccent}>即手渡し・Venue Holdで交換を固定。</Text>{'\n'}
             その場で交換できる相手を見つけましょう。
           </Text>
@@ -175,7 +175,9 @@ export default function VenueListScreen() {
           </View>
         ) : venues.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>現在開催予定の会場はありません</Text>
+            <Text style={styles.emptyText}>
+              いま参加できる会場はありません。{'\n'}ライブやイベントの当日にまた覗いてみてください。
+            </Text>
           </View>
         ) : (
           venues.map((venue) => {

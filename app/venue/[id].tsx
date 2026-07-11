@@ -80,6 +80,10 @@ const VENUE_COLORS = {
 const VENUE_ROOM_GRADIENT = ['#3B1E6E', '#6B2E96', '#F6F0FA', '#F6F0FA'] as const
 const VENUE_ROOM_LOCATIONS = [0, 0.22, 0.55, 1] as const
 
+// 段階4/E: 入場アニメを「その会場に初めて入った時」だけ 1 回再生するための記録。
+// module スコープなので同一セッション中は保持、アプリ再起動でリセット (仕様許容)。
+const enteredVenues = new Set<string>()
+
 function getDisplayName(poster: VenueSupplyPost['poster']): string {
   if (poster == null) return 'ユーザー'
   return poster.handle ?? poster.display_name ?? 'ユーザー'
@@ -351,36 +355,31 @@ export default function VenueHomeScreen() {
     }
   }, [venueId, userId])
 
-  // PR-2.1: 「開催中」LIVE ピル内ドットの opacity パルス。
-  // 仕様: 1 → 0.4 → 1、duration 1200ms 全周期 (600ms ずつ)、Easing.inOut。
-  // status === 'open' のときのみ動作。useNativeDriver=true で軽量化。
-  const liveDotOpacity = useRef(new Animated.Value(1)).current
+  // 段階4/E: 会場入場アニメ。一覧→会場の中の「初回のみ」再生 (enteredVenues で判定)。
+  // ①背景グラデがフェードイン (暗い紫 → ステージ点灯)、②ステージ看板 (LIVE 含む) が
+  // 少し迫り上がりながら点灯。LIVE ドットの脈打ちは共有 LiveBadge が内部で常時再生。
+  // useNativeDriver=true、単発 timing のみで軽量。2 回目以降は最初から表示 (anim なし)。
+  const isFirstEntry = useRef(
+    venueId != null && !enteredVenues.has(venueId)
+  ).current
+  const entrance = useRef(new Animated.Value(isFirstEntry ? 0 : 1)).current
   useEffect(() => {
-    if (venue?.status !== 'open') {
-      liveDotOpacity.setValue(1)
-      return
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(liveDotOpacity, {
-          toValue: 0.4,
-          duration: 600,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(liveDotOpacity, {
-          toValue: 1,
-          duration: 600,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    )
-    loop.start()
-    return () => {
-      loop.stop()
-    }
-  }, [venue?.status, liveDotOpacity])
+    if (!isFirstEntry) return
+    if (venueId != null) enteredVenues.add(venueId)
+    const anim = Animated.timing(entrance, {
+      toValue: 1,
+      duration: 520,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    })
+    anim.start()
+    return () => anim.stop()
+  }, [isFirstEntry, entrance, venueId])
+  // 看板の迫り上がり (translateY 10 → 0)。opacity は entrance をそのまま使う。
+  const headerRise = entrance.interpolate({
+    inputRange: [0, 1],
+    outputRange: [10, 0],
+  })
 
   // PR-V2-fix3: 会場詳細の主要データを一括再取得するエントリ。
   //   useFocusEffect (画面入り直し) と「うまく読み込めませんでした」再試行ボタンの
@@ -443,12 +442,15 @@ export default function VenueHomeScreen() {
         inset が乗り「会場モード」タイトルと会場文脈ヘッダーの間に余分な余白が出る。
         edges={[]} で top safe area を画面側からは取らず、Stack header の高さに任せる。 */
     <View style={styles.root}>
-      {/* 段階3-B: 上=紫 (非日常) → 下=白 (供給板の床) の縦グラデ。世界観レイヤー。 */}
-      <LinearGradient
-        colors={[...VENUE_ROOM_GRADIENT]}
-        locations={[...VENUE_ROOM_LOCATIONS]}
-        style={StyleSheet.absoluteFill}
-      />
+      {/* 段階3-B: 上=紫 (非日常) → 下=白 (供給板の床) の縦グラデ。世界観レイヤー。
+          段階4/E: 初回入場時はこのグラデが暗い紫床からフェードイン (ステージ点灯)。 */}
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: entrance }]}>
+        <LinearGradient
+          colors={[...VENUE_ROOM_GRADIENT]}
+          locations={[...VENUE_ROOM_LOCATIONS]}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
       <SafeAreaView style={styles.safeTransparent} edges={[]}>
       {/* PR-2: 会場文脈ヘッダー — どの会場にいるかを示し、開催中状態と参加人数で
           現在地＋臨場感を与える。venue 取得失敗時は非表示 (フォールバック)。
@@ -457,7 +459,13 @@ export default function VenueHomeScreen() {
       {venue != null && (
         // 段階3-B: ステージ看板ヘッダー。紫グラデ床に会場名を大きく掲げ、
         // LIVE バッジ + 参加人数 + アバターで「いま人がいる会場」の臨場感を出す。
-        <View style={styles.venueContextHeader}>
+        // 段階4/E: 初回入場時は点灯しながら少し迫り上がる (opacity + translateY)。
+        <Animated.View
+          style={[
+            styles.venueContextHeader,
+            { opacity: entrance, transform: [{ translateY: headerRise }] },
+          ]}
+        >
           <Text style={styles.venueContextTitle} numberOfLines={2}>
             {venue.title}
           </Text>
@@ -481,7 +489,7 @@ export default function VenueHomeScreen() {
               <Text style={styles.venueContextHint}>終了</Text>
             )}
           </View>
-        </View>
+        </Animated.View>
       )}
 
       {/* 「届いたHold(n)」CTA: 当該 venue 限定の受信 pending Hold が 1 件以上ある時のみ表示 */}
@@ -1008,30 +1016,8 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 4,
   },
-  // PR-2.1: 「開催中」LIVE ピル。proto --green-tint:#E4F5EC を背景に。
-  // ※ #E4F5EC は VENUE_COLORS に未定義 (trustGreen tint 系)。本 PR スコープでは
-  //   VENUE_COLORS 定義変更不可のため inline で使用。後続 PR で
-  //   VENUE_COLORS.trustGreenTint として promote する想定。
-  venueContextLivePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#E4F5EC',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  venueContextLiveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: VENUE_COLORS.trustGreen,
-  },
-  venueContextLiveText: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.extrabold,
-    color: VENUE_COLORS.trustGreen,
-  },
+  // 段階3-B: 旧・緑「開催中」LIVE ピル (venueContextLivePill/Dot/Text) は
+  // 共有 LiveBadge (赤グラデ + 脈打ち) に置き換えて撤去。
   venueContextCheckin: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,

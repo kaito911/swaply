@@ -206,6 +206,10 @@ function RootNavigator() {
           options={{ headerShown: false }} // 画面内 ScreenHeader (すべて見るグリッド一覧)
         />
         <Stack.Screen
+          name="trade/history"
+          options={{ headerShown: false }} // 画面内 ScreenHeader (取引履歴一覧)
+        />
+        <Stack.Screen
           name="venue/post"
           options={{ headerShown: false }} // 画面内 ScreenHeader (VenueComposerScreen)
         />

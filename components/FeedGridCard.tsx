@@ -124,14 +124,14 @@ const styles = StyleSheet.create({
     right: spacing.xs,
   },
   body: {
-    padding: spacing.sm,
-    gap: 3,
+    padding: spacing.xs + 1,
+    gap: 2,
   },
-  // 【譲】【求】は同サイズ (対等)。give=primary text, want=secondary で色のみ差。
+  // 【譲】【求】は同サイズ (対等)。3列グリッド幅 (~110px) に収まるよう 12px。
   line: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: fontWeight.semibold,
     color: colors.textPrimary,
-    lineHeight: 18,
+    lineHeight: 16,
   },
 })

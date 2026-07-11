@@ -414,7 +414,7 @@ export default function MyPageScreen() {
             {historyOffers.length > 0 && (
               <Pressable
                 style={styles.seeAll}
-                onPress={() => router.push('/(tabs)/trades' as never)}
+                onPress={() => router.push('/trade/history' as never)}
                 hitSlop={6}
               >
                 <Text style={styles.seeAllText}>すべて見る</Text>

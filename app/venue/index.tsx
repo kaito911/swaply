@@ -12,11 +12,14 @@ import {
 import { Venue } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { LinearGradient } from 'expo-linear-gradient'
 import { router, useFocusEffect } from 'expo-router'
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,6 +27,80 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+
+// 会場一覧の背景グラデ (縦180deg・プロト実数値)。世界観=紫〜ピンク (非日常)。
+const VENUE_BG_GRADIENT = ['#2A1A5E', '#5B2A8C', '#8E3B9E', '#C0487E'] as const
+const VENUE_BG_LOCATIONS = [0, 0.3, 0.6, 1] as const
+
+// LIVE バッジ: 90deg #E11D48→#BE185D + 白脈打ちドット (opacity 1→0.4, 1.4s)。
+function LiveBadge() {
+  const dot = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(dot, { toValue: 0.4, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(dot, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [dot])
+  return (
+    <LinearGradient
+      colors={['#E11D48', '#BE185D']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 0 }}
+      style={liveStyles.badge}
+    >
+      <Animated.View style={[liveStyles.dot, { opacity: dot }]} />
+      <Text style={liveStyles.text}>LIVE 開催中</Text>
+    </LinearGradient>
+  )
+}
+
+// 参加者アバター: 実データがないため参加人数だけグラデ円で表現 (最大3、-9px 重ね)。
+const AVATAR_GRADIENTS: readonly [string, string][] = [
+  ['#F472B6', '#A855F7'],
+  ['#60A5FA', '#818CF8'],
+  ['#F472B6', '#A855F7'],
+]
+function AvatarStack({ count }: { count: number }) {
+  const n = Math.min(count, 3)
+  if (n <= 0) return null
+  return (
+    <View style={liveStyles.avatarRow}>
+      {Array.from({ length: n }).map((_, i) => (
+        <LinearGradient
+          key={i}
+          colors={AVATAR_GRADIENTS[i]}
+          style={[liveStyles.avatar, i > 0 && { marginLeft: -9 }]}
+        />
+      ))}
+    </View>
+  )
+}
+
+const liveStyles = StyleSheet.create({
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFFFFF' },
+  text: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
+  avatarRow: { flexDirection: 'row', alignItems: 'center' },
+  avatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+})
 
 function formatEventDate(dateStr: string): string {
   const today = new Date().toISOString().split('T')[0]
@@ -137,9 +214,19 @@ export default function VenueListScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title="会場" showBackButton={false} rightActions={<HeaderActions />} />
-      <ScrollView contentContainerStyle={styles.content}>
+    <View style={styles.root}>
+      {/* 背景グラデ (世界観=紫〜ピンク・非日常)。募集/カードは白の器で主役を保つ。 */}
+      <LinearGradient
+        colors={[...VENUE_BG_GRADIENT]}
+        locations={[...VENUE_BG_LOCATIONS]}
+        style={StyleSheet.absoluteFill}
+      />
+      <SafeAreaView style={styles.safeTransparent} edges={['top']}>
+        <ScreenHeader title="会場" showBackButton={false} rightActions={<HeaderActions />} />
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
         {/* 説明バナー */}
         <View style={styles.banner}>
           <Text style={styles.bannerTitle}>会場で、いま交換</Text>
@@ -195,9 +282,7 @@ export default function VenueListScreen() {
                   <View style={styles.venueMeta}>
                     <View style={styles.venueStatusRow}>
                       {isOpen ? (
-                        <View style={styles.statusBadgeOpen}>
-                          <Text style={styles.statusBadgeOpenText}>● 開催中</Text>
-                        </View>
+                        <LiveBadge />
                       ) : (
                         <View style={styles.statusBadgeUpcoming}>
                           <Text style={styles.statusBadgeUpcomingText}>
@@ -212,6 +297,7 @@ export default function VenueListScreen() {
 
                   {isOpen && (
                     <View style={styles.venueStats}>
+                      <AvatarStack count={count} />
                       <Text style={styles.venueStatNum}>{count}</Text>
                       <Text style={styles.venueStatLabel}>参加中</Text>
                     </View>
@@ -253,42 +339,47 @@ export default function VenueListScreen() {
           })
         )}
 
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
+  // 段階3-A: 背景グラデ用。root は最下層 (グラデ描画前の fallback)、SafeArea は透過。
+  root: { flex: 1, backgroundColor: '#2A1A5E' },
+  safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },
   sectionLabel: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.bold,
-    color: colors.textTertiary,
+    color: 'rgba(255,255,255,0.7)',
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
+  // 説明バナー: ガラス風 (rgba 半透明。expo-blur は不使用=判断1)。
   banner: {
-    backgroundColor: colors.backgroundMuted,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     borderRadius: radius.xl,
     padding: spacing.md,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.25)',
   },
   bannerTitle: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
-    color: colors.primary,
+    color: '#FFD6E8',
     marginBottom: spacing.xs,
   },
   bannerBody: {
     fontSize: fontSize.xs,
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.85)',
     lineHeight: 18,
   },
   bannerAccent: {
-    color: colors.primary,
+    color: '#FFD6E8',
     fontWeight: fontWeight.bold,
   },
   emptyBox: {
@@ -297,7 +388,9 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: fontSize.sm,
-    color: colors.textTertiary,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   // PR-V2: 通信失敗時の「うまく読み込めませんでした [再試行]」表示。
   //   会場詳細画面の inline 実装と同形 (共通 component 化は V3 cleanup タスクで予定)。
@@ -310,11 +403,11 @@ const styles = StyleSheet.create({
   errorTitle: {
     fontSize: fontSize.base,
     fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
+    color: '#FFFFFF',
   },
   errorBody: {
     fontSize: fontSize.sm,
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.85)',
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -335,22 +428,20 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.primary,
   },
+  // 白島: グラデ背景の上に浮く白パネル (募集/会場情報の器)。
   venueCard: {
-    backgroundColor: colors.backgroundCard,
-    borderRadius: radius.xl,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
     gap: spacing.sm,
   },
+  // 開催中カード: 白島 + ピンク影 (0 8px 30px rgba(180,40,120,0.4))。
   venueCardOpen: {
-    borderColor: colors.primary,
-    borderWidth: 1.5,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowColor: '#B42878',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 30,
+    elevation: 10,
   },
   venueTop: {
     flexDirection: 'row',
@@ -410,18 +501,29 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 6,
   },
   checkinButtonText: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
     color: '#FFFFFF',
   },
+  // 会場に入る (操作 CTA)。色レイヤー: 操作=coral。
   enterButton: {
     height: 44,
     borderRadius: radius.lg,
-    backgroundColor: '#059669',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 6,
   },
   enterButtonText: {
     fontSize: fontSize.sm,

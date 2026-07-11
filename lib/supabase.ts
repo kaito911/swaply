@@ -2484,11 +2484,14 @@ export async function fetchVenueCheckinCount(venueId: string): Promise<number> {
   // PR-V1: withVenueTimeout で 8s タイムアウト。timeout 時は VenueFetchTimeoutError を
   //   throw、呼出側が catch して checkinCountFailed flag をセット (「— 人参加中」表示)。
   //   PostgrestBuilder は thenable だが Promise<T> ではないため IIFE で包んで Promise 化。
+  // C安全系①(④): venue_checkins への直 count head (全行 SELECT を要する) を廃し、
+  //   SECURITY DEFINER RPC get_venue_checkin_count に差し替え。件数のみ返り user_id は
+  //   一切露出しない。SELECT policy を当事者限定に絞った後 (③) も RPC は RLS を跨ぐため
+  //   同じ件数を返す (絞り前後で不変)。インターフェース (Promise<number>・失敗 fallback) は据え置き。
   return withVenueTimeout('fetchVenueCheckinCount', (async () => {
-    const { count, error } = await supabase
-      .from('venue_checkins')
-      .select('*', { count: 'exact', head: true })
-      .eq('venue_id', venueId)
+    const { data, error } = await supabase.rpc('get_venue_checkin_count', {
+      p_venue_id: venueId,
+    })
 
     if (error) {
       // PR-V2-fix2: ネットワーク起因なら throw、DB エラーは従来通り 0 fallback。
@@ -2499,7 +2502,7 @@ export async function fetchVenueCheckinCount(venueId: string): Promise<number> {
       return 0
     }
 
-    return count ?? 0
+    return (data as number | null) ?? 0
   })())
 }
 

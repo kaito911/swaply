@@ -13,13 +13,12 @@ import { Venue } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { LinearGradient } from 'expo-linear-gradient'
+import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
 import { router, useFocusEffect } from 'expo-router'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  Animated,
-  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -31,76 +30,6 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 // 会場一覧の背景グラデ (縦180deg・プロト実数値)。世界観=紫〜ピンク (非日常)。
 const VENUE_BG_GRADIENT = ['#2A1A5E', '#5B2A8C', '#8E3B9E', '#C0487E'] as const
 const VENUE_BG_LOCATIONS = [0, 0.3, 0.6, 1] as const
-
-// LIVE バッジ: 90deg #E11D48→#BE185D + 白脈打ちドット (opacity 1→0.4, 1.4s)。
-function LiveBadge() {
-  const dot = useRef(new Animated.Value(1)).current
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(dot, { toValue: 0.4, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(dot, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ]),
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [dot])
-  return (
-    <LinearGradient
-      colors={['#E11D48', '#BE185D']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 0 }}
-      style={liveStyles.badge}
-    >
-      <Animated.View style={[liveStyles.dot, { opacity: dot }]} />
-      <Text style={liveStyles.text}>LIVE 開催中</Text>
-    </LinearGradient>
-  )
-}
-
-// 参加者アバター: 実データがないため参加人数だけグラデ円で表現 (最大3、-9px 重ね)。
-const AVATAR_GRADIENTS: readonly [string, string][] = [
-  ['#F472B6', '#A855F7'],
-  ['#60A5FA', '#818CF8'],
-  ['#F472B6', '#A855F7'],
-]
-function AvatarStack({ count }: { count: number }) {
-  const n = Math.min(count, 3)
-  if (n <= 0) return null
-  return (
-    <View style={liveStyles.avatarRow}>
-      {Array.from({ length: n }).map((_, i) => (
-        <LinearGradient
-          key={i}
-          colors={AVATAR_GRADIENTS[i]}
-          style={[liveStyles.avatar, i > 0 && { marginLeft: -9 }]}
-        />
-      ))}
-    </View>
-  )
-}
-
-const liveStyles = StyleSheet.create({
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FFFFFF' },
-  text: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
-  avatarRow: { flexDirection: 'row', alignItems: 'center' },
-  avatar: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-})
 
 function formatEventDate(dateStr: string): string {
   const today = new Date().toISOString().split('T')[0]
@@ -297,7 +226,7 @@ export default function VenueListScreen() {
 
                   {isOpen && (
                     <View style={styles.venueStats}>
-                      <AvatarStack count={count} />
+                      <VenueAvatarStack count={count} />
                       <Text style={styles.venueStatNum}>{count}</Text>
                       <Text style={styles.venueStatLabel}>参加中</Text>
                     </View>

@@ -31,6 +31,8 @@ import {
   getItemTypeById,
 } from '@/lib/master'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
+import { LinearGradient } from 'expo-linear-gradient'
+import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { MultiSelectAutocomplete } from '@/components/MultiSelectAutocomplete'
@@ -72,6 +74,11 @@ const VENUE_COLORS = {
   body: '#5A5D6B',
   hint: '#9CA0AD',
 } as const
+
+// 段階3-B: 会場の中の背景グラデ (上=非日常の紫 → 下=供給板の白)。プロト実数値。
+// 上部ステージ看板を紫に沈め、下の供給板 (白カード) を #F6F0FA の淡い床に乗せる。
+const VENUE_ROOM_GRADIENT = ['#3B1E6E', '#6B2E96', '#F6F0FA', '#F6F0FA'] as const
+const VENUE_ROOM_LOCATIONS = [0, 0.22, 0.55, 1] as const
 
 function getDisplayName(poster: VenueSupplyPost['poster']): string {
   if (poster == null) return 'ユーザー'
@@ -435,12 +442,21 @@ export default function VenueHomeScreen() {
         safe area を消化しているため、ここで edges={['top']} を付けると二重に
         inset が乗り「会場モード」タイトルと会場文脈ヘッダーの間に余分な余白が出る。
         edges={[]} で top safe area を画面側からは取らず、Stack header の高さに任せる。 */
-    <SafeAreaView style={styles.safe} edges={[]}>
+    <View style={styles.root}>
+      {/* 段階3-B: 上=紫 (非日常) → 下=白 (供給板の床) の縦グラデ。世界観レイヤー。 */}
+      <LinearGradient
+        colors={[...VENUE_ROOM_GRADIENT]}
+        locations={[...VENUE_ROOM_LOCATIONS]}
+        style={StyleSheet.absoluteFill}
+      />
+      <SafeAreaView style={styles.safeTransparent} edges={[]}>
       {/* PR-2: 会場文脈ヘッダー — どの会場にいるかを示し、開催中状態と参加人数で
           現在地＋臨場感を与える。venue 取得失敗時は非表示 (フォールバック)。
           ナビゲーションバーの Stack title ('会場モード' 固定) は本 PR では触らず、
           画面内ヘッダーで文脈を出す方針。 */}
       {venue != null && (
+        // 段階3-B: ステージ看板ヘッダー。紫グラデ床に会場名を大きく掲げ、
+        // LIVE バッジ + 参加人数 + アバターで「いま人がいる会場」の臨場感を出す。
         <View style={styles.venueContextHeader}>
           <Text style={styles.venueContextTitle} numberOfLines={2}>
             {venue.title}
@@ -451,21 +467,13 @@ export default function VenueHomeScreen() {
           <View style={styles.venueContextStatusRow}>
             {venue.status === 'open' ? (
               <>
-                {/* PR-2.1: 緑 LIVE ピル (薄緑背景 + 緑文字 + パルスドット)。
-                    背景 brand のベタ塗りは禁止 (主 CTA 専用)。緑は
-                    status='open' の本ピルのみで使用。 */}
-                <View style={styles.venueContextLivePill}>
-                  <Animated.View
-                    style={[
-                      styles.venueContextLiveDot,
-                      { opacity: liveDotOpacity },
-                    ]}
-                  />
-                  <Text style={styles.venueContextLiveText}>開催中</Text>
-                </View>
+                <LiveBadge />
                 <Text style={styles.venueContextCheckin}>
-                  · {checkinCountFailed ? '—' : checkinCount}人参加中
+                  {checkinCountFailed ? '—' : checkinCount}人がこの会場にいます
                 </Text>
+                {!checkinCountFailed && checkinCount > 0 && (
+                  <VenueAvatarStack count={checkinCount} size={24} />
+                )}
               </>
             ) : venue.status === 'upcoming' ? (
               <Text style={styles.venueContextHint}>まもなく開催</Text>
@@ -770,12 +778,21 @@ export default function VenueHomeScreen() {
               </Pressable>
             </View>
           ) : supplyPosts.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Text style={styles.emptyTitle}>まだ交換が出ていません</Text>
-              <Text style={styles.emptyBody}>
-                右下の「この会場で出す」から、譲れる・探しているグッズを出してみましょう。
+            // 段階3-B: 空状態を「トップバッターに！」の前向き演出に。
+            // 淡い紫→ピンクのグラデ + dashed 枠で「まだ誰も出していない = チャンス」を表現。
+            <LinearGradient
+              colors={['rgba(168,85,247,0.08)', 'rgba(244,114,182,0.08)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.emptyStage}
+            >
+              <Text style={styles.emptyStageEmoji}>🎤</Text>
+              <Text style={styles.emptyStageTitle}>トップバッターに！</Text>
+              <Text style={styles.emptyStageBody}>
+                まだ交換が出ていません。{'\n'}
+                最初のグッズを出して、この会場の口火を切りましょう。
               </Text>
-            </View>
+            </LinearGradient>
           ) : filteredPosts.length === 0 ? (
             /* PR-3.5: 絞り込み結果 0 件 (全件 0 件とは分岐を分ける) */
             <View style={styles.emptyBox}>
@@ -956,40 +973,40 @@ export default function VenueHomeScreen() {
         accessibilityLabel="この会場の当日供給板に出品"
       />
 
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
+  // 段階3-B: 背景グラデを敷くための root + 透明 SafeAreaView。
+  root: { flex: 1, backgroundColor: '#3B1E6E' },
+  safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   flex: { flex: 1 },
-  // PR-2.1: 会場文脈ヘッダー (画面内ヘッダー、最上部)
-  // 帯背景を brand tint、境界線を brand border に変えて「会場ゾーン」識別性を出す。
-  // brand ベタ塗りはしない (主 CTA 専用)、緑は status='open' のピルのみで使用。
+  // 段階3-B: ステージ看板ヘッダー。紫グラデ床の上に会場名を大きく掲げる。
+  // 帯背景は付けず (グラデに沈める)、文字は白系で臨場感を出す。
   venueContextHeader: {
     paddingHorizontal: spacing.base,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
-    backgroundColor: VENUE_COLORS.brandTint,
-    borderBottomWidth: 1,
-    borderBottomColor: VENUE_COLORS.brandBorder,
-    gap: 4,
+    paddingBottom: spacing.base,
+    gap: 6,
   },
   venueContextTitle: {
-    fontSize: fontSize.lg,
+    fontSize: fontSize['2xl'],
     fontWeight: fontWeight.extrabold,
-    color: VENUE_COLORS.headline,
-    lineHeight: 22,
+    color: '#FFFFFF',
+    lineHeight: 27,
   },
   venueContextSubtitle: {
     fontSize: fontSize.sm,
-    color: VENUE_COLORS.body,
+    color: 'rgba(255,255,255,0.82)',
   },
   venueContextStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
+    gap: 8,
+    marginTop: 4,
   },
   // PR-2.1: 「開催中」LIVE ピル。proto --green-tint:#E4F5EC を背景に。
   // ※ #E4F5EC は VENUE_COLORS に未定義 (trustGreen tint 系)。本 PR スコープでは
@@ -1018,11 +1035,11 @@ const styles = StyleSheet.create({
   venueContextCheckin: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,
-    color: VENUE_COLORS.body,
+    color: 'rgba(255,255,255,0.9)',
   },
   venueContextHint: {
     fontSize: fontSize.xs,
-    color: VENUE_COLORS.hint,
+    color: 'rgba(255,255,255,0.75)',
   },
   holdBanner: {
     flexDirection: 'row',
@@ -1100,6 +1117,29 @@ const styles = StyleSheet.create({
   },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },
   emptyBox: { alignItems: 'center', paddingVertical: 40, gap: spacing.sm },
+  // 段階3-B: 「トップバッターに！」空状態カード。
+  emptyStage: {
+    alignItems: 'center',
+    paddingVertical: 36,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(168,85,247,0.3)',
+  },
+  emptyStageEmoji: { fontSize: 34 },
+  emptyStageTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: '800',
+    color: '#7C2D92',
+  },
+  emptyStageBody: {
+    fontSize: fontSize.sm,
+    color: '#9B6BB3',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
   emptyTitle: {
     fontSize: fontSize.base,
     fontWeight: fontWeight.bold,

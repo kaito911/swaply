@@ -35,10 +35,11 @@ import {
   supabase,
 } from '@/lib/supabase'
 import { useAuthContext } from '@/providers/AuthProvider'
-import { router, useFocusEffect } from 'expo-router'
-import React, { useCallback, useMemo, useState } from 'react'
+import { router } from 'expo-router'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -53,6 +54,9 @@ export default function HomeScreen() {
   const [easyCards, setEasyCards] = useState<Card[]>([])
   const [newCards, setNewCards] = useState<Card[]>([])
   const [loading, setLoading] = useState(true)
+  // pull-to-refresh 専用フラグ。★loading とは厳密に分離: refresh 時は loading を触らない
+  // (loading=true にするとレーンが loadingBox に潰れ scroll offset が飛ぶため)。
+  const [refreshing, setRefreshing] = useState(false)
   // matcher / easyScore 経路の保持 (fetchEasyCards に local wants で渡す + Phase B 以降の
   // 参照余地として state ホールド)。getter は現状 JSX 非使用、eslint-disable で意図保持を明示。
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -63,12 +67,14 @@ export default function HomeScreen() {
   // (3.5a の pendingAdds/Archives ハック解消)。
   const [myLikedCardIds, setMyLikedCardIds] = useState<Set<string>>(new Set())
 
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true
-
-      const load = async () => {
-        setLoading(true)
+  // 案b: mount + user 変更で 1 回だけ load。focus 復帰では再 fetch しない (scroll/データ保持)。
+  //   mode='initial' → setLoading (全画面ローディング、初回)
+  //   mode='refresh' → setRefreshing (pull-to-refresh、レーン表示のまま上部スピナー)
+  //   ★refresh は loading を絶対に触らない (loading=true だとレーンが潰れ scroll offset が飛ぶ)。
+  const load = useCallback(
+    async (mode: 'initial' | 'refresh' = 'initial') => {
+      if (mode === 'refresh') setRefreshing(true)
+      else setLoading(true)
 
         // ①レーン: get_best_trade_candidate RPC（ログイン時のみ）
         let candidateData: BestTradeCandidateData | null = null
@@ -95,10 +101,8 @@ export default function HomeScreen() {
           user != null ? fetchMyBlockedUserIds() : Promise.resolve([]),
           user != null ? fetchMyLikedCardIds(user.id) : Promise.resolve(new Set<string>()),
         ])
-        if (isActive) {
-          setMyWants(wants)
-          setMyLikedCardIds(likedIds)
-        }
+        setMyWants(wants)
+        setMyLikedCardIds(likedIds)
 
         // TODO: 推薦RPC実装後に差し替え (Lane 2: 現行は自分以外のアクティブカードによる近似)
         const [rec, easy, newest] = await Promise.all([
@@ -109,7 +113,6 @@ export default function HomeScreen() {
           fetchNewCards(20, blockedUserIds),
         ])
 
-        if (!isActive) return
         const myId = user?.id ?? null
 
         setRecommendedCards(rec.filter((c) => c.owner_user_id !== myId))
@@ -148,16 +151,16 @@ export default function HomeScreen() {
         }
 
         setNewCards(newest.filter((c) => c.owner_user_id !== myId))
-        setLoading(false)
-      }
-
-      load()
-
-      return () => {
-        isActive = false
-      }
-    }, [user?.id])
+      if (mode === 'refresh') setRefreshing(false)
+      else setLoading(false)
+    },
+    [user?.id],
   )
+
+  // 初回 mount + user 変更でのみ実行 (focus 復帰では走らない = scroll/データ保持)。
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const handleSearchPress = () => {
     router.push('/(tabs)/search')
@@ -234,6 +237,14 @@ export default function HomeScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => load('refresh')}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         {/* Header */}
         <View style={styles.headerWrap}>

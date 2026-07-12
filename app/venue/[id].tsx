@@ -1163,9 +1163,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xs,
-    backgroundColor: colors.backgroundCard,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    // 暗地×光源: 白帯をやめ透明に (操作ボタン自身を白ガラス chip にする)。
+    backgroundColor: 'transparent',
   },
   quickLink: {
     // PR-7: 2 ボタンが画面幅を等分するよう flex:1。中身 (アイコン+テキスト+矢印) は
@@ -1178,7 +1177,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radius.md,
-    backgroundColor: colors.backgroundMuted,
+    // 暗地に馴染む白ガラス調 (半透明白 + 淡い白枠)。coral 文字/アイコンで操作性を担保。
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   quickLinkText: {
     // PR-7: テキストが長くてアイコン/矢印を押し出さないよう flexShrink:1 で潰せる

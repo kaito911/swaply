@@ -11,9 +11,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.swaply.jp",
-      "buildNumber": "12",
+      "buildNumber": "13",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "出品するグッズやカードの写真を撮影するためにカメラを使用します。",
+        "NSPhotoLibraryUsageDescription": "出品や求リストに使うグッズ・カードの写真を選ぶために写真ライブラリにアクセスします。"
       }
     },
     "android": {

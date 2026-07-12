@@ -5,6 +5,7 @@ import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import * as ImagePicker from 'expo-image-picker'
+import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
 import { router } from 'expo-router'
 import React, { useState } from 'react'
 import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native'
@@ -13,11 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 type Slot = 'front' | 'back'
 
 async function pickFromCamera(): Promise<string | null> {
-  const perm = await ImagePicker.requestCameraPermissionsAsync()
-  if (!perm.granted) {
-    Alert.alert('権限が必要です', 'カメラへのアクセスを許可してください。')
-    return null
-  }
+  if (!(await ensureMediaPermission('camera'))) return null
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes: ['images'],
     allowsEditing: true,
@@ -34,11 +31,7 @@ async function pickFromCamera(): Promise<string | null> {
 }
 
 async function pickFromLibrary(): Promise<string | null> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
-  if (!perm.granted) {
-    Alert.alert('権限が必要です', '写真ライブラリへのアクセスを許可してください。')
-    return null
-  }
+  if (!(await ensureMediaPermission('library'))) return null
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     allowsEditing: true,

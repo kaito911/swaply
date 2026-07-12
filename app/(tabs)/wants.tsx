@@ -24,6 +24,7 @@ import { colors } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
 import { Image } from 'expo-image'
 import * as ImagePicker from 'expo-image-picker'
+import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
 import { useFocusEffect } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
@@ -74,11 +75,7 @@ function buildAutoCardName(params: {
 // ─────────────────────────────────────────
 
 async function pickFromLibrary(): Promise<string | null> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
-  if (!perm.granted) {
-    Alert.alert('権限が必要です', '写真ライブラリへのアクセスを許可してください。')
-    return null
-  }
+  if (!(await ensureMediaPermission('library'))) return null
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     allowsEditing: true,
@@ -95,11 +92,7 @@ async function pickFromLibrary(): Promise<string | null> {
 }
 
 async function pickFromCamera(): Promise<string | null> {
-  const perm = await ImagePicker.requestCameraPermissionsAsync()
-  if (!perm.granted) {
-    Alert.alert('権限が必要です', 'カメラへのアクセスを許可してください。')
-    return null
-  }
+  if (!(await ensureMediaPermission('camera'))) return null
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes: ['images'],
     allowsEditing: true,

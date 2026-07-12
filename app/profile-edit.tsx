@@ -5,6 +5,7 @@ import { checkHandleAvailable, fetchProfile, updateProfile, supabase } from '@/l
 import { useAuthContext } from '@/providers/AuthProvider'
 import { router } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
+import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
 import { readAsStringAsync } from 'expo-file-system/legacy'
 import React, { useEffect, useState } from 'react'
 import {
@@ -85,11 +86,7 @@ export default function ProfileEditScreen() {
   const canSave = handle.trim().length >= 3 && !saving
 
   const handlePickAvatar = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
-    if (!perm.granted) {
-      Alert.alert('権限が必要です', '写真ライブラリへのアクセスを許可してください。')
-      return
-    }
+    if (!(await ensureMediaPermission('library'))) return
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,

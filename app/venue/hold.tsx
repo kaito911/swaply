@@ -21,6 +21,7 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme
 import { useAuthContext } from '@/providers/AuthProvider'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
+import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
@@ -90,11 +91,7 @@ export default function VenueHoldScreen() {
     }
 
   const handlePickImage = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
-    if (!perm.granted) {
-      Alert.alert('権限が必要です', '写真ライブラリへのアクセスを許可してください。')
-      return
-    }
+    if (!(await ensureMediaPermission('library'))) return
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,

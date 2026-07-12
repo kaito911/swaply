@@ -48,6 +48,7 @@ import {
 import type { WantedCard } from '@/lib/types'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
+import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
 import { router } from 'expo-router'
 import React, { useEffect, useState } from 'react'
 import {
@@ -189,11 +190,7 @@ function buildPointName(
 }
 
 async function pickFromCamera(): Promise<PickedImage | null> {
-  const perm = await ImagePicker.requestCameraPermissionsAsync()
-  if (!perm.granted) {
-    Alert.alert('権限が必要です', 'カメラへのアクセスを許可してください。')
-    return null
-  }
+  if (!(await ensureMediaPermission('camera'))) return null
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes: ['images'],
     quality: 0.8,
@@ -206,11 +203,7 @@ async function pickFromCamera(): Promise<PickedImage | null> {
 }
 
 async function pickFromLibrary(): Promise<PickedImage | null> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
-  if (!perm.granted) {
-    Alert.alert('権限が必要です', '写真ライブラリへのアクセスを許可してください。')
-    return null
-  }
+  if (!(await ensureMediaPermission('library'))) return null
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     quality: 0.8,

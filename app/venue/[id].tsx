@@ -517,8 +517,10 @@ export default function VenueHomeScreen() {
           style={StyleSheet.absoluteFill}
         />
       </Animated.View>
-      {/* #4 光の海 + #1 熱量脈打ち: 上部ステージ帯 (open のみ)。粒は静止、脈打ちは
-          新出品/Hold の瞬間だけ。写真/情報は下の白カードが担うので背面装飾に徹する。 */}
+      <SafeAreaView style={styles.safeTransparent} edges={[]}>
+      {/* #4 光の海 + #1 熱量脈打ち: SafeAreaView 内・看板ヒーローの背面に前面化 (open のみ)。
+          以前は SafeAreaView の外(背面)で content に隠れていたため中へ移動。粒は静止、
+          脈打ちは新出品/Hold の瞬間のみ。pointerEvents none で操作は透過。 */}
       {venue?.status === 'open' && (
         <View pointerEvents="none" style={styles.galaxyBand}>
           <HeatRing
@@ -530,7 +532,6 @@ export default function VenueHomeScreen() {
           <LightstickGalaxy count={checkinCount} selfPresent color={ignition.glowColor} />
         </View>
       )}
-      <SafeAreaView style={styles.safeTransparent} edges={[]}>
       {/* PR-2: 会場文脈ヘッダー — どの会場にいるかを示し、開催中状態と参加人数で
           現在地＋臨場感を与える。venue 取得失敗時は非表示 (フォールバック)。
           ナビゲーションバーの Stack title ('会場モード' 固定) は本 PR では触らず、
@@ -558,12 +559,7 @@ export default function VenueHomeScreen() {
             {venue.status === 'open' ? (
               <>
                 <LiveBadge />
-                {/* #2 点火ラベル: 0人でも「点火前」ポジティブ表示。 */}
-                <View style={[styles.ignitionChip, { borderColor: ignition.glowColor }]}>
-                  <Text style={[styles.ignitionChipText, { color: ignition.glowColor }]}>
-                    {ignition.label}
-                  </Text>
-                </View>
+                {/* #2 点火は色/強度(熱量リング)で表現。テキストラベルは K 指定で撤去。 */}
                 <Text style={styles.venueContextCheckin}>
                   {checkinCountFailed ? '—' : checkinCount}人がこの会場にいます
                 </Text>

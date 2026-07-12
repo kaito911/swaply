@@ -11,6 +11,8 @@ import React, { useEffect, useMemo, useRef } from 'react'
 import { Animated, StyleSheet, View } from 'react-native'
 
 const MAX_PARTICLES = 60
+// 0人でも「点火前の静かな灯り」を出すための最低アンビエント数 (少なさを武器にする思想)。
+const AMBIENT_MIN = 6
 
 interface LightstickGalaxyProps {
   /** 参加人数 (checkin count)。粒子数の基準。 */
@@ -31,7 +33,9 @@ function scatter(i: number): { fx: number; fy: number; op: number } {
 }
 
 export function LightstickGalaxy({ count, selfPresent = false, color = '#FF9F5C' }: LightstickGalaxyProps) {
-  const n = Math.max(0, Math.min(Math.floor(count), MAX_PARTICLES))
+  // 実人数。0/低でも最低 AMBIENT_MIN 個は「静かな灯り」として描く (点火前)。
+  const real = Math.max(0, Math.floor(count))
+  const n = Math.min(Math.max(real, AMBIENT_MIN), MAX_PARTICLES)
   const fade = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
@@ -57,6 +61,9 @@ export function LightstickGalaxy({ count, selfPresent = false, color = '#FF9F5C'
       {particles.map((p) => {
         const size = 5 + ((p.i * 3) % 4) // 5..8px、決定的
         const isSelf = selfPresent && p.i === 0
+        // 実人数を超えた分は「アンビエント(点火前の予兆)」として一段暗く。
+        const isAmbient = p.i >= real
+        const dotOpacity = isSelf ? 1 : p.op * (isAmbient ? 0.4 : 1)
         return (
           <View
             key={p.i}
@@ -68,7 +75,7 @@ export function LightstickGalaxy({ count, selfPresent = false, color = '#FF9F5C'
               height: isSelf ? size + 3 : size,
               borderRadius: 99,
               backgroundColor: isSelf ? 'transparent' : color,
-              opacity: isSelf ? 1 : p.op,
+              opacity: dotOpacity,
               borderWidth: isSelf ? 1.5 : 0,
               borderColor: '#FFFFFF',
               shadowColor: color,

@@ -282,15 +282,8 @@ export default function VenueListScreen() {
                   <View style={styles.venueMeta}>
                     <View style={styles.venueStatusRow}>
                       {isOpen ? (
-                        <>
-                          <LiveBadge />
-                          {/* #2 点火ラベル: 0人でも「点火前」ポジティブ表示。 */}
-                          <View style={[styles.ignitionChip, { borderColor: ig.glowColor }]}>
-                            <Text style={[styles.ignitionChipText, { color: ig.glowColor }]}>
-                              {ig.label}
-                            </Text>
-                          </View>
-                        </>
+                        // #2 点火は色/強度(熱量リング)で表現。テキストラベルは K 指定で撤去。
+                        <LiveBadge />
                       ) : (
                         <View style={styles.statusBadgeUpcoming}>
                           <Text style={styles.statusBadgeUpcomingText}>

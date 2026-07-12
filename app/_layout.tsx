@@ -176,8 +176,10 @@ function RootNavigator() {
           options={{
             headerShown: true,
             title: '会場モード',
-            headerStyle: { backgroundColor: colors.background },
-            headerTintColor: colors.textPrimary,
+            // 暗地×光源: 会場の中は暗地。Stack ナビヘッダーも暗地色 + 白文字/戻る矢印に。
+            //   ここが [id] 上部の白帯の実体 (画面は ScreenHeader 不使用のため tint は効かない)。
+            headerStyle: { backgroundColor: '#0D0F1C' },
+            headerTintColor: '#FFFFFF',
             headerShadowVisible: false,
           }}
         />

@@ -21,6 +21,7 @@ export function ScreenHeader({
   rightActions,
   showBackButton = true,
   transparent = false,
+  tint = 'default',
 }: {
   title: string
   subtitle?: string
@@ -30,7 +31,11 @@ export function ScreenHeader({
   // 段階3-C: 背景グラデ (会場世界観) を透かすため、背景色・下線を消すオプション。
   // 既定 false = 従来どおり不透明。会場フォーム等グラデ上に置く画面でのみ true。
   transparent?: boolean
+  // item1: 暗色グラデ上に置くとき用の明色 tint。既定 'default' = 従来どおり濃色文字。
+  //   'light' 時のみ title/subtitle/back を白系に (会場タブのみで使用、他画面は default)。
+  tint?: 'default' | 'light'
 }) {
+  const isLight = tint === 'light'
   const handleBack = () => {
     if (onBack != null) {
       onBack()
@@ -49,17 +54,27 @@ export function ScreenHeader({
           hitSlop={12}
           style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
         >
-          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
+          <Ionicons
+            name="chevron-back"
+            size={24}
+            color={isLight ? '#FFFFFF' : colors.textPrimary}
+          />
         </Pressable>
       ) : (
         <View style={styles.btn} />
       )}
       <View style={styles.titleWrap}>
-        <Text style={styles.title} numberOfLines={1}>
+        <Text
+          style={[styles.title, isLight && styles.titleLight]}
+          numberOfLines={1}
+        >
           {title}
         </Text>
         {subtitle != null && subtitle !== '' && (
-          <Text style={styles.subtitle} numberOfLines={1}>
+          <Text
+            style={[styles.subtitle, isLight && styles.subtitleLight]}
+            numberOfLines={1}
+          >
             {subtitle}
           </Text>
         )}
@@ -107,11 +122,14 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
   },
+  // item1: tint='light' 用 (暗色グラデ上)。
+  titleLight: { color: '#FFFFFF' },
   subtitle: {
     fontSize: 11,
     color: colors.textSecondary,
     marginTop: 1,
   },
+  subtitleLight: { color: 'rgba(255,255,255,0.85)' },
   rightWrap: {
     minHeight: 40,
     alignItems: 'center',

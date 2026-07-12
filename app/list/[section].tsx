@@ -275,7 +275,7 @@ export default function ListSectionScreen() {
               getKey={(w) => w.id}
               renderOption={(w) => <Text style={styles.msaMain}>{w.display_name_ja}</Text>}
               renderChip={(w) => <Text style={styles.msaChip}>{w.display_name_ja}</Text>}
-              placeholder="例: 名探偵コナン"
+              placeholder="例: TREASURE"
               minInputChars={2}
               softLimit={10}
             />

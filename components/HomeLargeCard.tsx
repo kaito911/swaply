@@ -38,11 +38,11 @@ function getDiffLabel(card: Card): { text: string; bg: string; textColor: string
 export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLike }: HomeLargeCardProps) {
   const diff = getDiffLabel(card)
 
-  // item5c: レーンのカード幅を「すべて見る」3 列グリッドと同密度に縮小し、
-  //   横 3 枚 + チラ見えにする (発見体験のレーン構造は維持)。content padding(base*2)
-  //   + 列間相当 gap(sm*2) を差し引いた 3 等分。marginRight 分わずかに溢れて 4 枚目が覗く。
+  // item3 (build12 fix): 3 列だと商品名が「TREASUR…」で潰れて識別不能だったため、
+  //   2.5 列相当に広げる (右端カードが半分見切れ、横スクロールを誘導)。
+  //   ※発見体験のレーン構造は維持。除数 2.5 は感覚値でビルド微調整前提 (2.3〜2.7)。
   const { width: screenW } = useWindowDimensions()
-  const cardWidth = Math.floor((screenW - spacing.base * 2 - spacing.sm * 2) / 3)
+  const cardWidth = Math.floor((screenW - spacing.base * 2 - spacing.sm) / 2.5)
 
   const handlePress = () => {
     router.push({ pathname: '/listing/[id]', params: { id: card.id } })
@@ -186,11 +186,12 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   // 【譲】【求】は同サイズ (対等・現場フォーマット)。2 行併記。
+  // item3: 2.5 列化で広がった幅で読みやすくするため fontSize 15→13 に縮小 (ビルドで 12 まで微調整可)。
   line: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: fontWeight.semibold,
     color: colors.textPrimary,
-    lineHeight: 20,
+    lineHeight: 18,
     marginTop: spacing.xs,
   },
 })

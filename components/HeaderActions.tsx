@@ -17,7 +17,11 @@ import React from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { useBadge } from '@/providers/BadgeProvider'
 
-export function HeaderActions() {
+export function HeaderActions({ color }: { color?: string } = {}) {
+  // item1: 暗色グラデ上 (会場タブ) 用にアイコン色を上書きできる additive prop。
+  //   未指定 = 従来どおり colors.textPrimary (他画面・他タブ不変)。
+  //   mypage active 時のアバター強調 (primary) は color 指定より優先しない = 従来維持。
+  const iconColor = color ?? colors.textPrimary
   // (tabs) などの route group は pathname から strip されるため、
   // mypage screen の pathname は '/mypage' 固定。href: null で hidden tab 化しても変化なし。
   const pathname = usePathname()
@@ -34,7 +38,7 @@ export function HeaderActions() {
         hitSlop={8}
         style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
       >
-        <Ionicons name="notifications-outline" size={22} color={colors.textPrimary} />
+        <Ionicons name="notifications-outline" size={22} color={iconColor} />
         {showBellBadge && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>
@@ -49,7 +53,7 @@ export function HeaderActions() {
         hitSlop={8}
         style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
       >
-        <Ionicons name="heart-outline" size={22} color={colors.textPrimary} />
+        <Ionicons name="heart-outline" size={22} color={iconColor} />
       </Pressable>
 
       <Pressable
@@ -61,7 +65,7 @@ export function HeaderActions() {
         <Ionicons
           name={isMypageActive ? 'person' : 'person-outline'}
           size={22}
-          color={isMypageActive ? colors.primary : colors.textPrimary}
+          color={isMypageActive ? colors.primary : iconColor}
         />
       </Pressable>
     </View>

@@ -14,6 +14,9 @@ import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 interface FeedGridCardProps {
   card: Card
+  /** 列数に応じた固定幅 (px)。指定時は flex:1 を使わず固定幅にし、
+   *  numColumns グリッドの最終行 1 枚で全幅化するのを防ぐ (item5)。 */
+  width?: number
   isOwn?: boolean
   isLiked?: boolean
   onToggleLike?: () => void
@@ -21,6 +24,7 @@ interface FeedGridCardProps {
 
 export function FeedGridCard({
   card,
+  width,
   isOwn = false,
   isLiked = false,
   onToggleLike,
@@ -30,7 +34,10 @@ export function FeedGridCard({
   }
 
   return (
-    <Pressable style={styles.card} onPress={handlePress}>
+    <Pressable
+      style={[styles.card, width != null ? { width } : styles.cardFlex]}
+      onPress={handlePress}
+    >
       <View style={styles.imageWrap}>
         {card.image_url ? (
           <Image
@@ -85,13 +92,14 @@ function FeedGridTitle({ card }: { card: Card }) {
 
 const styles = StyleSheet.create({
   card: {
-    flex: 1,
     borderRadius: radius.lg,
     backgroundColor: colors.backgroundCard,
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
   },
+  // width 未指定時の後方互換 (flex 等分)。list/[section] は width を渡すため通常未使用。
+  cardFlex: { flex: 1 },
   imageWrap: {
     width: '100%',
     aspectRatio: 1,

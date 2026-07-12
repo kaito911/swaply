@@ -30,8 +30,9 @@ import {
 import {
   getCharacterSuggestionsAcrossWorks,
   getItemTypeSuggestions,
+  getWorkSuggestions,
 } from '@/lib/master'
-import { Card, MasterCharacter, MasterItemType } from '@/lib/types'
+import { Card, MasterCharacter, MasterItemType, MasterWork } from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { Ionicons } from '@expo/vector-icons'
@@ -40,10 +41,13 @@ import React, { useCallback, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -76,11 +80,19 @@ export default function ListSectionScreen() {
   const params = useLocalSearchParams<{ section?: string }>()
   const section = isSection(params.section) ? params.section : null
 
+  // 3 列グリッドの固定カード幅: content padding(base*2) + 列間 gap(sm*2) を差し引いて 3 等分。
+  // FeedGridCard を固定幅にし、最終行 1 枚でも全幅化させない (numColumns の伸び対策)。
+  const { width: screenW } = useWindowDimensions()
+  const gridCardWidth = Math.floor(
+    (screenW - spacing.base * 2 - spacing.sm * 2) / 3,
+  )
+
   const [cards, setCards] = useState<Card[]>([])
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
-  // 絞込 (クライアント側): メンバー + 種類 の 2 軸。空なら全件。
+  // 絞込 (クライアント側): グループ + メンバー + 種類 の 3 軸。空なら全件。
+  const [filterWorks, setFilterWorks] = useState<MasterWork[]>([])
   const [filterChars, setFilterChars] = useState<MasterCharacter[]>([])
   const [filterItems, setFilterItems] = useState<MasterItemType[]>([])
   const [showFilter, setShowFilter] = useState(false)
@@ -147,21 +159,25 @@ export default function ListSectionScreen() {
     [userId, likedIds],
   )
 
-  // クライアント側フィルタ (card.characters[] / item_types[] と選択 master ID の overlap)。
+  // クライアント側フィルタ (card.work_id / characters[] / item_types[] と選択 master ID の overlap)。
+  // グループは card.work_id (単一) を直照合。DB 追加クエリなし、master cache 常駐前提。
   const displayCards = useMemo(() => {
+    const workIds = new Set(filterWorks.map((w) => w.id))
     const charIds = new Set(filterChars.map((c) => c.id))
     const itemIds = new Set(filterItems.map((t) => t.id))
-    if (charIds.size === 0 && itemIds.size === 0) return cards
+    if (workIds.size === 0 && charIds.size === 0 && itemIds.size === 0) return cards
     return cards.filter((c) => {
+      const okWork =
+        workIds.size === 0 || (c.work_id != null && workIds.has(c.work_id))
       const okChar =
         charIds.size === 0 || (c.characters ?? []).some((id) => charIds.has(id))
       const okItem =
         itemIds.size === 0 || (c.item_types ?? []).some((id) => itemIds.has(id))
-      return okChar && okItem
+      return okWork && okChar && okItem
     })
-  }, [cards, filterChars, filterItems])
+  }, [cards, filterWorks, filterChars, filterItems])
 
-  const filterCount = filterChars.length + filterItems.length
+  const filterCount = filterWorks.length + filterChars.length + filterItems.length
   const title = section != null ? SECTION_TITLES[section] : '一覧'
 
   return (
@@ -222,6 +238,7 @@ export default function ListSectionScreen() {
             return (
               <FeedGridCard
                 card={item}
+                width={gridCardWidth}
                 isOwn={isOwn}
                 isLiked={likedIds.has(item.id)}
                 onToggleLike={isOwn ? undefined : () => toggleLike(item.id)}
@@ -240,11 +257,32 @@ export default function ListSectionScreen() {
       >
         <View style={styles.sheetOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowFilter(false)} />
+          {/* item4: キーボード表示中も入力欄・適用ボタンが隠れないよう持ち上げる。 */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.sheetKav}
+          >
           <View style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>絞込検索</Text>
 
-            <Text style={styles.fieldLabel}>メンバー / キャラ</Text>
+            {/* item2: グループ (作品/シリーズ) を最上段に。card.work_id を直照合。 */}
+            <Text style={styles.fieldLabel}>グループ</Text>
+            <MultiSelectAutocomplete<MasterWork>
+              selected={filterWorks}
+              onChange={setFilterWorks}
+              fetchSuggestions={(input) => getWorkSuggestions(input)}
+              getKey={(w) => w.id}
+              renderOption={(w) => <Text style={styles.msaMain}>{w.display_name_ja}</Text>}
+              renderChip={(w) => <Text style={styles.msaChip}>{w.display_name_ja}</Text>}
+              placeholder="例: 名探偵コナン"
+              minInputChars={2}
+              softLimit={10}
+            />
+
+            <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>
+              メンバー / キャラ
+            </Text>
             <MultiSelectAutocomplete<MasterCharacter>
               selected={filterChars}
               onChange={setFilterChars}
@@ -274,6 +312,7 @@ export default function ListSectionScreen() {
               <Pressable
                 style={styles.clearButton}
                 onPress={() => {
+                  setFilterWorks([])
                   setFilterChars([])
                   setFilterItems([])
                 }}
@@ -287,6 +326,7 @@ export default function ListSectionScreen() {
               </Pressable>
             </View>
           </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </SafeAreaView>
@@ -346,6 +386,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },
+  sheetKav: { width: '100%' },
   sheetCard: {
     backgroundColor: colors.backgroundCard,
     borderTopLeftRadius: 20,
@@ -380,9 +421,11 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   msaChip: {
+    // item3: チップ背景は colors.primary (coral) 固定なので、ラベルは白でないと
+    //   coral-on-coral で不可視になる (MultiSelectAutocomplete.tsx:299)。
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,
-    color: colors.primary,
+    color: colors.textInverse,
   },
   sheetActions: {
     flexDirection: 'row',

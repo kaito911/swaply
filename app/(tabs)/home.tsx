@@ -356,7 +356,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   scrollContent: {
-    paddingBottom: 120,
+    // item6: タブバー (BottomTabBar position:relative=非オーバーレイ) 分の下駄 120 は過大。
+    //   FAB overlay と最下要素のブリージング分のみ残して圧縮。
+    paddingBottom: 40,
   },
   headerWrap: {
     paddingHorizontal: spacing.base,

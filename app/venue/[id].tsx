@@ -80,10 +80,6 @@ const VENUE_COLORS = {
 const VENUE_ROOM_GRADIENT = ['#3B1E6E', '#6B2E96', '#F6F0FA', '#F6F0FA'] as const
 const VENUE_ROOM_LOCATIONS = [0, 0.22, 0.55, 1] as const
 
-// 段階4/E: 入場アニメを「その会場に初めて入った時」だけ 1 回再生するための記録。
-// module スコープなので同一セッション中は保持、アプリ再起動でリセット (仕様許容)。
-const enteredVenues = new Set<string>()
-
 function getDisplayName(poster: VenueSupplyPost['poster']): string {
   if (poster == null) return 'ユーザー'
   return poster.handle ?? poster.display_name ?? 'ユーザー'
@@ -355,30 +351,30 @@ export default function VenueHomeScreen() {
     }
   }, [venueId, userId])
 
-  // 段階4/E: 会場入場アニメ。一覧→会場の中の「初回のみ」再生 (enteredVenues で判定)。
-  // ①背景グラデがフェードイン (暗い紫 → ステージ点灯)、②ステージ看板 (LIVE 含む) が
-  // 少し迫り上がりながら点灯。LIVE ドットの脈打ちは共有 LiveBadge が内部で常時再生。
-  // useNativeDriver=true、単発 timing のみで軽量。2 回目以降は最初から表示 (anim なし)。
-  const isFirstEntry = useRef(
-    venueId != null && !enteredVenues.has(venueId)
-  ).current
-  const entrance = useRef(new Animated.Value(isFirstEntry ? 0 : 1)).current
+  // item7 (旧 段階4/E): 会場入場アニメ。会場に入る度に「毎回」再生し、演出をやや強める
+  //   (初回だけだと地味で気づかれないため)。①背景グラデがフェードイン (暗い紫 →
+  //   ステージ点灯)、②ステージ看板 (LIVE 含む) が迫り上がりつつ微スケールで点灯。
+  //   過剰にならないよう ~0.78s / useNativeDriver=true でテンポと軽さを維持。
+  const entrance = useRef(new Animated.Value(0)).current
   useEffect(() => {
-    if (!isFirstEntry) return
-    if (venueId != null) enteredVenues.add(venueId)
+    entrance.setValue(0)
     const anim = Animated.timing(entrance, {
       toValue: 1,
-      duration: 520,
+      duration: 780,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     })
     anim.start()
     return () => anim.stop()
-  }, [isFirstEntry, entrance, venueId])
-  // 看板の迫り上がり (translateY 10 → 0)。opacity は entrance をそのまま使う。
+  }, [entrance, venueId])
+  // 看板の迫り上がり (translateY 18 → 0) + 微スケール (0.98 → 1)。opacity は entrance を使う。
   const headerRise = entrance.interpolate({
     inputRange: [0, 1],
-    outputRange: [10, 0],
+    outputRange: [18, 0],
+  })
+  const headerScale = entrance.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.98, 1],
   })
 
   // PR-V2-fix3: 会場詳細の主要データを一括再取得するエントリ。
@@ -463,7 +459,10 @@ export default function VenueHomeScreen() {
         <Animated.View
           style={[
             styles.venueContextHeader,
-            { opacity: entrance, transform: [{ translateY: headerRise }] },
+            {
+              opacity: entrance,
+              transform: [{ translateY: headerRise }, { scale: headerScale }],
+            },
           ]}
         >
           <Text style={styles.venueContextTitle} numberOfLines={2}>

@@ -156,14 +156,11 @@ export default function VenueListScreen() {
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-        {/* 説明バナー */}
+        {/* item1: 白箱をやめ紫グラデ直置きの白文字に (世界観に溶かす)。2 行に圧縮。 */}
         <View style={styles.banner}>
           <Text style={styles.bannerTitle}>会場で、いま交換</Text>
           <Text style={styles.bannerBody}>
-            会場にいる人と、今すぐ交換。譲・求をすばやくマッチ、その場で手渡し。{'\n'}
-            いま会場に出ている「譲ります／探しています」から、交換相手を探せます。{'\n'}
-            <Text style={styles.bannerAccent}>即手渡し・Venue Holdで交換を固定。</Text>{'\n'}
-            その場で交換できる相手を見つけましょう。
+            会場にいる人と、いま出ている譲・求からその場で今すぐ交換。
           </Text>
         </View>
 
@@ -288,28 +285,19 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
-  // 説明バナー: ガラス風 (rgba 半透明。expo-blur は不使用=判断1)。
+  // item1: 白箱/ガラスをやめ、紫グラデ直置きの白文字 (世界観に溶かす)。
   banner: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: radius.xl,
-    padding: spacing.md,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.25)',
+    gap: 2,
   },
   bannerTitle: {
-    fontSize: fontSize.sm,
+    fontSize: fontSize.md,
     fontWeight: fontWeight.bold,
     color: '#FFD6E8',
-    marginBottom: spacing.xs,
   },
   bannerBody: {
-    fontSize: fontSize.xs,
-    color: 'rgba(255,255,255,0.85)',
-    lineHeight: 18,
-  },
-  bannerAccent: {
-    color: '#FFD6E8',
-    fontWeight: fontWeight.bold,
+    fontSize: fontSize.sm,
+    color: 'rgba(255,255,255,0.9)',
+    lineHeight: 19,
   },
   emptyBox: {
     alignItems: 'center',

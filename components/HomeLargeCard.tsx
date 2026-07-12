@@ -11,7 +11,7 @@ import { Card, formatCardTitle } from '@/lib/types'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import React from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 
 interface HomeLargeCardProps {
@@ -38,12 +38,18 @@ function getDiffLabel(card: Card): { text: string; bg: string; textColor: string
 export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLike }: HomeLargeCardProps) {
   const diff = getDiffLabel(card)
 
+  // item5c: レーンのカード幅を「すべて見る」3 列グリッドと同密度に縮小し、
+  //   横 3 枚 + チラ見えにする (発見体験のレーン構造は維持)。content padding(base*2)
+  //   + 列間相当 gap(sm*2) を差し引いた 3 等分。marginRight 分わずかに溢れて 4 枚目が覗く。
+  const { width: screenW } = useWindowDimensions()
+  const cardWidth = Math.floor((screenW - spacing.base * 2 - spacing.sm * 2) / 3)
+
   const handlePress = () => {
     router.push({ pathname: '/listing/[id]', params: { id: card.id } })
   }
 
   return (
-    <Pressable style={styles.card} onPress={handlePress}>
+    <Pressable style={[styles.card, { width: cardWidth }]} onPress={handlePress}>
       {/* Image area */}
       <View style={styles.imageWrap}>
         {card.image_url ? (
@@ -113,11 +119,9 @@ function HomeLargeTitle({ card }: { card: Card }) {
   )
 }
 
-const CARD_WIDTH = 204
-
 const styles = StyleSheet.create({
   card: {
-    width: CARD_WIDTH,
+    // width は cardWidth (useWindowDimensions 由来) を inline 指定 (item5c)。
     borderRadius: radius.lg,
     backgroundColor: colors.backgroundCard,
     borderWidth: 1,
@@ -126,8 +130,10 @@ const styles = StyleSheet.create({
     marginRight: spacing.md,
   },
   imageWrap: {
+    // item5c: 幅可変に伴い固定 height:220 を廃止し aspectRatio 化 (物理写真の
+    //   顔切れ回避)。4:5 の縦長で人物/グッズを収めやすくする。実機で 4:5⇔1:1 を最終判断。
     width: '100%',
-    height: 220,
+    aspectRatio: 4 / 5,
     backgroundColor: colors.backgroundMuted,
   },
   imagePlaceholder: {

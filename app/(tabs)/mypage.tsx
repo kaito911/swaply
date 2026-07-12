@@ -540,7 +540,8 @@ export default function MyPageScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 120 },
+  // item6: ホームと同じく下駄 120 は過大。ブリージング分のみ残して圧縮。
+  scrollContent: { paddingBottom: 40 },
 
   // ── hero ──
   hero: {

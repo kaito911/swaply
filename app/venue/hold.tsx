@@ -405,8 +405,9 @@ const styles = StyleSheet.create({
   },
   msaOptionSub: { fontSize: fontSize.xs, color: colors.textTertiary },
   msaChipLabel: {
+    // item3: チップ背景 coral 固定のためラベルは白 (coral-on-coral 不可視を回避)。
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,
-    color: colors.primary,
+    color: colors.textInverse,
   },
 })

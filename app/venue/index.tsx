@@ -6,14 +6,21 @@ import {
   checkInVenue,
   fetchMyCheckin,
   fetchVenueCheckinCount,
+  fetchVenueSupplyCount,
   fetchVenues,
   isVenueLoadFailure,
 } from '@/lib/supabase'
+import { computeIgnition } from '@/lib/venueIgnition'
+import { HeatRing } from '@/components/venue/HeatRing'
+import { ShowtimeClock } from '@/components/venue/ShowtimeClock'
+import { useVenueSupplyRealtime } from '@/hooks/useVenueSupplyRealtime'
 import { Venue } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { LinearGradient } from 'expo-linear-gradient'
 import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
+import { StatusBar } from 'expo-status-bar'
+import * as Haptics from 'expo-haptics'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useState } from 'react'
 import {
@@ -27,9 +34,13 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-// 会場一覧の背景グラデ (縦180deg・プロト実数値)。世界観=紫〜ピンク (非日常)。
-const VENUE_BG_GRADIENT = ['#2A1A5E', '#5B2A8C', '#8E3B9E', '#C0487E'] as const
-const VENUE_BG_LOCATIONS = [0, 0.3, 0.6, 1] as const
+// 会場モード「暗地×光源」v1 (VENUE IGNITION)。紫版は docs/venue_color_backup.md。
+// 背景=ほぼ黒のディープネイビー (下地)。会場カードは白=「光の島」として暗地に浮かす。
+const VENUE_BG_GRADIENT = ['#0D0F1C', '#0A0B14', '#070810'] as const
+const VENUE_BG_LOCATIONS = [0, 0.5, 1] as const
+// 上部から漏れる光源 (coral→orange→透明の縦グラデを上 ~35% に重ねる)。radial/blur 不使用。
+const VENUE_GLOW_COLORS = ['rgba(255,107,139,0.20)', 'rgba(255,159,92,0.06)', 'transparent'] as const
+const VENUE_GLOW_LOCATIONS = [0, 0.22, 0.42] as const
 
 function formatEventDate(dateStr: string): string {
   const today = new Date().toISOString().split('T')[0]
@@ -47,8 +58,24 @@ export default function VenueListScreen() {
   const [venues, setVenues] = useState<Venue[]>([])
   const [loading, setLoading] = useState(true)
   const [checkinCounts, setCheckinCounts] = useState<Record<string, number>>({})
+  // 暗地×光源: 会場ごとの active 出品数 (熱量/点火の集計元)。RPC 未適用時は 0 でグレースフル。
+  const [supplyCounts, setSupplyCounts] = useState<Record<string, number>>({})
+  // 熱量リングの脈打ちトリガ (venue_id → カウンタ、Realtime で increment)。
+  const [pulseSignals, setPulseSignals] = useState<Record<string, number>>({})
   const [myCheckins, setMyCheckins] = useState<Record<string, boolean>>({})
   const [checkingIn, setCheckingIn] = useState<string | null>(null)
+
+  // 会場一覧 (全会場) の supply Realtime を購読し、新出品/Hold で該当会場を脈打たせる。
+  useVenueSupplyRealtime({
+    enabled: userId != null,
+    onInsert: (row) => {
+      setPulseSignals((prev) => ({ ...prev, [row.venue_id]: (prev[row.venue_id] ?? 0) + 1 }))
+      setSupplyCounts((prev) => ({ ...prev, [row.venue_id]: (prev[row.venue_id] ?? 0) + 1 }))
+    },
+    onHeld: (row) => {
+      setPulseSignals((prev) => ({ ...prev, [row.venue_id]: (prev[row.venue_id] ?? 0) + 1 }))
+    },
+  })
   // PR-V2: fetchVenues の VenueFetchTimeoutError を拾って失敗 UI を出すフラグ。
   //   初期 false、正常 fetch では false 維持。失敗時のみ true、再試行成功で false に戻す。
   //   付随 fetch (fetchVenueCheckinCount / fetchMyCheckin) の失敗は本フラグに影響させない
@@ -67,22 +94,26 @@ export default function VenueListScreen() {
 
       if (userId != null) {
         const counts: Record<string, number> = {}
+        const supplies: Record<string, number> = {}
         const checkins: Record<string, boolean> = {}
         // PR-V2: 付随 fetch の部分失敗を許容するため Promise.allSettled に変更。
-        //   個別 venue で fetchVenueCheckinCount / fetchMyCheckin が timeout しても
-        //   全体は止めず、その venue だけ count=0 / checkin=false の fallback で続行。
+        //   個別 venue で fetch が timeout しても全体は止めず、その venue だけ fallback で続行。
+        //   暗地×光源: supply count も併せて取得 (熱量/点火の集計元、失敗時 0)。
         await Promise.allSettled(
           venueList.map(async (v) => {
-            const [countResult, checkinResult] = await Promise.allSettled([
+            const [countResult, supplyResult, checkinResult] = await Promise.allSettled([
               fetchVenueCheckinCount(v.id),
+              fetchVenueSupplyCount(v.id),
               fetchMyCheckin(v.id, userId),
             ])
             counts[v.id] = countResult.status === 'fulfilled' ? countResult.value : 0
+            supplies[v.id] = supplyResult.status === 'fulfilled' ? supplyResult.value : 0
             checkins[v.id] =
               checkinResult.status === 'fulfilled' && checkinResult.value != null
           })
         )
         setCheckinCounts(counts)
+        setSupplyCounts(supplies)
         setMyCheckins(checkins)
       }
     } catch (err) {
@@ -128,30 +159,67 @@ export default function VenueListScreen() {
   }
 
   const handleEnter = (venue: Venue) => {
+    // 暗地×光源 v1: 入場の「点火」触覚。Light・瞬間のみ (頻繁な出入りでうざくならない強度)。
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     router.push({ pathname: '/venue/[id]', params: { id: venue.id } } as never)
   }
 
   if (loading) {
+    // item1: loading 中も白ヘッダーのフラッシュを避け、本体と同じ紫グラデ+透過ヘッダーに。
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <ScreenHeader title="会場" showBackButton={false} rightActions={<HeaderActions />} />
-        <View style={styles.centerBox}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
-      </SafeAreaView>
+      <View style={styles.root}>
+        <LinearGradient
+          colors={[...VENUE_BG_GRADIENT]}
+          locations={[...VENUE_BG_LOCATIONS]}
+          style={StyleSheet.absoluteFill}
+        />
+        <LinearGradient
+          colors={[...VENUE_GLOW_COLORS]}
+          locations={[...VENUE_GLOW_LOCATIONS]}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
+        <SafeAreaView style={styles.safeTransparent} edges={['top']}>
+          <StatusBar style="light" />
+          <ScreenHeader
+            title="会場"
+            showBackButton={false}
+            transparent
+            tint="light"
+            rightActions={<HeaderActions color="#FFFFFF" />}
+          />
+          <View style={styles.centerBox}>
+            <ActivityIndicator color="#FFFFFF" />
+          </View>
+        </SafeAreaView>
+      </View>
     )
   }
 
   return (
     <View style={styles.root}>
-      {/* 背景グラデ (世界観=紫〜ピンク・非日常)。募集/カードは白の器で主役を保つ。 */}
+      {/* 暗地×光源 v1: 暗地ベース + 上部 coral/orange 光源。白カードが光の島。 */}
       <LinearGradient
         colors={[...VENUE_BG_GRADIENT]}
         locations={[...VENUE_BG_LOCATIONS]}
         style={StyleSheet.absoluteFill}
       />
+      <LinearGradient
+        colors={[...VENUE_GLOW_COLORS]}
+        locations={[...VENUE_GLOW_LOCATIONS]}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
       <SafeAreaView style={styles.safeTransparent} edges={['top']}>
-        <ScreenHeader title="会場" showBackButton={false} rightActions={<HeaderActions />} />
+        {/* item1: 暗紫グラデ上端に溶かす。透過 + 明色 tint + 白アイコン (会場タブのみ)。 */}
+        <StatusBar style="light" />
+        <ScreenHeader
+          title="会場"
+          showBackButton={false}
+          transparent
+          tint="light"
+          rightActions={<HeaderActions color="#FFFFFF" />}
+        />
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
@@ -197,18 +265,32 @@ export default function VenueListScreen() {
             const isOpen = venue.status === 'open'
             const isCheckedIn = myCheckins[venue.id] ?? false
             const count = checkinCounts[venue.id] ?? 0
+            const supply = supplyCounts[venue.id] ?? 0
             const isCheckingIn = checkingIn === venue.id
+            // 暗地×光源: 点火状態 (checkin+supply)。open のみ熱量リング/点火ラベルを出す。
+            const ig = computeIgnition(count, supply)
+            const pulse = pulseSignals[venue.id] ?? 0
 
             return (
-              <View
-                key={venue.id}
-                style={[styles.venueCard, isOpen && styles.venueCardOpen]}
-              >
+              <View key={venue.id} style={styles.venueCardWrap}>
+                {/* #1 熱量リング (背面・open のみ)。平時静的グロー、Realtime で脈打つ。 */}
+                {isOpen && (
+                  <HeatRing intensity={ig.intensity} color={ig.glowColor} pulseSignal={pulse} radius={16} />
+                )}
+                <View style={[styles.venueCard, isOpen && styles.venueCardOpen]}>
                 <View style={styles.venueTop}>
                   <View style={styles.venueMeta}>
                     <View style={styles.venueStatusRow}>
                       {isOpen ? (
-                        <LiveBadge />
+                        <>
+                          <LiveBadge />
+                          {/* #2 点火ラベル: 0人でも「点火前」ポジティブ表示。 */}
+                          <View style={[styles.ignitionChip, { borderColor: ig.glowColor }]}>
+                            <Text style={[styles.ignitionChipText, { color: ig.glowColor }]}>
+                              {ig.label}
+                            </Text>
+                          </View>
+                        </>
                       ) : (
                         <View style={styles.statusBadgeUpcoming}>
                           <Text style={styles.statusBadgeUpcomingText}>
@@ -217,6 +299,8 @@ export default function VenueListScreen() {
                         </View>
                       )}
                     </View>
+                    {/* #5 開演前カウントダウン (upcoming + starts_at 有り時のみ表示)。 */}
+                    {!isOpen && <ShowtimeClock startsAt={venue.starts_at} />}
                     <Text style={styles.venueTitle}>{venue.title}</Text>
                     <Text style={styles.venueName}>{venue.venue_name}</Text>
                   </View>
@@ -260,6 +344,7 @@ export default function VenueListScreen() {
                     </Text>
                   </View>
                 )}
+                </View>
               </View>
             )
           })
@@ -273,8 +358,8 @@ export default function VenueListScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
-  // 段階3-A: 背景グラデ用。root は最下層 (グラデ描画前の fallback)、SafeArea は透過。
-  root: { flex: 1, backgroundColor: '#2A1A5E' },
+  // 暗地×光源 v1: root は暗地の下地 (グラデ描画前 fallback)、SafeArea は透過。
+  root: { flex: 1, backgroundColor: '#0D0F1C' },
   safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },
@@ -345,20 +430,35 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: colors.primary,
   },
-  // 白島: グラデ背景の上に浮く白パネル (募集/会場情報の器)。
+  // 暗地×光源: カードの背面に熱量リングを敷くための relative wrapper。
+  venueCardWrap: { position: 'relative' },
+  // 白島: 暗地の上に浮く白パネル (募集/会場情報の器)。写真/情報の視認性を担う。
   venueCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: spacing.md,
     gap: spacing.sm,
   },
-  // 開催中カード: 白島 + ピンク影 (0 8px 30px rgba(180,40,120,0.4))。
+  // #2 点火ラベルチップ (透明地 + 光源色の枠/文字)。
+  ignitionChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: 6,
+  },
+  ignitionChipText: {
+    fontSize: 10,
+    fontWeight: fontWeight.extrabold,
+    letterSpacing: 0.5,
+  },
+  // 暗地×光源 v1: 開催中の白島から coral 光が滲む (発光)。暗地でカードが「点灯」して見える。
   venueCardOpen: {
-    shadowColor: '#B42878',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 30,
-    elevation: 10,
+    shadowColor: '#FF6B8B',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.55,
+    shadowRadius: 26,
+    elevation: 12,
   },
   venueTop: {
     flexDirection: 'row',

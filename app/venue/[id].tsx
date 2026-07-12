@@ -22,6 +22,7 @@ import {
   fetchSupplyPosts,
   fetchVenue,
   fetchVenueCheckinCount,
+  fetchVenueSupplyCount,
   isVenueLoadFailure,
 } from '@/lib/supabase'
 import { computeTrustBadge, Venue, VenueSupplyPost } from '@/lib/types'
@@ -33,6 +34,12 @@ import {
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
 import { LinearGradient } from 'expo-linear-gradient'
 import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
+import { HeatRing } from '@/components/venue/HeatRing'
+import { LightstickGalaxy } from '@/components/venue/LightstickGalaxy'
+import { ShowtimeClock } from '@/components/venue/ShowtimeClock'
+import { JustDroppedBadge, formatDropAge } from '@/components/venue/JustDroppedBadge'
+import { computeIgnition } from '@/lib/venueIgnition'
+import { useVenueSupplyRealtime } from '@/hooks/useVenueSupplyRealtime'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { MultiSelectAutocomplete } from '@/components/MultiSelectAutocomplete'
@@ -75,10 +82,12 @@ const VENUE_COLORS = {
   hint: '#9CA0AD',
 } as const
 
-// 段階3-B: 会場の中の背景グラデ (上=非日常の紫 → 下=供給板の白)。プロト実数値。
-// 上部ステージ看板を紫に沈め、下の供給板 (白カード) を #F6F0FA の淡い床に乗せる。
-const VENUE_ROOM_GRADIENT = ['#3B1E6E', '#6B2E96', '#F6F0FA', '#F6F0FA'] as const
-const VENUE_ROOM_LOCATIONS = [0, 0.22, 0.55, 1] as const
+// 暗地×光源 v1 (VENUE IGNITION)。紫版は docs/venue_color_backup.md。
+// 会場一覧と統一: 暗地ベース + 上部 coral/orange 光源。供給板・カードは白=「光の島」。
+const VENUE_ROOM_GRADIENT = ['#0D0F1C', '#0A0B14', '#070810'] as const
+const VENUE_ROOM_LOCATIONS = [0, 0.5, 1] as const
+const VENUE_GLOW_COLORS = ['rgba(255,107,139,0.20)', 'rgba(255,159,92,0.06)', 'transparent'] as const
+const VENUE_GLOW_LOCATIONS = [0, 0.22, 0.42] as const
 
 function getDisplayName(poster: VenueSupplyPost['poster']): string {
   if (poster == null) return 'ユーザー'
@@ -125,6 +134,12 @@ export default function VenueHomeScreen() {
   // fetch 失敗時 (venue=null) はヘッダー非表示にフォールバック。
   const [venue, setVenue] = useState<Venue | null>(null)
   const [checkinCount, setCheckinCount] = useState(0)
+  // 暗地×光源: この会場の active 出品数 (熱量/点火の集計元)。RPC 未適用時 0 でグレースフル。
+  const [supplyCount, setSupplyCount] = useState(0)
+  // #1 熱量リング脈打ちトリガ (Realtime で increment)。
+  const [heatPulse, setHeatPulse] = useState(0)
+  // #3 EXCHANGE DROP: 直近に Realtime で滑り込んだ post id (数秒で自動解除)。
+  const [recentlyDropped, setRecentlyDropped] = useState<Set<string>>(new Set())
   // PR-V1: checkinCount だけ「取得失敗」と「0 件」を区別したい (venue 取得は成功し
   // 会場名は出ているのに、人数だけ取れなかった状態を「— 人参加中」で表現)。
   // venue 自体の失敗判定は既存の venue==null fallback で代用 (V2 で venueFailed 追加余地)。
@@ -266,6 +281,39 @@ export default function VenueHomeScreen() {
     }
   }, [venueId, userId])
 
+  // #1/#3 ライブ演出: この会場の supply Realtime を購読。
+  //   新出品(INSERT) → 熱量脈打ち + EXCHANGE DROP (recentlyDropped 印 + 供給板再取得で滑り込み)。
+  //   Hold成立(active→held UPDATE) → 熱量脈打ち。自分の出品は供給板では非表示なので印は付けない。
+  useVenueSupplyRealtime({
+    venueId,
+    enabled: venueId != null,
+    onInsert: (row) => {
+      setHeatPulse((p) => p + 1)
+      setSupplyCount((c) => c + 1)
+      if (row.user_id !== userId) {
+        setRecentlyDropped((prev) => {
+          const next = new Set(prev)
+          next.add(row.id)
+          return next
+        })
+        // 数秒で JUST DROPPED 印を解除 (瞬間だけの原則)。
+        setTimeout(() => {
+          setRecentlyDropped((prev) => {
+            const next = new Set(prev)
+            next.delete(row.id)
+            return next
+          })
+        }, 8000)
+      }
+      void loadSupply()
+    },
+    onHeld: () => {
+      setHeatPulse((p) => p + 1)
+      setSupplyCount((c) => Math.max(0, c - 1))
+      void loadSupply()
+    },
+  })
+
   const loadHoldCount = useCallback(async () => {
     if (venueId == null || userId == null) {
       setReceivedHoldCount(0)
@@ -292,10 +340,13 @@ export default function VenueHomeScreen() {
   //   checkinCount だけが失敗した場合は checkinCountFailed=true で UI 側が「— 人参加中」表示。
   const loadVenueContext = useCallback(async () => {
     if (venueId == null) return
-    const [vResult, cResult] = await Promise.allSettled([
+    const [vResult, cResult, sResult] = await Promise.allSettled([
       fetchVenue(venueId),
       fetchVenueCheckinCount(venueId),
+      fetchVenueSupplyCount(venueId),
     ])
+    // 暗地×光源: supply count は熱量/点火の集計元。失敗時は既存値維持 (熱量が控えめになるだけ)。
+    if (sResult.status === 'fulfilled') setSupplyCount(sResult.value)
 
     // venue: 成功 → setVenue / 失敗 (timeout 等) → null fallback (会場文脈ヘッダー非表示)。
     //   既存の null 判定 (venue != null && ...) と同じ挙動を維持。
@@ -376,6 +427,13 @@ export default function VenueHomeScreen() {
     inputRange: [0, 1],
     outputRange: [0.98, 1],
   })
+  // 暗地×光源 v1: 上部光源が「広がりながら灯る」= 入場時に scale 0.92 → 1。
+  const glowScale = entrance.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.92, 1],
+  })
+  // 点火状態 (checkin+supply)。看板の点火ラベル・熱量リング・光の海の色に使う。
+  const ignition = computeIgnition(checkinCount, supplyCount)
 
   // PR-V2-fix3: 会場詳細の主要データを一括再取得するエントリ。
   //   useFocusEffect (画面入り直し) と「うまく読み込めませんでした」再試行ボタンの
@@ -438,15 +496,40 @@ export default function VenueHomeScreen() {
         inset が乗り「会場モード」タイトルと会場文脈ヘッダーの間に余分な余白が出る。
         edges={[]} で top safe area を画面側からは取らず、Stack header の高さに任せる。 */
     <View style={styles.root}>
-      {/* 段階3-B: 上=紫 (非日常) → 下=白 (供給板の床) の縦グラデ。世界観レイヤー。
-          段階4/E: 初回入場時はこのグラデが暗い紫床からフェードイン (ステージ点灯)。 */}
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: entrance }]}>
+      {/* 暗地×光源 v1: 暗地ベースは即時表示 (会場という「空間」)。 */}
+      <LinearGradient
+        colors={[...VENUE_ROOM_GRADIENT]}
+        locations={[...VENUE_ROOM_LOCATIONS]}
+        style={StyleSheet.absoluteFill}
+      />
+      {/* 入場体験: 上部の光源が「広がりながら灯る」(entrance で opacity + scale)。
+          瞬間のみ (~0.7s)、以後静止。ChatGPT 原則「常時動かさない」を守る。 */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          { opacity: entrance, transform: [{ scale: glowScale }] },
+        ]}
+      >
         <LinearGradient
-          colors={[...VENUE_ROOM_GRADIENT]}
-          locations={[...VENUE_ROOM_LOCATIONS]}
+          colors={[...VENUE_GLOW_COLORS]}
+          locations={[...VENUE_GLOW_LOCATIONS]}
           style={StyleSheet.absoluteFill}
         />
       </Animated.View>
+      {/* #4 光の海 + #1 熱量脈打ち: 上部ステージ帯 (open のみ)。粒は静止、脈打ちは
+          新出品/Hold の瞬間だけ。写真/情報は下の白カードが担うので背面装飾に徹する。 */}
+      {venue?.status === 'open' && (
+        <View pointerEvents="none" style={styles.galaxyBand}>
+          <HeatRing
+            intensity={ignition.intensity}
+            color={ignition.glowColor}
+            pulseSignal={heatPulse}
+            radius={0}
+          />
+          <LightstickGalaxy count={checkinCount} selfPresent color={ignition.glowColor} />
+        </View>
+      )}
       <SafeAreaView style={styles.safeTransparent} edges={[]}>
       {/* PR-2: 会場文脈ヘッダー — どの会場にいるかを示し、開催中状態と参加人数で
           現在地＋臨場感を与える。venue 取得失敗時は非表示 (フォールバック)。
@@ -475,6 +558,12 @@ export default function VenueHomeScreen() {
             {venue.status === 'open' ? (
               <>
                 <LiveBadge />
+                {/* #2 点火ラベル: 0人でも「点火前」ポジティブ表示。 */}
+                <View style={[styles.ignitionChip, { borderColor: ignition.glowColor }]}>
+                  <Text style={[styles.ignitionChipText, { color: ignition.glowColor }]}>
+                    {ignition.label}
+                  </Text>
+                </View>
                 <Text style={styles.venueContextCheckin}>
                   {checkinCountFailed ? '—' : checkinCount}人がこの会場にいます
                 </Text>
@@ -488,6 +577,8 @@ export default function VenueHomeScreen() {
               <Text style={styles.venueContextHint}>終了</Text>
             )}
           </View>
+          {/* #5 開演前カウントダウン (upcoming + starts_at 有り時のみ)。 */}
+          {venue.status === 'upcoming' && <ShowtimeClock startsAt={venue.starts_at} />}
         </Animated.View>
       )}
 
@@ -760,7 +851,7 @@ export default function VenueHomeScreen() {
           {/* PR-V2: 状態優先順位 loadingSupply > supplyLoadFailed > 検索 0 件 > 全件 0 件 > データ表示。
               「読み込み失敗」と「本当に空」を分離し、失敗時は再試行可能にする。 */}
           {loadingSupply ? (
-            <ActivityIndicator color={VENUE_COLORS.brand} style={{ marginTop: 24 }} />
+            <ActivityIndicator color="#FF9F5C" style={{ marginTop: 24 }} />
           ) : supplyLoadFailed ? (
             <View style={styles.errorBox}>
               <Text style={styles.errorTitle}>うまく読み込めませんでした</Text>
@@ -788,7 +879,7 @@ export default function VenueHomeScreen() {
             // 段階3-B: 空状態を「トップバッターに！」の前向き演出に。
             // 淡い紫→ピンクのグラデ + dashed 枠で「まだ誰も出していない = チャンス」を表現。
             <LinearGradient
-              colors={['rgba(168,85,247,0.08)', 'rgba(244,114,182,0.08)']}
+              colors={['rgba(255,107,139,0.14)', 'rgba(255,159,92,0.08)']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.emptyStage}
@@ -852,6 +943,12 @@ export default function VenueHomeScreen() {
               }
               return (
                 <View key={post.id} style={styles.supplyCard}>
+                  {/* #3 EXCHANGE DROP: Realtime で滑り込んだ直後だけ「JUST DROPPED」。 */}
+                  {recentlyDropped.has(post.id) && (
+                    <View style={styles.dropBadgeWrap}>
+                      <JustDroppedBadge age={formatDropAge(post.created_at)} />
+                    </View>
+                  )}
                   {/* PR-6-b: 供給板リボンは「片方向一致のみ」に絞る。
                       双方向 (isMutual) は上部マッチレーン (PR-6) に集約済なのでここでは出さない。
                       hasOverlap && !isMutual = 片方向のみ → 薄ピンク「求と一致」固定。 */}
@@ -988,7 +1085,23 @@ export default function VenueHomeScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   // 段階3-B: 背景グラデを敷くための root + 透明 SafeAreaView。
-  root: { flex: 1, backgroundColor: '#3B1E6E' },
+  root: { flex: 1, backgroundColor: '#0D0F1C' },
+  // #4 光の海 + #1 熱量リングを敷く上部ステージ帯 (画面上部 ~42%、背面装飾)。
+  galaxyBand: { position: 'absolute', top: 0, left: 0, right: 0, height: '42%' },
+  // #2 点火ラベルチップ (透明地 + 光源色の枠/文字)。
+  ignitionChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  ignitionChipText: {
+    fontSize: 10,
+    fontWeight: fontWeight.extrabold,
+    letterSpacing: 0.5,
+  },
+  // #3 JUST DROPPED バッジのカード内右上配置。
+  dropBadgeWrap: { position: 'absolute', top: 6, right: 6, zIndex: 5 },
   safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   flex: { flex: 1 },
   // 段階3-B: ステージ看板ヘッダー。紫グラデ床の上に会場名を大きく掲げる。
@@ -1111,28 +1224,29 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: 'rgba(168,85,247,0.3)',
+    // 暗地×光源 v1: coral の点線枠 (暗地で「これから灯る枠」として見せる)。
+    borderColor: 'rgba(255,107,139,0.4)',
   },
   emptyStageEmoji: { fontSize: 34 },
   emptyStageTitle: {
     fontSize: fontSize.lg,
     fontWeight: '800',
-    color: '#7C2D92',
+    color: '#FFB3C4',
   },
   emptyStageBody: {
     fontSize: fontSize.sm,
-    color: '#9B6BB3',
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
     lineHeight: 20,
   },
   emptyTitle: {
     fontSize: fontSize.base,
     fontWeight: fontWeight.bold,
-    color: VENUE_COLORS.headline,
+    color: '#FFFFFF',
   },
   emptyBody: {
     fontSize: fontSize.sm,
-    color: VENUE_COLORS.body,
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -1147,11 +1261,11 @@ const styles = StyleSheet.create({
   errorTitle: {
     fontSize: fontSize.base,
     fontWeight: fontWeight.bold,
-    color: VENUE_COLORS.headline,
+    color: '#FFFFFF',
   },
   errorBody: {
     fontSize: fontSize.sm,
-    color: VENUE_COLORS.body,
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -1272,9 +1386,9 @@ const styles = StyleSheet.create({
   supplyTitle: {
     fontSize: fontSize.lg,
     fontWeight: fontWeight.extrabold,
-    color: VENUE_COLORS.headline,
+    color: '#FFFFFF',
   },
-  supplySub: { fontSize: fontSize.xs, color: VENUE_COLORS.hint },
+  supplySub: { fontSize: fontSize.xs, color: 'rgba(255,255,255,0.6)' },
   // PR-3.5: 会場内検索バー (供給板タイトル直下に配置)。
   // 横並びレイアウト: MSA (flex:1) + クリアボタン (テキストボタン、右端、選択中のみ表示)。
   searchBar: {

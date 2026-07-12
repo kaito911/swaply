@@ -2506,6 +2506,27 @@ export async function fetchVenueCheckinCount(venueId: string): Promise<number> {
   })())
 }
 
+// 会場の active 出品数を SECURITY DEFINER RPC で取得 (熱量/点火の集計元)。
+// get_venue_checkin_count と同型: 件数のみ返り user_id 非露出、RLS を跨ぐ。
+// グレースフル劣化: RPC 未適用/失敗時は 0 を返す (熱量リングは控えめ表示になるだけ)。
+export async function fetchVenueSupplyCount(venueId: string): Promise<number> {
+  return withVenueTimeout('fetchVenueSupplyCount', (async () => {
+    const { data, error } = await supabase.rpc('get_venue_supply_count', {
+      p_venue_id: venueId,
+    })
+
+    if (error) {
+      if (isNetworkErrorObject(error)) {
+        throw new VenueNetworkError('fetchVenueSupplyCount', error)
+      }
+      console.error('[fetchVenueSupplyCount]', error)
+      return 0
+    }
+
+    return (data as number | null) ?? 0
+  })())
+}
+
 /**
  * 当日掲示板 (Live Supply Board) に表示する supply_post を取得。
  *

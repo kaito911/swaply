@@ -628,9 +628,16 @@ export function formatCardTitle(
   const wantParts = (card.card_wanted_links ?? [])
     .map((l) => l.wanted_card)
     .filter((w): w is NonNullable<typeof w> => w != null)
-    .map((w) =>
-      [w.group_name, w.member_name, w.card_name].filter((s) => s != null && s !== '').join(' '),
-    )
+    .map((w) => {
+      // ★二重連結バグ修正: card_name は求フォームの buildAutoCardName で既に
+      //   「group_name member_name item_type series」を連結した合成文字列。
+      //   ここで group/member を再度前置すると「TREASURE ハルト TREASURE ハルト…」と
+      //   二重になる。よって card_name を単独表示する (合成源を 1 つに一本化)。
+      const name = (w.card_name ?? '').trim()
+      if (name !== '') return name
+      // card_name が空の稀ケースのみ group/member から最低限を組む (フォールバック)。
+      return [w.group_name, w.member_name].filter((s) => s != null && s !== '').join(' ')
+    })
     .filter((s) => s !== '')
 
   const want = wantParts.length > 0 ? '【求】' + wantParts.join('・') : null

@@ -8,10 +8,16 @@
     "scheme": "swaply",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/c4601014-cc59-4ecb-9df8-f30596856c26"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.swaply.jp",
-      "buildNumber": "14",
+      "buildNumber": "15",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "出品するグッズやカードの写真を撮影するためにカメラを使用します。",

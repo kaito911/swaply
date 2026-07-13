@@ -5,11 +5,12 @@ import { AuthProvider, useAuthContext } from '@/providers/AuthProvider'
 import { BadgeProvider } from '@/providers/BadgeProvider'
 import { MasterCacheProvider } from '@/providers/MasterCacheProvider'
 import { ToastProvider } from '@/providers/ToastProvider'
-import { Stack } from 'expo-router'
+import { Ionicons } from '@expo/vector-icons'
+import { router, Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import OnboardingScreen, { ONBOARDING_DONE_KEY } from './onboarding'
 import React, { useEffect, useState } from 'react'
-import { ActivityIndicator, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 function RootNavigator() {
@@ -181,6 +182,17 @@ function RootNavigator() {
             headerStyle: { backgroundColor: '#0D0F1C' },
             headerTintColor: '#FFFFFF',
             headerShadowVisible: false,
+            // 既定の戻るは丸背景が付き暗地で浮くため、丸なしの白「＜」だけに置換。
+            headerLeft: () => (
+              <Pressable
+                onPress={() => router.back()}
+                hitSlop={12}
+                style={{ paddingRight: 8, paddingVertical: 4 }}
+                accessibilityLabel="戻る"
+              >
+                <Ionicons name="chevron-back" size={26} color="#FFFFFF" />
+              </Pressable>
+            ),
           }}
         />
         <Stack.Screen

@@ -9,6 +9,7 @@
 // ★自分の在席: 自分の粒だけ白い輪郭で示す。
 import React, { useEffect, useMemo, useRef } from 'react'
 import { Animated, StyleSheet, View } from 'react-native'
+import { VENUE_LIGHT } from '@/lib/venueIgnition'
 
 const MAX_PARTICLES = 60
 // 0人でも「点火前の静かな灯り」を出すための最低アンビエント数 (少なさを武器にする思想)。
@@ -32,7 +33,7 @@ function scatter(i: number): { fx: number; fy: number; op: number } {
   return { fx, fy, op }
 }
 
-export function LightstickGalaxy({ count, selfPresent = false, color = '#FF9F5C' }: LightstickGalaxyProps) {
+export function LightstickGalaxy({ count, selfPresent = false, color = VENUE_LIGHT.orange }: LightstickGalaxyProps) {
   // 実人数。0/低でも最低 AMBIENT_MIN 個は「静かな灯り」として描く (点火前)。
   const real = Math.max(0, Math.floor(count))
   const n = Math.min(Math.max(real, AMBIENT_MIN), MAX_PARTICLES)

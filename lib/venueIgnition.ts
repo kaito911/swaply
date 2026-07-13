@@ -23,6 +23,16 @@ export interface IgnitionState {
   tagline: string
 }
 
+// Batch D: 会場モード「暗地×光源」の coral/orange 光源色の正規トークン。
+// 会場系のハードコード hex(#FF6B8B/#FF4D6D/#FF9F5C)をここに巻き取り一元化する
+// (値は現行と同一=見た目不変。色の意味変更ではなくトークン統一)。
+// ※ VENUE_COLORS(紫版由来 brand 等)は挙動/見た目を変えないため本 Batch では触らない。
+export const VENUE_LIGHT = {
+  coral: '#FF6B8B',
+  coralDeep: '#FF4D6D',
+  orange: '#FF9F5C',
+} as const
+
 // 閾値: score 下限 → レベル。上から評価。
 // 現行 (β1 初期・保守的): SPARK 0-1 / GLOW 2-4 / HEAT 5-9 / ROAR 10-19 / IGNITED 20+
 const LADDER: {
@@ -33,10 +43,10 @@ const LADDER: {
   label: string
   tagline: string
 }[] = [
-  { min: 20, level: 'IGNITED', glowColor: '#FF4D6D', intensity: 1.0, label: '点火', tagline: '会場が燃えています' },
-  { min: 10, level: 'ROAR', glowColor: '#FF6B8B', intensity: 0.82, label: '沸騰', tagline: '盛り上がっています' },
+  { min: 20, level: 'IGNITED', glowColor: VENUE_LIGHT.coralDeep, intensity: 1.0, label: '点火', tagline: '会場が燃えています' },
+  { min: 10, level: 'ROAR', glowColor: VENUE_LIGHT.coral, intensity: 0.82, label: '沸騰', tagline: '盛り上がっています' },
   { min: 5, level: 'HEAT', glowColor: '#FF8A6B', intensity: 0.62, label: '熱気', tagline: '交換が動いています' },
-  { min: 2, level: 'GLOW', glowColor: '#FF9F5C', intensity: 0.44, label: '点灯', tagline: '灯りはじめました' },
+  { min: 2, level: 'GLOW', glowColor: VENUE_LIGHT.orange, intensity: 0.44, label: '点灯', tagline: '灯りはじめました' },
   { min: 0, level: 'SPARK', glowColor: '#FFB27A', intensity: 0.26, label: '点火前', tagline: '最初の火種を待っています' },
 ]
 

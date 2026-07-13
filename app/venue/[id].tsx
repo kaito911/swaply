@@ -39,7 +39,7 @@ import { HeatRing } from '@/components/venue/HeatRing'
 import { LightstickGalaxy } from '@/components/venue/LightstickGalaxy'
 import { ShowtimeClock } from '@/components/venue/ShowtimeClock'
 import { JustDroppedBadge, formatDropAge } from '@/components/venue/JustDroppedBadge'
-import { computeIgnition } from '@/lib/venueIgnition'
+import { computeIgnition, VENUE_LIGHT } from '@/lib/venueIgnition'
 import { useVenueSupplyRealtime } from '@/hooks/useVenueSupplyRealtime'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
@@ -531,7 +531,7 @@ export default function VenueHomeScreen() {
             radius={0}
           />
           {/* #4 光の海: 固定密度(44)・固定色のペンライトの海 (人数連動廃止・世界観演出)。 */}
-          <LightstickGalaxy count={44} color="#FF9F5C" />
+          <LightstickGalaxy count={44} color={VENUE_LIGHT.orange} />
         </View>
       )}
       <SafeAreaView style={styles.safeTransparent} edges={['top']}>
@@ -868,7 +868,7 @@ export default function VenueHomeScreen() {
           {/* PR-V2: 状態優先順位 loadingSupply > supplyLoadFailed > 検索 0 件 > 全件 0 件 > データ表示。
               「読み込み失敗」と「本当に空」を分離し、失敗時は再試行可能にする。 */}
           {loadingSupply ? (
-            <ActivityIndicator color="#FF9F5C" style={{ marginTop: 24 }} />
+            <ActivityIndicator color={VENUE_LIGHT.orange} style={{ marginTop: 24 }} />
           ) : supplyLoadFailed ? (
             <View style={styles.errorBox}>
               <Text style={styles.errorTitle}>うまく読み込めませんでした</Text>

@@ -9,7 +9,7 @@ import {
   fetchVenues,
   isVenueLoadFailure,
 } from '@/lib/supabase'
-import { computeIgnition } from '@/lib/venueIgnition'
+import { computeIgnition, VENUE_LIGHT } from '@/lib/venueIgnition'
 import { HeatRing } from '@/components/venue/HeatRing'
 import { LightstickGalaxy } from '@/components/venue/LightstickGalaxy'
 import { ShowtimeClock } from '@/components/venue/ShowtimeClock'
@@ -323,7 +323,7 @@ export default function VenueListScreen() {
       {/* commit①: 光の海を会場一覧の下端にも (会場[id]と同形・下地レイヤ)。
           SafeAreaView(hero/カード/density) の前 = 背面。カード・テキストに光を重ねない。 */}
       <View pointerEvents="none" style={styles.galaxyBand}>
-        <LightstickGalaxy count={44} color="#FF9F5C" />
+        <LightstickGalaxy count={44} color={VENUE_LIGHT.orange} />
       </View>
       <SafeAreaView style={styles.safeTransparent} edges={['top']}>
         <StatusBar style="light" />
@@ -481,7 +481,7 @@ const styles = StyleSheet.create({
   heroSub: { fontSize: fontSize.sm, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
   // H2 集約density 行。
   densityRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  signalDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF6B8B' },
+  signalDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: VENUE_LIGHT.coral },
   densityText: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
@@ -579,7 +579,7 @@ const styles = StyleSheet.create({
   },
   // 暗地×光源 v1: 開催中の白島から coral 光が滲む (発光)。暗地でカードが「点灯」して見える。
   venueCardOpen: {
-    shadowColor: '#FF6B8B',
+    shadowColor: VENUE_LIGHT.coral,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.55,
     shadowRadius: 26,

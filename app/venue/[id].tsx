@@ -1103,14 +1103,16 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   // 段階3-B: 背景グラデを敷くための root + 透明 SafeAreaView。
   root: { flex: 1, backgroundColor: '#0D0F1C' },
-  // 画面内ヘッダー (iOS26 auto-glass 回避で OS ヘッダーを廃し自前描画)。暗地 + 白＜/白タイトル。
+  // 画面内ヘッダー (iOS26 auto-glass 回避で OS ヘッダーを廃し自前描画)。
+  // ★背景はベタ塗りせず透過にする: 上の SafeArea inset(透過=暗地グラデ)との
+  //   トーン差の継ぎ目線を消し、暗地グラデ直置きで上端まで連続させる。白＜/白タイトルのみ。
   inHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     height: 44,
     paddingHorizontal: spacing.sm,
-    backgroundColor: '#0D0F1C',
+    backgroundColor: 'transparent',
   },
   inHeaderSide: {
     width: 40,

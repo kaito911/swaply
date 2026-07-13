@@ -182,7 +182,11 @@ function RootNavigator() {
             headerStyle: { backgroundColor: '#0D0F1C' },
             headerTintColor: '#FFFFFF',
             headerShadowVisible: false,
-            // 既定の戻るは丸背景が付き暗地で浮くため、丸なしの白「＜」だけに置換。
+            // ★丸の正体: native-stack iOS は headerLeft を出しても標準の戻るボタン
+            //   (iOS 新版は丸い半透明背景付き) を併存させる。headerBackVisible:false で
+            //   その native 戻るを消し、下のカスタム白「＜」(丸なし) だけを残す。
+            headerBackVisible: false,
+            // 丸なしの白「＜」だけに置換。
             headerLeft: () => (
               <Pressable
                 onPress={() => router.back()}

@@ -35,4 +35,14 @@ density 実証後（Phase 1.5+）に検討する拡張。実装は未着手・�
 - 前提: いずれも density（実参加者数・供給数）が伴って初めて意味を持つため、
   β1 の実データが溜まってから。現行の紫版バックアップは `docs/venue_color_backup.md`。
 
+### 推し登録データの master 統一 (user_oshi の master ID 化)
+- 現状 `user_oshi` は `group_name` / `member_name` の**フリーテキスト**で、絞込検索/
+  求リスト (MSA + master 参照) と**非統一**。入力も oshi-edit.tsx の素の TextInput。
+- 「推しと一致!」レーンは現状 fuzzy-resolve (findCharacterIdsByText / getWorkSuggestions)
+  で吸収して動くが、master 未解決の推しは一致ゼロになる。
+- **follow-up**: user_oshi に `work_id` / `character_id` (master ID) 列を追加する
+  migration ＋ oshi-edit を MSA (master サジェスト) 入力に統一。→ ID 直照合で最も堅牢。
+- **前提 (K指定)**: これは DB migration を伴い OTA 不可。**単独ビルドはせず、次に
+  native 変更で eas build を焼く回に一緒に乗せる**。それまでは fuzzy-resolve 版で運用。
+
 <!-- 追加項目はここに -->

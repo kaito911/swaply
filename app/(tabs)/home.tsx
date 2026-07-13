@@ -16,6 +16,7 @@
 
 import { BestTradeCandidateData } from '@/components/BestTradeCandidateCard'
 import { EmptyHomeState } from '@/components/EmptyHomeState'
+import { FeedGridCard } from '@/components/FeedGridCard'
 import { HeaderActions } from '@/components/HeaderActions'
 import { HomeLargeCard } from '@/components/HomeLargeCard'
 import { LaneSectionLabel } from '@/components/LaneSectionLabel'
@@ -29,6 +30,7 @@ import {
   fetchMyBlockedUserIds,
   fetchMyLikedCardIds,
   fetchMyWantedCards,
+  fetchCardsPaged,
   fetchNewCards,
   fetchRecommendedCards,
   removeLike,
@@ -36,16 +38,21 @@ import {
 } from '@/lib/supabase'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { router } from 'expo-router'
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+
+const GRID_PAGE = 30
 
 export default function HomeScreen() {
   const { user } = useAuthContext()
@@ -66,6 +73,16 @@ export default function HomeScreen() {
   // card_id ベースなので fuzzy match 不要、Set<cardId> で完結
   // (3.5a の pendingAdds/Archives ハック解消)。
   const [myLikedCardIds, setMyLikedCardIds] = useState<Set<string>>(new Set())
+
+  // ホーム下部の無限グリッド (レーンの下・新着順・無限スクロール)。
+  const { width: screenW } = useWindowDimensions()
+  const gridCardWidth = Math.floor((screenW - spacing.base * 2 - spacing.sm * 2) / 3)
+  const [gridCards, setGridCards] = useState<Card[]>([])
+  const [gridEnd, setGridEnd] = useState(false)
+  const [gridLoadingMore, setGridLoadingMore] = useState(false)
+  // 多重ロード防止 + 最新の blocked ids を pager から参照するための ref。
+  const gridLoadingRef = useRef(false)
+  const blockedIdsRef = useRef<string[]>([])
 
   // 案b: mount + user 変更で 1 回だけ load。focus 復帰では再 fetch しない (scroll/データ保持)。
   //   mode='initial' → setLoading (全画面ローディング、初回)
@@ -151,10 +168,52 @@ export default function HomeScreen() {
         }
 
         setNewCards(newest.filter((c) => c.owner_user_id !== myId))
+
+        // 無限グリッド page 0 (reset)。blocked は pager 用に ref 保持。
+        blockedIdsRef.current = blockedUserIds
+        setGridEnd(false)
+        const firstPage = await fetchCardsPaged({
+          offset: 0,
+          limit: GRID_PAGE,
+          excludeUserId: myId,
+          excludeOwnerIds: blockedUserIds,
+        })
+        setGridCards(firstPage)
+        if (firstPage.length < GRID_PAGE) setGridEnd(true)
       if (mode === 'refresh') setRefreshing(false)
       else setLoading(false)
     },
     [user?.id],
+  )
+
+  // 無限グリッドの次ページ取得 (near-bottom で発火)。重複 id は除外。
+  const loadMoreGrid = useCallback(async () => {
+    if (gridLoadingRef.current || gridEnd) return
+    gridLoadingRef.current = true
+    setGridLoadingMore(true)
+    const page = await fetchCardsPaged({
+      offset: gridCards.length,
+      limit: GRID_PAGE,
+      excludeUserId: user?.id ?? null,
+      excludeOwnerIds: blockedIdsRef.current,
+    })
+    setGridCards((prev) => {
+      const seen = new Set(prev.map((c) => c.id))
+      return [...prev, ...page.filter((c) => !seen.has(c.id))]
+    })
+    if (page.length < GRID_PAGE) setGridEnd(true)
+    setGridLoadingMore(false)
+    gridLoadingRef.current = false
+  }, [gridCards.length, gridEnd, user?.id])
+
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent
+      const distanceToBottom =
+        contentSize.height - (contentOffset.y + layoutMeasurement.height)
+      if (distanceToBottom < 600) void loadMoreGrid()
+    },
+    [loadMoreGrid],
   )
 
   // 初回 mount + user 変更でのみ実行 (focus 復帰では走らない = scroll/データ保持)。
@@ -237,6 +296,8 @@ export default function HomeScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -339,6 +400,34 @@ export default function HomeScreen() {
             >
               {easyCards.map(renderLargeCard)}
             </ScrollView>
+
+            {/* レーンの下: すべての交換 (新着 created_at 降順) の無限グリッド。
+                FeedGridCard を固定幅で描画 = 余り行の全幅化崩れは構造的に起きない。 */}
+            {gridCards.length > 0 && (
+              <View style={styles.gridSection}>
+                <Text style={styles.gridLabel}>すべての交換</Text>
+                <View style={styles.grid}>
+                  {gridCards.map((card) => (
+                    <FeedGridCard
+                      key={card.id}
+                      card={card}
+                      width={gridCardWidth}
+                      isOwn={user != null && card.owner_user_id === user.id}
+                      isLiked={isCardLiked(card)}
+                      onToggleLike={
+                        user != null ? () => handleToggleLike(card) : undefined
+                      }
+                    />
+                  ))}
+                </View>
+                {gridLoadingMore && (
+                  <ActivityIndicator
+                    color={colors.primary}
+                    style={styles.gridSpinner}
+                  />
+                )}
+              </View>
+            )}
           </>
         )}
       </ScrollView>
@@ -360,6 +449,22 @@ const styles = StyleSheet.create({
     //   FAB overlay と最下要素のブリージング分のみ残して圧縮。
     paddingBottom: 40,
   },
+  // レーン下の無限グリッド (すべての交換)。
+  gridSection: { marginTop: spacing.lg },
+  gridLabel: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    paddingHorizontal: spacing.base,
+    marginBottom: spacing.sm,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.base,
+  },
+  gridSpinner: { marginVertical: spacing.base },
   headerWrap: {
     paddingHorizontal: spacing.base,
     paddingTop: spacing.sm,

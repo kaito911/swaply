@@ -255,6 +255,39 @@ export async function fetchNewCards(
   return (data ?? []) as Card[]
 }
 
+// ホーム下部の無限グリッド用: created_at 降順を offset ページングで取得。
+// discovery グリッドなので自分の出品 (excludeUserId) と blocked (excludeOwnerIds) は除外。
+// DB スキーマ変更なし (SELECT + .range のみ)。空配列が返れば末尾 (それ以上ロードしない)。
+export async function fetchCardsPaged(params: {
+  offset: number
+  limit?: number
+  excludeUserId?: string | null
+  excludeOwnerIds?: string[]
+}): Promise<Card[]> {
+  const { offset, limit = 30, excludeUserId, excludeOwnerIds = [] } = params
+  let query = supabase
+    .from('cards')
+    .select(CARD_FEED_SELECT)
+    .eq('status', 'active')
+    .eq('is_public', true)
+
+  if (excludeUserId != null) query = query.neq('owner_user_id', excludeUserId)
+  if (excludeOwnerIds.length > 0) {
+    query = query.not('owner_user_id', 'in', `(${excludeOwnerIds.join(',')})`)
+  }
+
+  const { data, error } = await query
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (error) {
+    console.error('[fetchCardsPaged]', error)
+    return []
+  }
+
+  return (data ?? []) as Card[]
+}
+
 // ─────────────────────────────────────────
 // 成立しやすさスコア（クライアントサイド並び替え用）
 // 既存 Profile データのみ使用。DB変更・RPC追加なし。

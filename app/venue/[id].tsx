@@ -32,7 +32,7 @@ import {
   getItemTypeById,
 } from '@/lib/master'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
-import * as Updates from 'expo-updates'
+import { StatusBar } from 'expo-status-bar'
 import { LinearGradient } from 'expo-linear-gradient'
 import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
 import { HeatRing } from '@/components/venue/HeatRing'
@@ -492,10 +492,9 @@ export default function VenueHomeScreen() {
   }
 
   return (
-    /* PR-7: Stack header (app/_layout.tsx:173-182 で headerShown:true) が既に top
-        safe area を消化しているため、ここで edges={['top']} を付けると二重に
-        inset が乗り「会場モード」タイトルと会場文脈ヘッダーの間に余分な余白が出る。
-        edges={[]} で top safe area を画面側からは取らず、Stack header の高さに任せる。 */
+    /* iOS26 auto-glass 回避で Stack header を廃止 (headerShown:false) したため、top safe area は
+        画面側で消化する。SafeAreaView edges={['top']} で notch/ステータスバー分を inset し、
+        その直下に自前ヘッダー (inHeader) を置く。 */
     <View style={styles.root}>
       {/* 暗地×光源 v1: 暗地ベースは即時表示 (会場という「空間」)。 */}
       <LinearGradient
@@ -535,17 +534,24 @@ export default function VenueHomeScreen() {
           <LightstickGalaxy count={44} color="#FF9F5C" />
         </View>
       )}
-      <SafeAreaView style={styles.safeTransparent} edges={[]}>
-      {/* ★一時 OTA 可視化 debug: 実機が今どの JS を動かしているかを目視で確定する。
-          isEmbeddedLaunch=true → build のバンドル JS (OTA 未適用)。
-          false + updateId → OTA 更新が適用されている。決着後に撤去する。 */}
-      <View style={styles.otaDebug} pointerEvents="none">
-        <Text style={styles.otaDebugText}>
-          OTA: {Updates.isEmbeddedLaunch ? 'EMBEDDED(未適用)' : 'UPDATE適用'} · id=
-          {Updates.updateId != null ? Updates.updateId.slice(0, 8) : 'none'} · rtv=
-          {Updates.runtimeVersion != null ? Updates.runtimeVersion.slice(0, 8) : '?'} ·{' '}
-          {Updates.createdAt != null ? new Date(Updates.createdAt).toLocaleTimeString() : '-'}
+      <SafeAreaView style={styles.safeTransparent} edges={['top']}>
+      <StatusBar style="light" />
+      {/* iOS26 auto-glass 回避: OS ヘッダー(headerShown:false)を使わず、会場[id] の画面内に
+          自前ヘッダーを描く。丸なしの白「＜」+ 中央「会場モード」タイトル、背景は暗地。
+          SafeAreaView edges=['top'] で notch/ステータスバーに被らない。 */}
+      <View style={styles.inHeader}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.inHeaderSide}
+          accessibilityLabel="戻る"
+        >
+          <Ionicons name="chevron-back" size={26} color="#FFFFFF" />
+        </Pressable>
+        <Text style={styles.inHeaderTitle} numberOfLines={1}>
+          会場モード
         </Text>
+        <View style={styles.inHeaderSide} />
       </View>
       {/* PR-2: 会場文脈ヘッダー — どの会場にいるかを示し、開催中状態と参加人数で
           現在地＋臨場感を与える。venue 取得失敗時は非表示 (フォールバック)。
@@ -1097,13 +1103,28 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   // 段階3-B: 背景グラデを敷くための root + 透明 SafeAreaView。
   root: { flex: 1, backgroundColor: '#0D0F1C' },
-  // ★一時 OTA 可視化 debug バー (決着後に撤去)。
-  otaDebug: {
-    backgroundColor: '#00E5A0',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+  // 画面内ヘッダー (iOS26 auto-glass 回避で OS ヘッダーを廃し自前描画)。暗地 + 白＜/白タイトル。
+  inHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 44,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: '#0D0F1C',
   },
-  otaDebugText: { fontSize: 11, fontWeight: '800', color: '#001510' },
+  inHeaderSide: {
+    width: 40,
+    height: 40,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  inHeaderTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
+  },
   // #4 光の海 + #1 熱量リングを敷く上部ステージ帯 (画面上部 ~42%、背面装飾)。
   // #4 光の海 (再設計): 画面下部の定位置バンド (背面装飾、UI にかぶせない)。
   galaxyBand: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 190 },

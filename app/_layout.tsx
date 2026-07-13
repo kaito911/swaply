@@ -5,12 +5,11 @@ import { AuthProvider, useAuthContext } from '@/providers/AuthProvider'
 import { BadgeProvider } from '@/providers/BadgeProvider'
 import { MasterCacheProvider } from '@/providers/MasterCacheProvider'
 import { ToastProvider } from '@/providers/ToastProvider'
-import { Ionicons } from '@expo/vector-icons'
-import { router, Stack } from 'expo-router'
+import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import OnboardingScreen, { ONBOARDING_DONE_KEY } from './onboarding'
 import React, { useEffect, useState } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 function RootNavigator() {
@@ -175,28 +174,12 @@ function RootNavigator() {
         <Stack.Screen
           name="venue/[id]"
           options={{
-            headerShown: true,
-            title: '会場モード',
-            // 暗地×光源: 会場の中は暗地。Stack ナビヘッダーも暗地色 + 白文字/戻る矢印に。
-            //   ここが [id] 上部の白帯の実体 (画面は ScreenHeader 不使用のため tint は効かない)。
-            headerStyle: { backgroundColor: '#0D0F1C' },
-            headerTintColor: '#FFFFFF',
-            headerShadowVisible: false,
-            // ★丸の正体: native-stack iOS は headerLeft を出しても標準の戻るボタン
-            //   (iOS 新版は丸い半透明背景付き) を併存させる。headerBackVisible:false で
-            //   その native 戻るを消し、下のカスタム白「＜」(丸なし) だけを残す。
-            headerBackVisible: false,
-            // 丸なしの白「＜」だけに置換。
-            headerLeft: () => (
-              <Pressable
-                onPress={() => router.back()}
-                hitSlop={12}
-                style={{ paddingRight: 8, paddingVertical: 4 }}
-                accessibilityLabel="戻る"
-              >
-                <Ionicons name="chevron-back" size={26} color="#FFFFFF" />
-              </Pressable>
-            ),
+            // iOS26 の auto-glass が OS ヘッダーのバーボタンに丸ガラス背景を付けるため
+            //   (headerBackVisible:false でも OS が丸を描き直す)、OS ヘッダーを使わず
+            //   headerShown:false にして会場[id] の画面内に自前ヘッダー(丸なし白＜)を描く。
+            //   swipe-back gesture は native-stack 既定 true。明示的に維持。
+            headerShown: false,
+            gestureEnabled: true,
           }}
         />
         <Stack.Screen

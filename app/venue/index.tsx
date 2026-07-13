@@ -9,7 +9,7 @@ import {
   fetchVenues,
   isVenueLoadFailure,
 } from '@/lib/supabase'
-import { computeIgnition, VENUE_LIGHT } from '@/lib/venueIgnition'
+import { computeIgnition, VENUE_DARK, VENUE_LIGHT } from '@/lib/venueIgnition'
 import { HeatRing } from '@/components/venue/HeatRing'
 import { LightstickGalaxy } from '@/components/venue/LightstickGalaxy'
 import { ShowtimeClock } from '@/components/venue/ShowtimeClock'
@@ -39,7 +39,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 // 会場モード「暗地×光源」v1 (VENUE IGNITION)。紫版は docs/venue_color_backup.md。
 // 背景=ほぼ黒のディープネイビー (下地)。会場カードは白=「光の島」として暗地に浮かす。
-const VENUE_BG_GRADIENT = ['#0D0F1C', '#0A0B14', '#070810'] as const
+const VENUE_BG_GRADIENT = [VENUE_DARK, '#0A0B14', '#070810'] as const
 const VENUE_BG_LOCATIONS = [0, 0.5, 1] as const
 // 上部から漏れる光源 (coral→orange→透明の縦グラデを上 ~35% に重ねる)。radial/blur 不使用。
 const VENUE_GLOW_COLORS = ['rgba(255,107,139,0.20)', 'rgba(255,159,92,0.06)', 'transparent'] as const
@@ -458,7 +458,7 @@ export default function VenueListScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   // 暗地×光源 v1: root は暗地の下地 (グラデ描画前 fallback)、SafeArea は透過。
-  root: { flex: 1, backgroundColor: '#0D0F1C' },
+  root: { flex: 1, backgroundColor: VENUE_DARK },
   safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1 },

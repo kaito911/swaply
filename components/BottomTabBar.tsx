@@ -1,5 +1,6 @@
 // components/BottomTabBar.tsx
 import { colors, spacing } from '@/constants/theme'
+import { VENUE_DARK } from '@/lib/venueIgnition'
 import { Ionicons } from '@expo/vector-icons'
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs'
 import React from 'react'
@@ -60,6 +61,10 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const { pendingOfferCount, receivedHoldCount, venueTradeUnreadCount } =
     useBadge()
   const currentRouteName = state.routes[state.index]?.name ?? ''
+  // 会場タブ在席時だけタブバーを暗地(会場背景と同値 VENUE_DARK)になじませる。他タブは白のまま。
+  //   スナップ切替 (案1)。iOS26 glass 無縁 (自前 View)。
+  const isVenue = currentRouteName === 'venue-tab'
+  const inactiveColor = isVenue ? 'rgba(255,255,255,0.55)' : colors.textTertiary
 
   const renderTab = (tab: VisibleTab) => {
     const route = state.routes.find((r) => r.name === tab.name)
@@ -103,7 +108,7 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
           <Ionicons
             name={isFocused ? tab.iconActive : tab.icon}
             size={22}
-            color={isFocused ? colors.primary : colors.textTertiary}
+            color={isFocused ? colors.primary : inactiveColor}
           />
           {showBadge && (
             <View style={styles.badge}>
@@ -113,7 +118,13 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             </View>
           )}
         </View>
-        <Text style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
+        <Text
+          style={[
+            styles.tabLabel,
+            !isFocused && { color: inactiveColor },
+            isFocused && styles.tabLabelActive,
+          ]}
+        >
           {tab.label}
         </Text>
       </Pressable>
@@ -121,8 +132,8 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   }
 
   return (
-    <View style={[styles.wrap, { paddingBottom: insetBottom }]}>
-      <View style={styles.bar}>
+    <View style={[styles.wrap, isVenue && styles.wrapDark, { paddingBottom: insetBottom }]}>
+      <View style={[styles.bar, isVenue && styles.barDark]}>
         {TABS.map(renderTab)}
       </View>
     </View>
@@ -132,6 +143,10 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
 const styles = StyleSheet.create({
   wrap: {
     backgroundColor: colors.backgroundCard,
+  },
+  // 会場タブ在席時: 暗地(会場背景と同値 VENUE_DARK)になじませる。
+  wrapDark: {
+    backgroundColor: VENUE_DARK,
   },
   bar: {
     flexDirection: 'row',
@@ -143,6 +158,11 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
+  },
+  // 会場タブ在席時: 暗地bg + 上端は薄い白 hairline のみで領域を示す (色差で分けない)。
+  barDark: {
+    backgroundColor: VENUE_DARK,
+    borderTopColor: 'rgba(255,255,255,0.12)',
   },
   tabItem: {
     flex: 1,

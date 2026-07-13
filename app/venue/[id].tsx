@@ -39,7 +39,7 @@ import { HeatRing } from '@/components/venue/HeatRing'
 import { LightstickGalaxy } from '@/components/venue/LightstickGalaxy'
 import { ShowtimeClock } from '@/components/venue/ShowtimeClock'
 import { JustDroppedBadge, formatDropAge } from '@/components/venue/JustDroppedBadge'
-import { computeIgnition, VENUE_LIGHT } from '@/lib/venueIgnition'
+import { computeIgnition, VENUE_DARK, VENUE_LIGHT } from '@/lib/venueIgnition'
 import { useVenueSupplyRealtime } from '@/hooks/useVenueSupplyRealtime'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
@@ -85,7 +85,7 @@ const VENUE_COLORS = {
 
 // 暗地×光源 v1 (VENUE IGNITION)。紫版は docs/venue_color_backup.md。
 // 会場一覧と統一: 暗地ベース + 上部 coral/orange 光源。供給板・カードは白=「光の島」。
-const VENUE_ROOM_GRADIENT = ['#0D0F1C', '#0A0B14', '#070810'] as const
+const VENUE_ROOM_GRADIENT = [VENUE_DARK, '#0A0B14', '#070810'] as const
 const VENUE_ROOM_LOCATIONS = [0, 0.5, 1] as const
 const VENUE_GLOW_COLORS = ['rgba(255,107,139,0.20)', 'rgba(255,159,92,0.06)', 'transparent'] as const
 const VENUE_GLOW_LOCATIONS = [0, 0.22, 0.42] as const
@@ -1102,7 +1102,7 @@ export default function VenueHomeScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   // 段階3-B: 背景グラデを敷くための root + 透明 SafeAreaView。
-  root: { flex: 1, backgroundColor: '#0D0F1C' },
+  root: { flex: 1, backgroundColor: VENUE_DARK },
   // 画面内ヘッダー (iOS26 auto-glass 回避で OS ヘッダーを廃し自前描画)。
   // ★背景はベタ塗りせず透過にする: 上の SafeArea inset(透過=暗地グラデ)との
   //   トーン差の継ぎ目線を消し、暗地グラデ直置きで上端まで連続させる。白＜/白タイトルのみ。

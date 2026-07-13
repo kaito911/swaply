@@ -33,6 +33,10 @@ export const VENUE_LIGHT = {
   orange: '#FF9F5C',
 } as const
 
+// 会場モードの暗地ベース色 (ほぼ黒のディープネイビー)。会場背景bgとタブバー暗地なじませが
+// 「同値」であることを構造的に保証するための単一トークン (inline #0D0F1C の巻き取り・ズレ防止)。
+export const VENUE_DARK = '#0D0F1C'
+
 // 閾値: score 下限 → レベル。上から評価。
 // 現行 (β1 初期・保守的): SPARK 0-1 / GLOW 2-4 / HEAT 5-9 / ROAR 10-19 / IGNITED 20+
 const LADDER: {

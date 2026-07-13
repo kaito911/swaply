@@ -61,22 +61,6 @@ export function SwapMark({ trigger = 0, size = 9, span = 16, mountDelayMs = 0 }:
   const ay = t.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, -6, 0] })
   const by = t.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 6, 0] })
 
-  // ★診断(一時・後でrevert): 強制可視化。120x120 マゼンタ矩形を translateX 0→200 で
-  //   無限往復させ、(a)JSX が可視領域に描画されるか (b)Animated/useNativeDriver が実機で
-  //   値を動かせるか を同時に炙り出す。既存の Swap ロジック/点はそのまま残す。
-  const debugLoop = useRef(new Animated.Value(0)).current
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(debugLoop, { toValue: 1, duration: 800, useNativeDriver: true }),
-        Animated.timing(debugLoop, { toValue: 0, duration: 800, useNativeDriver: true }),
-      ]),
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [debugLoop])
-  const debugX = debugLoop.interpolate({ inputRange: [0, 1], outputRange: [0, 200] })
-
   const dot = (bg: string, tx: Animated.AnimatedInterpolation<number>, ty: Animated.AnimatedInterpolation<number>) => (
     <Animated.View
       style={{
@@ -91,16 +75,12 @@ export function SwapMark({ trigger = 0, size = 9, span = 16, mountDelayMs = 0 }:
   )
 
   return (
-    <View pointerEvents="none">
-      {/* ★診断: 遅延/条件を全バイパスした 120x120 マゼンタ矩形 (無条件・不透明)。 */}
-      <Animated.View
-        style={{ width: 120, height: 120, backgroundColor: '#FF00FF', transform: [{ translateX: debugX }] }}
-      />
-      {/* 既存 Swap の 2 点 (残す)。 */}
-      <View style={{ width: span + size, height: size + 14, justifyContent: 'center' }}>
-        {dot(VENUE_LIGHT.coral, ax, ay)}
-        {dot(VENUE_LIGHT.orange, bx, by)}
-      </View>
+    <View
+      pointerEvents="none"
+      style={{ width: span + size, height: size + 14, justifyContent: 'center' }}
+    >
+      {dot(VENUE_LIGHT.coral, ax, ay)}
+      {dot(VENUE_LIGHT.orange, bx, by)}
     </View>
   )
 }

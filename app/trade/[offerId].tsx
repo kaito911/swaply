@@ -3,6 +3,7 @@ import { colors } from '@/constants/theme'
 import {
     cancelTrade,
     confirmTradeReceipt,
+    fetchShippingAddress,
     fetchTradeDetailByOffer,
     openTradeDispute,
     submitTradeShipment,
@@ -365,6 +366,9 @@ export default function TradeDetailScreen() {
   const [shippingMethod, setShippingMethod] = useState<ShippingMethod | null>(null)
   const [disputeReason, setDisputeReason] = useState('')
   const [disputeDetail, setDisputeDetail] = useState('')
+  // ③ 成立→発送の住所導線: 自分の配送先が登録済かを本人RLSで判定 (相手に届けてもらうために必要)。
+  //   null = 未取得 (初回フラッシュ防止でナッジを出さない)、false = 未登録 (ナッジ表示)、true = 登録済。
+  const [myAddressRegistered, setMyAddressRegistered] = useState<boolean | null>(null)
 
   const loadTrade = useCallback(async () => {
     if (!offerId || typeof offerId !== 'string') {
@@ -378,7 +382,21 @@ export default function TradeDetailScreen() {
     setTrackingNumber(payload?.myShipment?.tracking_number || '')
     setCarrier(payload?.myShipment?.carrier || '')
     setShippingMethod(payload?.myShipment?.shipping_method ?? null)
-  }, [offerId])
+
+    // ③ 自分の配送先の登録状況を判定 (相手が自分に発送するために必要)。
+    //   focus 再取得で /shipping 登録後に戻るとナッジが自動で消える。取得失敗時は
+    //   ナッジで邪魔しないよう「登録済扱い(true)」に倒す (誤ナッジより無ナッジを優先)。
+    if (currentUserId != null) {
+      try {
+        const addr = await fetchShippingAddress(currentUserId)
+        setMyAddressRegistered(
+          addr != null && (addr.address_line1 != null || addr.shipping_name != null),
+        )
+      } catch {
+        setMyAddressRegistered(true)
+      }
+    }
+  }, [offerId, currentUserId])
 
   const initialLoad = useCallback(async () => {
     try {
@@ -724,6 +742,25 @@ export default function TradeDetailScreen() {
           </View>
         )}
 
+        {/* [2.5] 自分の配送先 未登録ナッジ ── 相手が発送できるように促す (③) */}
+        {myAddressRegistered === false &&
+          uiState !== 'completed' &&
+          uiState !== 'cancelled' &&
+          uiState !== 'disputed' && (
+            <View style={styles.addressNudgeCard}>
+              <Text style={styles.addressNudgeTitle}>配送先を登録してください</Text>
+              <Text style={styles.addressNudgeText}>
+                あなたの配送先が未登録です。登録しないと、相手があなたに発送できません。
+              </Text>
+              <Pressable
+                style={styles.addressNudgeButton}
+                onPress={() => router.push('/shipping')}
+              >
+                <Text style={styles.addressNudgeButtonText}>配送先を登録する</Text>
+              </Pressable>
+            </View>
+          )}
+
         {/* [3] Primary Action ── 今やること */}
         {uiState === 'waiting_my_ship' && (() => {
           // 選択中の配送方法に応じて追跡番号入力欄の表示を出し分け
@@ -792,10 +829,20 @@ export default function TradeDetailScreen() {
                 style={styles.input}
               />
 
+              {/* ③ 相手が配送先未登録なら発送先が無い = 発送させない (素通り防止・理由提示) */}
+              {!hasAddress && (
+                <Text style={styles.shipBlockedNote}>
+                  相手が配送先未登録です。登録され次第、発送できます。
+                </Text>
+              )}
+
               <Pressable
-                style={[styles.primaryButton, submittingShipment && styles.disabledButton]}
+                style={[
+                  styles.primaryButton,
+                  (submittingShipment || !hasAddress) && styles.disabledButton,
+                ]}
                 onPress={handleSubmitShipment}
-                disabled={submittingShipment}
+                disabled={submittingShipment || !hasAddress}
               >
                 <Text style={styles.primaryButtonText}>
                   {submittingShipment ? '送信中...' : '発送を通知する'}
@@ -1454,5 +1501,45 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.6,
+  },
+  // ③ 自分の配送先 未登録ナッジ (attention amber — error 赤とも primary 紫とも別系統)。
+  addressNudgeCard: {
+    backgroundColor: '#FFF7ED',
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#FDBA74',
+  },
+  addressNudgeTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#9A3412',
+    marginBottom: 4,
+  },
+  addressNudgeText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#9A3412',
+    marginBottom: 12,
+  },
+  addressNudgeButton: {
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#EA580C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addressNudgeButtonText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  // ③ 相手未登録で発送不可のときの理由行 (発送ボタン直上)。
+  shipBlockedNote: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#B45309',
+    fontWeight: '600',
+    marginBottom: 10,
   },
 })

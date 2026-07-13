@@ -255,6 +255,46 @@ export async function fetchNewCards(
   return (data ?? []) as Card[]
 }
 
+// 「推しと一致!」レーン用: 推し (フリーテキスト) をクライアント側で master 解決した
+// 文字ID/作品ID の配列を受け取り、cards.characters overlap または work_id 一致で抽出。
+// 推しが 1 つも master 解決できなければ (charIds/workIds 空) → 空配列。DB変更なし。
+export async function fetchOshiMatchCards(params: {
+  userId: string
+  charIds: string[]
+  workIds: string[]
+  excludeOwnerIds?: string[]
+  limit?: number
+}): Promise<Card[]> {
+  const { userId, charIds, workIds, excludeOwnerIds = [], limit = 20 } = params
+  const orParts: string[] = []
+  if (charIds.length > 0) orParts.push(`characters.ov.{${charIds.join(',')}}`)
+  if (workIds.length > 0) orParts.push(`work_id.in.(${workIds.join(',')})`)
+  if (orParts.length === 0) return []
+
+  let query = supabase
+    .from('cards')
+    .select(CARD_FEED_SELECT)
+    .eq('status', 'active')
+    .eq('is_public', true)
+    .neq('owner_user_id', userId)
+    .or(orParts.join(','))
+
+  if (excludeOwnerIds.length > 0) {
+    query = query.not('owner_user_id', 'in', `(${excludeOwnerIds.join(',')})`)
+  }
+
+  const { data, error } = await query
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.error('[fetchOshiMatchCards]', error)
+    return []
+  }
+
+  return (data ?? []) as Card[]
+}
+
 // ホーム下部の無限グリッド用: created_at 降順を offset ページングで取得。
 // discovery グリッドなので自分の出品 (excludeUserId) と blocked (excludeOwnerIds) は除外。
 // DB スキーマ変更なし (SELECT + .range のみ)。空配列が返れば末尾 (それ以上ロードしない)。

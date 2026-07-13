@@ -31,11 +31,12 @@ import {
   fetchMyLikedCardIds,
   fetchMyWantedCards,
   fetchCardsPaged,
-  fetchNewCards,
-  fetchRecommendedCards,
+  fetchOshiMatchCards,
+  fetchUserOshi,
   removeLike,
   supabase,
 } from '@/lib/supabase'
+import { findCharacterIdsByText, getWorkSuggestions } from '@/lib/master'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { router } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -57,9 +58,9 @@ const GRID_PAGE = 30
 export default function HomeScreen() {
   const { user } = useAuthContext()
 
-  const [recommendedCards, setRecommendedCards] = useState<Card[]>([])
+  // 「推しと一致!」レーン (推し登録に基づく本物のパーソナライズ)。
+  const [oshiMatchCards, setOshiMatchCards] = useState<Card[]>([])
   const [easyCards, setEasyCards] = useState<Card[]>([])
-  const [newCards, setNewCards] = useState<Card[]>([])
   const [loading, setLoading] = useState(true)
   // pull-to-refresh 専用フラグ。★loading とは厳密に分離: refresh 時は loading を触らない
   // (loading=true にするとレーンが loadingBox に潰れ scroll offset が飛ぶため)。
@@ -121,18 +122,37 @@ export default function HomeScreen() {
         setMyWants(wants)
         setMyLikedCardIds(likedIds)
 
-        // TODO: 推薦RPC実装後に差し替え (Lane 2: 現行は自分以外のアクティブカードによる近似)
-        const [rec, easy, newest] = await Promise.all([
-          user != null
-            ? fetchRecommendedCards(user.id, 20, blockedUserIds)
-            : fetchNewCards(20, blockedUserIds),
-          fetchEasyCards(user?.id, wants, blockedUserIds),
-          fetchNewCards(20, blockedUserIds),
-        ])
-
         const myId = user?.id ?? null
 
-        setRecommendedCards(rec.filter((c) => c.owner_user_id !== myId))
+        // 「推しと一致!」: 推し(フリーテキスト)を master 解決 → 一致カード。
+        //   member_name → findCharacterIdsByText (aliases/表記揺れ吸収)、
+        //   group_name → getWorkSuggestions[0] で work 解決。解決0なら空レーン (非表示)。
+        let oshiMatch: Card[] = []
+        if (user != null) {
+          const oshiList = await fetchUserOshi(user.id)
+          const charIds = new Set<string>()
+          const workIds = new Set<string>()
+          for (const o of oshiList) {
+            if (o.member_name != null && o.member_name.trim() !== '') {
+              findCharacterIdsByText(o.member_name).forEach((id) => charIds.add(id))
+            }
+            if (o.group_name.trim() !== '') {
+              const w = getWorkSuggestions(o.group_name, 1)[0]
+              if (w != null) workIds.add(w.id)
+            }
+          }
+          if (charIds.size > 0 || workIds.size > 0) {
+            oshiMatch = await fetchOshiMatchCards({
+              userId: user.id,
+              charIds: [...charIds],
+              workIds: [...workIds],
+              excludeOwnerIds: blockedUserIds,
+            })
+          }
+        }
+        setOshiMatchCards(oshiMatch.filter((c) => c.owner_user_id !== myId))
+
+        const easy = await fetchEasyCards(user?.id, wants, blockedUserIds)
 
         // bestCandidate を easyCards の先頭に Card として挿入する
         if (candidateData != null) {
@@ -166,8 +186,6 @@ export default function HomeScreen() {
         } else {
           setEasyCards(easy.filter((c) => c.owner_user_id !== myId))
         }
-
-        setNewCards(newest.filter((c) => c.owner_user_id !== myId))
 
         // 無限グリッド page 0 (reset)。blocked は pager 用に ref 保持。
         blockedIdsRef.current = blockedUserIds
@@ -267,9 +285,9 @@ export default function HomeScreen() {
 
   // Lane 1「いいねした交換」用の暫定データ計算
   // liked_cards (card_id ベース) で filter する。Phase B 以降に fetchLikedCards 専用
-  // fetch に置換予定 (現在は home の rec/easy/new 取得結果から抽出する近似)。
+  // fetch に置換予定 (現在は home のロード済カード=推し一致/成立しやすい/グリッドから抽出する近似)。
   const likedCards = useMemo<Card[]>(() => {
-    const all = [...recommendedCards, ...easyCards, ...newCards]
+    const all = [...oshiMatchCards, ...easyCards, ...gridCards]
     const seen = new Set<string>()
     const result: Card[] = []
     for (const c of all) {
@@ -279,7 +297,7 @@ export default function HomeScreen() {
       result.push(c)
     }
     return result
-  }, [recommendedCards, easyCards, newCards, isCardLiked])
+  }, [oshiMatchCards, easyCards, gridCards, isCardLiked])
 
   const renderLargeCard = (card: Card) => (
     <HomeLargeCard
@@ -325,7 +343,10 @@ export default function HomeScreen() {
             <ActivityIndicator color={colors.primary} />
             <Text style={styles.loadingText}>カードを読み込み中...</Text>
           </View>
-        ) : recommendedCards.length === 0 && easyCards.length === 0 && newCards.length === 0 ? (
+        ) : oshiMatchCards.length === 0 &&
+          easyCards.length === 0 &&
+          likedCards.length === 0 &&
+          gridCards.length === 0 ? (
           <EmptyHomeState />
         ) : (
           <>
@@ -349,39 +370,22 @@ export default function HomeScreen() {
               </>
             )}
 
-            {/* Lane 2: あなたへのおすすめ — LargeCard */}
-            <LaneSectionLabel
-              title="あなたへのおすすめ"
-              sub="すべて見る"
-              onSubPress={() =>
-                router.push({ pathname: '/list/[section]', params: { section: 'recommended' } } as never)
-              }
-            />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.laneContent}
-            >
-              {recommendedCards.map(renderLargeCard)}
-            </ScrollView>
+            {/* Lane 2: 推しと一致! — 推し登録に基づく本物のパーソナライズ。
+                一致0 (推し未登録 or master 未解決) ならレーンごと非表示。 */}
+            {oshiMatchCards.length > 0 && (
+              <>
+                <LaneSectionLabel title="推しと一致！" />
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.laneContent}
+                >
+                  {oshiMatchCards.map(renderLargeCard)}
+                </ScrollView>
+              </>
+            )}
 
-            {/* Lane 3: 新着の交換 — LargeCard (ラベル「新着」→「新着の交換」) */}
-            <LaneSectionLabel
-              title="新着の交換"
-              sub="すべて見る"
-              onSubPress={() =>
-                router.push({ pathname: '/list/[section]', params: { section: 'new' } } as never)
-              }
-            />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.laneContent}
-            >
-              {newCards.map(renderLargeCard)}
-            </ScrollView>
-
-            {/* Lane 4: 成立しやすい交換 — LargeCard (3.5a commit 3 で Small→Large 化) */}
+            {/* Lane 3: 成立しやすい交換 — LargeCard (求ベース再ランクの本物ロジック) */}
             <LaneSectionLabel
               title="成立しやすい交換"
               sub="すべて見る"

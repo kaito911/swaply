@@ -15,9 +15,11 @@ interface SwapMarkProps {
   size?: number
   /** 2点の横移動幅 (すれ違い距離)。 */
   span?: number
+  /** マウント時再生の遅延(ms)。親のヒーロー入場 fade-in と重ならないよう後にずらす用。 */
+  mountDelayMs?: number
 }
 
-export function SwapMark({ trigger = 0, size = 9, span = 16 }: SwapMarkProps) {
+export function SwapMark({ trigger = 0, size = 9, span = 16, mountDelayMs = 0 }: SwapMarkProps) {
   const t = useRef(new Animated.Value(0)).current
   const dir = useRef(0) // 現在の到達側 (0/1)。再生の度にトグルして「入れ替わる」。
 
@@ -32,10 +34,16 @@ export function SwapMark({ trigger = 0, size = 9, span = 16 }: SwapMarkProps) {
     }).start()
   }, [t])
 
-  // マウント時に1回。
+  // マウント時に1回。ヒーロー入場 fade-in(≈700ms) と重なると masked されるため、
+  //   mountDelayMs だけ遅延し、full に見えている状態で交差させる (常時静か=1回のみ)。
   useEffect(() => {
-    play()
-  }, [play])
+    if (mountDelayMs <= 0) {
+      play()
+      return
+    }
+    const id = setTimeout(play, mountDelayMs)
+    return () => clearTimeout(id)
+  }, [play, mountDelayMs])
 
   // trigger 変化で1回 (初回はマウント側で再生済みなので skip)。
   const first = useRef(true)

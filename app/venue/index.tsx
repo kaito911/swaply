@@ -235,8 +235,9 @@ export default function VenueListScreen() {
         <View style={styles.flex}>
           <View style={styles.heroTitleRow}>
             <Text style={styles.heroTitle}>会場モード</Text>
-            {/* commit③ Swapモーション試作: 入口の1箇所のみ。マウント時+新着で1回、以後静止。 */}
-            <SwapMark trigger={signalTick} />
+            {/* commit③ Swapモーション試作: 入口の1箇所のみ。マウント時+新着で1回、以後静止。
+                入場 fade-in(≈700ms) と重なると masked されるため、その完了後(750ms)に再生。 */}
+            <SwapMark trigger={signalTick} mountDelayMs={750} />
           </View>
           <Text style={styles.heroSub}>いま、交換が動く場所</Text>
         </View>

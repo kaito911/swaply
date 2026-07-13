@@ -19,8 +19,8 @@ interface SwapMarkProps {
   mountDelayMs?: number
 }
 
-// 実機視認サイズの既定 (実機で微調整前提)。点は 20px、すれ違い幅 40px、再生 900ms。
-export function SwapMark({ trigger = 0, size = 20, span = 40, mountDelayMs = 0 }: SwapMarkProps) {
+// 控えめ・かわいい装飾サイズ (実機微調整前提)。点は 10px、すれ違い幅 20px、再生 800ms。
+export function SwapMark({ trigger = 0, size = 10, span = 20, mountDelayMs = 0 }: SwapMarkProps) {
   const t = useRef(new Animated.Value(0)).current
   const dir = useRef(0) // 現在の到達側 (0/1)。再生の度にトグルして「入れ替わる」。
 
@@ -29,7 +29,7 @@ export function SwapMark({ trigger = 0, size = 20, span = 40, mountDelayMs = 0 }
     dir.current = next
     Animated.timing(t, {
       toValue: next,
-      duration: 900,
+      duration: 800,
       easing: Easing.inOut(Easing.cubic),
       useNativeDriver: true,
     }).start()
@@ -58,9 +58,9 @@ export function SwapMark({ trigger = 0, size = 20, span = 40, mountDelayMs = 0 }
 
   const ax = t.interpolate({ inputRange: [0, 1], outputRange: [0, span] })
   const bx = t.interpolate({ inputRange: [0, 1], outputRange: [span, 0] })
-  // 弧: A は上、B は下を通ってすれ違う (衝突せず“交差”に見せる)。点拡大に合わせ弧も拡大。
-  const ay = t.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, -14, 0] })
-  const by = t.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 14, 0] })
+  // 弧: A は上、B は下を通ってすれ違う (衝突せず“交差”に見せる)。控えめサイズに合わせ弧も控えめ。
+  const ay = t.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, -7, 0] })
+  const by = t.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 7, 0] })
 
   const dot = (bg: string, tx: Animated.AnimatedInterpolation<number>, ty: Animated.AnimatedInterpolation<number>) => (
     <Animated.View
@@ -70,10 +70,10 @@ export function SwapMark({ trigger = 0, size = 20, span = 40, mountDelayMs = 0 }
         height: size,
         borderRadius: size / 2,
         backgroundColor: bg,
-        // 暗地で沈まないよう自色の発光 (光の島/点火と同じ光源表現)。
+        // 暗地で沈まないよう自色の発光 (光の島/点火と同じ光源表現)。控えめに。
         shadowColor: bg,
-        shadowOpacity: 0.8,
-        shadowRadius: 5,
+        shadowOpacity: 0.7,
+        shadowRadius: 3,
         shadowOffset: { width: 0, height: 0 },
         transform: [{ translateX: tx }, { translateY: ty }],
       }}
@@ -83,7 +83,7 @@ export function SwapMark({ trigger = 0, size = 20, span = 40, mountDelayMs = 0 }
   return (
     <View
       pointerEvents="none"
-      style={{ width: span + size, height: size + 30, justifyContent: 'center' }}
+      style={{ width: span + size, height: size + 18, justifyContent: 'center' }}
     >
       {dot(VENUE_LIGHT.coral, ax, ay)}
       {dot(VENUE_LIGHT.orange, bx, by)}

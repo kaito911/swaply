@@ -11,6 +11,7 @@ import {
 } from '@/lib/supabase'
 import { computeIgnition } from '@/lib/venueIgnition'
 import { HeatRing } from '@/components/venue/HeatRing'
+import { LightstickGalaxy } from '@/components/venue/LightstickGalaxy'
 import { ShowtimeClock } from '@/components/venue/ShowtimeClock'
 import { useVenueSupplyRealtime } from '@/hooks/useVenueSupplyRealtime'
 import { Venue } from '@/lib/types'
@@ -319,6 +320,11 @@ export default function VenueListScreen() {
           style={StyleSheet.absoluteFill}
         />
       </Animated.View>
+      {/* commit①: 光の海を会場一覧の下端にも (会場[id]と同形・下地レイヤ)。
+          SafeAreaView(hero/カード/density) の前 = 背面。カード・テキストに光を重ねない。 */}
+      <View pointerEvents="none" style={styles.galaxyBand}>
+        <LightstickGalaxy count={44} color="#FF9F5C" />
+      </View>
       <SafeAreaView style={styles.safeTransparent} edges={['top']}>
         <StatusBar style="light" />
         {/* A(大宣言「会場モード」) + H2(集約density) の画面内ヒーローヘッダー。 */}
@@ -451,6 +457,8 @@ const styles = StyleSheet.create({
   safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1 },
+  // commit①: 光の海の下端バンド (会場[id] と同形: bottom アンカー・height 190・背面装飾)。
+  galaxyBand: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 190 },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },
   // SWAPLY LIVE SIGNAL: 大宣言ヒーローヘッダー (画面内・暗地直置き)。
   hero: {

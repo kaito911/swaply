@@ -13,6 +13,7 @@ import { computeIgnition, VENUE_LIGHT } from '@/lib/venueIgnition'
 import { HeatRing } from '@/components/venue/HeatRing'
 import { LightstickGalaxy } from '@/components/venue/LightstickGalaxy'
 import { ShowtimeClock } from '@/components/venue/ShowtimeClock'
+import { SwapMark } from '@/components/venue/SwapMark'
 import { useVenueSupplyRealtime } from '@/hooks/useVenueSupplyRealtime'
 import { Venue } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
@@ -232,7 +233,11 @@ export default function VenueListScreen() {
     >
       <View style={styles.heroTopRow}>
         <View style={styles.flex}>
-          <Text style={styles.heroTitle}>会場モード</Text>
+          <View style={styles.heroTitleRow}>
+            <Text style={styles.heroTitle}>会場モード</Text>
+            {/* commit③ Swapモーション試作: 入口の1箇所のみ。マウント時+新着で1回、以後静止。 */}
+            <SwapMark trigger={signalTick} />
+          </View>
           <Text style={styles.heroSub}>いま、交換が動く場所</Text>
         </View>
         <HeaderActions color="#FFFFFF" />
@@ -472,6 +477,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
   },
+  heroTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   heroTitle: {
     fontSize: fontSize.hero,
     fontWeight: fontWeight.extrabold,

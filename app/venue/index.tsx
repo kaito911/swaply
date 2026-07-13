@@ -22,7 +22,6 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
 import { StatusBar } from 'expo-status-bar'
 import * as Haptics from 'expo-haptics'
-import * as Updates from 'expo-updates'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -334,16 +333,6 @@ export default function VenueListScreen() {
       </View>
       <SafeAreaView style={styles.safeTransparent} edges={['top']}>
         <StatusBar style="light" />
-        {/* ★一時 OTA 可視化 debug バー (適用確認用・確認後に撤去)。
-            isEmbeddedLaunch=true → build のバンドル JS (OTA 未適用)。false+updateId → OTA 適用済み。 */}
-        <View style={styles.otaDebug} pointerEvents="none">
-          <Text style={styles.otaDebugText}>
-            OTA: {Updates.isEmbeddedLaunch ? 'EMBEDDED(未適用)' : 'UPDATE適用'} · id=
-            {Updates.updateId != null ? Updates.updateId.slice(0, 8) : 'none'} · rtv=
-            {Updates.runtimeVersion != null ? Updates.runtimeVersion.slice(0, 8) : '?'} ·{' '}
-            {Updates.createdAt != null ? new Date(Updates.createdAt).toLocaleTimeString() : '-'}
-          </Text>
-        </View>
         {/* A(大宣言「会場モード」) + H2(集約density) の画面内ヒーローヘッダー。 */}
         {renderHero(densityLine)}
         <ScrollView
@@ -474,9 +463,6 @@ const styles = StyleSheet.create({
   safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1 },
-  // ★一時 OTA 可視化 debug バー (確認後に撤去)。
-  otaDebug: { backgroundColor: '#00E5A0', paddingHorizontal: 10, paddingVertical: 4 },
-  otaDebugText: { fontSize: 11, fontWeight: '800', color: '#001510' },
   // commit①: 光の海の下端バンド (会場[id] と同形: bottom アンカー・height 190・背面装飾)。
   galaxyBand: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 190 },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },

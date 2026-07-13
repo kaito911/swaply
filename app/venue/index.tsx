@@ -1,7 +1,6 @@
 // app/venue/index.tsx
 // 会場一覧画面
 import { HeaderActions } from '@/components/HeaderActions'
-import { ScreenHeader } from '@/components/ScreenHeader'
 import {
   checkInVenue,
   fetchMyCheckin,
@@ -22,10 +21,12 @@ import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
 import { StatusBar } from 'expo-status-bar'
 import * as Haptics from 'expo-haptics'
 import { router, useFocusEffect } from 'expo-router'
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -65,15 +66,24 @@ export default function VenueListScreen() {
   const [myCheckins, setMyCheckins] = useState<Record<string, boolean>>({})
   const [checkingIn, setCheckingIn] = useState<string | null>(null)
 
+  // SWAPLY LIVE SIGNAL: 会場タブを開いた瞬間の入場アニメ (マウント時1回・瞬間のみ)。
+  const entrance = useRef(new Animated.Value(0)).current
+  // 集約シグナルドットの脈打ち (Realtime の新着/Hold で一瞬だけ。平時静止)。
+  const signalDot = useRef(new Animated.Value(0)).current
+  const [signalTick, setSignalTick] = useState(0)
+
   // 会場一覧 (全会場) の supply Realtime を購読し、新出品/Hold で該当会場を脈打たせる。
+  //   併せて上端の集約シグナル (signalDot) も一瞬脈打たせる (「いま動いた」)。
   useVenueSupplyRealtime({
     enabled: userId != null,
     onInsert: (row) => {
       setPulseSignals((prev) => ({ ...prev, [row.venue_id]: (prev[row.venue_id] ?? 0) + 1 }))
       setSupplyCounts((prev) => ({ ...prev, [row.venue_id]: (prev[row.venue_id] ?? 0) + 1 }))
+      setSignalTick((t) => t + 1)
     },
     onHeld: (row) => {
       setPulseSignals((prev) => ({ ...prev, [row.venue_id]: (prev[row.venue_id] ?? 0) + 1 }))
+      setSignalTick((t) => t + 1)
     },
   })
   // PR-V2: fetchVenues の VenueFetchTimeoutError を拾って失敗 UI を出すフラグ。
@@ -164,6 +174,102 @@ export default function VenueListScreen() {
     router.push({ pathname: '/venue/[id]', params: { id: venue.id } } as never)
   }
 
+  // B(a): 会場タブを開いた瞬間の入場アニメ (マウント時1回・以後静止)。
+  useEffect(() => {
+    const anim = Animated.timing(entrance, {
+      toValue: 1,
+      duration: 700,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    })
+    anim.start()
+    return () => anim.stop()
+  }, [entrance])
+
+  // C: 集約シグナルドット。Realtime の新着/Hold (signalTick) で一瞬脈打つ。初回は鳴らさない。
+  const firstTick = useRef(true)
+  useEffect(() => {
+    if (firstTick.current) {
+      firstTick.current = false
+      return
+    }
+    signalDot.setValue(0)
+    const anim = Animated.sequence([
+      Animated.timing(signalDot, { toValue: 1, duration: 180, useNativeDriver: true }),
+      Animated.timing(signalDot, {
+        toValue: 0,
+        duration: 700,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+    ])
+    anim.start()
+    return () => anim.stop()
+  }, [signalTick, signalDot])
+
+  // H2: 集約 density (open 会場のみ合計)。0 でも会場カードは消さず、集約行だけ促し文に。
+  const density = useMemo(() => {
+    let people = 0
+    let supply = 0
+    for (const v of venues) {
+      if (v.status !== 'open') continue
+      people += checkinCounts[v.id] ?? 0
+      supply += supplyCounts[v.id] ?? 0
+    }
+    return { people, supply, active: people > 0 || supply > 0 }
+  }, [venues, checkinCounts, supplyCounts])
+
+  // 入場アニメの補間 (ヒーロー: opacity + 迫り上がり / 光源: opacity + 微 scale)。
+  const heroRise = entrance.interpolate({ inputRange: [0, 1], outputRange: [14, 0] })
+  const glowScale = entrance.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] })
+
+  // A(大宣言) + H2(集約density) の画面内ヒーローヘッダー。OS header 不使用 (iOS26 glass 回避)。
+  //   densityNode を差し替えて loading/本体で共用。HeaderActions は右上に維持。
+  const renderHero = (densityNode: React.ReactNode) => (
+    <Animated.View
+      style={[styles.hero, { opacity: entrance, transform: [{ translateY: heroRise }] }]}
+    >
+      <View style={styles.heroTopRow}>
+        <View style={styles.flex}>
+          <Text style={styles.heroTitle}>会場モード</Text>
+          <Text style={styles.heroSub}>いま、交換が動く場所</Text>
+        </View>
+        <HeaderActions color="#FFFFFF" />
+      </View>
+      {densityNode}
+    </Animated.View>
+  )
+
+  // 集約density 行: 動いている時は素直な事実、0 の時は素直な促し (煽らない・過疎表示しない)。
+  const densityLine = (() => {
+    if (!density.active) {
+      return (
+        <Text style={styles.densityPrompt}>
+          まだ交換は出ていません。最初のグッズを出して口火を切りましょう。
+        </Text>
+      )
+    }
+    const parts: string[] = []
+    if (density.people > 0) parts.push(`${density.people}人が交換中`)
+    if (density.supply > 0) parts.push(`${density.supply}件出ています`)
+    return (
+      <View style={styles.densityRow}>
+        <Animated.View
+          style={[
+            styles.signalDot,
+            {
+              opacity: signalDot.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }),
+              transform: [
+                { scale: signalDot.interpolate({ inputRange: [0, 1], outputRange: [1, 1.9] }) },
+              ],
+            },
+          ]}
+        />
+        <Text style={styles.densityText}>いま {parts.join('・')}</Text>
+      </View>
+    )
+  })()
+
   if (loading) {
     // item1: loading 中も白ヘッダーのフラッシュを避け、本体と同じ紫グラデ+透過ヘッダーに。
     return (
@@ -173,21 +279,19 @@ export default function VenueListScreen() {
           locations={[...VENUE_BG_LOCATIONS]}
           style={StyleSheet.absoluteFill}
         />
-        <LinearGradient
-          colors={[...VENUE_GLOW_COLORS]}
-          locations={[...VENUE_GLOW_LOCATIONS]}
-          style={StyleSheet.absoluteFill}
+        <Animated.View
           pointerEvents="none"
-        />
+          style={[StyleSheet.absoluteFill, { opacity: entrance, transform: [{ scale: glowScale }] }]}
+        >
+          <LinearGradient
+            colors={[...VENUE_GLOW_COLORS]}
+            locations={[...VENUE_GLOW_LOCATIONS]}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
         <SafeAreaView style={styles.safeTransparent} edges={['top']}>
           <StatusBar style="light" />
-          <ScreenHeader
-            title="会場"
-            showBackButton={false}
-            transparent
-            tint="light"
-            rightActions={<HeaderActions color="#FFFFFF" />}
-          />
+          {renderHero(<Text style={styles.densityPrompt}>読み込み中…</Text>)}
           <View style={styles.centerBox}>
             <ActivityIndicator color="#FFFFFF" />
           </View>
@@ -204,34 +308,25 @@ export default function VenueListScreen() {
         locations={[...VENUE_BG_LOCATIONS]}
         style={StyleSheet.absoluteFill}
       />
-      <LinearGradient
-        colors={[...VENUE_GLOW_COLORS]}
-        locations={[...VENUE_GLOW_LOCATIONS]}
-        style={StyleSheet.absoluteFill}
+      {/* B(a): 上部光源は入場時に灯る (opacity + 微 scale)、以後静止。 */}
+      <Animated.View
         pointerEvents="none"
-      />
-      <SafeAreaView style={styles.safeTransparent} edges={['top']}>
-        {/* item1: 暗紫グラデ上端に溶かす。透過 + 明色 tint + 白アイコン (会場タブのみ)。 */}
-        <StatusBar style="light" />
-        <ScreenHeader
-          title="会場"
-          showBackButton={false}
-          transparent
-          tint="light"
-          rightActions={<HeaderActions color="#FFFFFF" />}
+        style={[StyleSheet.absoluteFill, { opacity: entrance, transform: [{ scale: glowScale }] }]}
+      >
+        <LinearGradient
+          colors={[...VENUE_GLOW_COLORS]}
+          locations={[...VENUE_GLOW_LOCATIONS]}
+          style={StyleSheet.absoluteFill}
         />
+      </Animated.View>
+      <SafeAreaView style={styles.safeTransparent} edges={['top']}>
+        <StatusBar style="light" />
+        {/* A(大宣言「会場モード」) + H2(集約density) の画面内ヒーローヘッダー。 */}
+        {renderHero(densityLine)}
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-        {/* item1: 白箱をやめ紫グラデ直置きの白文字に (世界観に溶かす)。2 行に圧縮。 */}
-        <View style={styles.banner}>
-          <Text style={styles.bannerTitle}>会場で、いま交換</Text>
-          <Text style={styles.bannerBody}>
-            会場にいる人と、いま出ている譲・求からその場で今すぐ交換。
-          </Text>
-        </View>
-
         <Text style={styles.sectionLabel}>今日・近日の会場</Text>
 
         {/* PR-V2: 状態優先順位 loading > venuesLoadFailed > venues.length===0 > データ表示。
@@ -355,7 +450,36 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0D0F1C' },
   safeTransparent: { flex: 1, backgroundColor: 'transparent' },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  flex: { flex: 1 },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },
+  // SWAPLY LIVE SIGNAL: 大宣言ヒーローヘッダー (画面内・暗地直置き)。
+  hero: {
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+    gap: 8,
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  heroTitle: {
+    fontSize: fontSize.hero,
+    fontWeight: fontWeight.extrabold,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  heroSub: { fontSize: fontSize.sm, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
+  // H2 集約density 行。
+  densityRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  signalDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF6B8B' },
+  densityText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: 'rgba(255,255,255,0.92)',
+  },
+  densityPrompt: { fontSize: fontSize.sm, color: 'rgba(255,255,255,0.7)', lineHeight: 19 },
   sectionLabel: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.bold,

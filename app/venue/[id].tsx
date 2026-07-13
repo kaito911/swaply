@@ -32,6 +32,7 @@ import {
   getItemTypeById,
 } from '@/lib/master'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
+import * as Updates from 'expo-updates'
 import { LinearGradient } from 'expo-linear-gradient'
 import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
 import { HeatRing } from '@/components/venue/HeatRing'
@@ -535,6 +536,17 @@ export default function VenueHomeScreen() {
         </View>
       )}
       <SafeAreaView style={styles.safeTransparent} edges={[]}>
+      {/* ★一時 OTA 可視化 debug: 実機が今どの JS を動かしているかを目視で確定する。
+          isEmbeddedLaunch=true → build のバンドル JS (OTA 未適用)。
+          false + updateId → OTA 更新が適用されている。決着後に撤去する。 */}
+      <View style={styles.otaDebug} pointerEvents="none">
+        <Text style={styles.otaDebugText}>
+          OTA: {Updates.isEmbeddedLaunch ? 'EMBEDDED(未適用)' : 'UPDATE適用'} · id=
+          {Updates.updateId != null ? Updates.updateId.slice(0, 8) : 'none'} · rtv=
+          {Updates.runtimeVersion != null ? Updates.runtimeVersion.slice(0, 8) : '?'} ·{' '}
+          {Updates.createdAt != null ? new Date(Updates.createdAt).toLocaleTimeString() : '-'}
+        </Text>
+      </View>
       {/* PR-2: 会場文脈ヘッダー — どの会場にいるかを示し、開催中状態と参加人数で
           現在地＋臨場感を与える。venue 取得失敗時は非表示 (フォールバック)。
           ナビゲーションバーの Stack title ('会場モード' 固定) は本 PR では触らず、
@@ -1085,6 +1097,13 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   // 段階3-B: 背景グラデを敷くための root + 透明 SafeAreaView。
   root: { flex: 1, backgroundColor: '#0D0F1C' },
+  // ★一時 OTA 可視化 debug バー (決着後に撤去)。
+  otaDebug: {
+    backgroundColor: '#00E5A0',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  otaDebugText: { fontSize: 11, fontWeight: '800', color: '#001510' },
   // #4 光の海 + #1 熱量リングを敷く上部ステージ帯 (画面上部 ~42%、背面装飾)。
   // #4 光の海 (再設計): 画面下部の定位置バンド (背面装飾、UI にかぶせない)。
   galaxyBand: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 190 },

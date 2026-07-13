@@ -517,21 +517,24 @@ export default function VenueHomeScreen() {
           style={StyleSheet.absoluteFill}
         />
       </Animated.View>
-      <SafeAreaView style={styles.safeTransparent} edges={[]}>
-      {/* #4 光の海 + #1 熱量脈打ち: SafeAreaView 内・看板ヒーローの背面に前面化 (open のみ)。
-          以前は SafeAreaView の外(背面)で content に隠れていたため中へ移動。粒は静止、
-          脈打ちは新出品/Hold の瞬間のみ。pointerEvents none で操作は透過。 */}
+      {/* #4 光の海 (再設計): 画面下部の定位置に「ペンライトの海」を静的に灯す世界観演出。
+          人数連動は廃止し固定密度。SafeAreaView の前 (背面) + pointerEvents none で
+          UI/文字/カードには絶対かぶせない (下部の余白・カード間から覗く)。
+          #1 熱量: 新出品/Hold の瞬間だけ海が一度脈打つ (heatPulse)。 */}
       {venue?.status === 'open' && (
         <View pointerEvents="none" style={styles.galaxyBand}>
+          {/* #1 熱量: 密度(ignition)で発光強度、新出品/Hold の瞬間だけ脈打つ。 */}
           <HeatRing
             intensity={ignition.intensity}
             color={ignition.glowColor}
             pulseSignal={heatPulse}
             radius={0}
           />
-          <LightstickGalaxy count={checkinCount} selfPresent color={ignition.glowColor} />
+          {/* #4 光の海: 固定密度(44)・固定色のペンライトの海 (人数連動廃止・世界観演出)。 */}
+          <LightstickGalaxy count={44} color="#FF9F5C" />
         </View>
       )}
+      <SafeAreaView style={styles.safeTransparent} edges={[]}>
       {/* PR-2: 会場文脈ヘッダー — どの会場にいるかを示し、開催中状態と参加人数で
           現在地＋臨場感を与える。venue 取得失敗時は非表示 (フォールバック)。
           ナビゲーションバーの Stack title ('会場モード' 固定) は本 PR では触らず、
@@ -1083,7 +1086,8 @@ const styles = StyleSheet.create({
   // 段階3-B: 背景グラデを敷くための root + 透明 SafeAreaView。
   root: { flex: 1, backgroundColor: '#0D0F1C' },
   // #4 光の海 + #1 熱量リングを敷く上部ステージ帯 (画面上部 ~42%、背面装飾)。
-  galaxyBand: { position: 'absolute', top: 0, left: 0, right: 0, height: '42%' },
+  // #4 光の海 (再設計): 画面下部の定位置バンド (背面装飾、UI にかぶせない)。
+  galaxyBand: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 190 },
   // #2 点火ラベルチップ (透明地 + 光源色の枠/文字)。
   ignitionChip: {
     borderWidth: 1,

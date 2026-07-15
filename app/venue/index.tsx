@@ -150,29 +150,31 @@ export default function VenueListScreen() {
     }, [load])
   )
 
-  const handleCheckin = async (venue: Venue) => {
+  // ③ 入場1タップ化: 「チェックイン」という語と2段操作を廃し「入場する」に統一。
+  //   未入場なら venue_checkins に記録 (density の N人母数を維持) してから入場、
+  //   入場済なら記録をスキップして即入場。記録失敗は入場を妨げない (density は
+  //   best-effort、二重挿入は UNIQUE(venue_id,user_id) が弾く)。
+  const handleEnter = async (venue: Venue) => {
     if (userId == null) {
       Alert.alert('エラー', 'ログインが必要です')
       return
     }
-
-    try {
-      setCheckingIn(venue.id)
-      await checkInVenue(venue.id, userId)
-      setMyCheckins((prev) => ({ ...prev, [venue.id]: true }))
-      setCheckinCounts((prev) => ({ ...prev, [venue.id]: (prev[venue.id] ?? 0) + 1 }))
-      router.push({ pathname: '/venue/[id]', params: { id: venue.id } } as never)
-    } catch (error) {
-      console.error('[VenueList][handleCheckin]', error)
-      Alert.alert('エラー', 'チェックインに失敗しました')
-    } finally {
-      setCheckingIn(null)
-    }
-  }
-
-  const handleEnter = (venue: Venue) => {
     // 暗地×光源 v1: 入場の「点火」触覚。Light・瞬間のみ (頻繁な出入りでうざくならない強度)。
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+
+    if (!myCheckins[venue.id]) {
+      try {
+        setCheckingIn(venue.id)
+        await checkInVenue(venue.id, userId)
+        setMyCheckins((prev) => ({ ...prev, [venue.id]: true }))
+        setCheckinCounts((prev) => ({ ...prev, [venue.id]: (prev[venue.id] ?? 0) + 1 }))
+      } catch (error) {
+        // 記録失敗でも入場は続行 (density のみ best-effort)。
+        console.error('[VenueList][handleEnter][checkin]', error)
+      } finally {
+        setCheckingIn(null)
+      }
+    }
     router.push({ pathname: '/venue/[id]', params: { id: venue.id } } as never)
   }
 
@@ -369,7 +371,6 @@ export default function VenueListScreen() {
         ) : (
           venues.map((venue) => {
             const isOpen = venue.status === 'open'
-            const isCheckedIn = myCheckins[venue.id] ?? false
             const count = checkinCounts[venue.id] ?? 0
             const supply = supplyCounts[venue.id] ?? 0
             const isCheckingIn = checkingIn === venue.id
@@ -413,26 +414,19 @@ export default function VenueListScreen() {
                   )}
                 </View>
 
-                {isOpen && !isCheckedIn && (
+                {/* ③ 入場1タップ: 未入場でも入場済でも同じ「入場する」。押下時に
+                    未入場なら venue_checkins へ記録 (density維持)、入場済なら即遷移。 */}
+                {isOpen && (
                   <Pressable
                     style={[styles.checkinButton, isCheckingIn && styles.buttonDisabled]}
-                    onPress={() => handleCheckin(venue)}
+                    onPress={() => handleEnter(venue)}
                     disabled={isCheckingIn}
                   >
                     {isCheckingIn ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <Text style={styles.checkinButtonText}>チェックインして参加する</Text>
+                      <Text style={styles.checkinButtonText}>入場する</Text>
                     )}
-                  </Pressable>
-                )}
-
-                {isOpen && isCheckedIn && (
-                  <Pressable
-                    style={styles.enterButton}
-                    onPress={() => handleEnter(venue)}
-                  >
-                    <Text style={styles.enterButtonText}>✓ チェックイン済 → 会場に入る</Text>
                   </Pressable>
                 )}
 
@@ -656,24 +650,6 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   checkinButtonText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: '#FFFFFF',
-  },
-  // 会場に入る (操作 CTA)。色レイヤー: 操作=coral。
-  enterButton: {
-    height: 44,
-    borderRadius: radius.lg,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    elevation: 6,
-  },
-  enterButtonText: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
     color: '#FFFFFF',

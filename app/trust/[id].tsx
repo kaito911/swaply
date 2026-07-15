@@ -15,7 +15,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { CardItem } from '@/components/CardItem'
-import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SectionHeader } from '@/components/SectionHeader'
 import { TrustBadge } from '@/components/TrustBadge'
@@ -274,9 +273,11 @@ export default function TrustProfileScreen() {
           )}
         </View>
 
-        {/* 通報導線: 自分以外のプロフィールで「このユーザーを報告」(content_reports) */}
+        {/* 通報導線: 自分以外のプロフィールで「このユーザーを報告」(content_reports)。
+            出品カード群と控えめな区切り線で分離し、最下部で自然に見えるようにする。 */}
         {!isOwnProfile && (
           <View style={styles.reportLinkSection}>
+            <View style={styles.reportLinkDivider} />
             <TouchableOpacity
               onPress={() =>
                 router.push({
@@ -295,30 +296,10 @@ export default function TrustProfileScreen() {
           </View>
         )}
 
-        {/* スクロール下余白 (固定CTA分) */}
-        <View style={{ height: 120 }} />
+        {/* スクロール下余白。提案は「出品中のカードをタップ→出品詳細→提案」が正規導線
+            (先頭カード固定の暫定CTAは削除・A2解消)。 */}
+        <View style={{ height: spacing.xl }} />
       </ScrollView>
-
-      {/* ─ 固定CTA: 提案ボタン ─ */}
-      <View style={styles.ctaWrap}>
-        <PrimaryCTA
-          label={
-            cards.length > 0
-              ? `${profile.handle || profile.display_name || '出品者'} に提案する`
-              : '出品中のカードがありません'
-          }
-          onPress={() => {
-            if (cards.length === 0) return
-            // TODO: 暫定実装 — 正式には出品一覧からカードを選択して提案する導線が正しい
-            router.push({
-              pathname: '/offer/create',
-              params: { cardId: cards[0].id },
-            } as never)
-          }}
-          disabled={cards.length === 0}
-          size="lg"
-        />
-      </View>
     </SafeAreaView>
   )
 }
@@ -428,23 +409,22 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textTertiary,
   },
-  // 通報導線 (控えめ・中央)
+  // 通報導線 (控えめ・中央)。出品カード群と区切り線で分離。
   reportLinkSection: {
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  reportLinkDivider: {
+    alignSelf: 'stretch',
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginHorizontal: spacing.base,
+    marginBottom: spacing.md,
   },
   reportLinkText: {
     fontSize: fontSize.sm,
     color: colors.textTertiary,
     textDecorationLine: 'underline',
-  },
-
-  // ── 固定CTA
-  ctaWrap: {
-    padding: spacing.base,
-    paddingBottom: spacing.lg,
-    backgroundColor: colors.background,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
   },
 })

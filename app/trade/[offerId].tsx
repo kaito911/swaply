@@ -396,6 +396,9 @@ export default function TradeDetailScreen() {
         setMyAddressRegistered(true)
       }
     }
+    // 申告導線: confirm 後に「完了したか」を判定するため fresh payload を返す
+    //   (既存呼出は戻り値を無視するので非破壊)。
+    return payload as TradeDetail
   }, [offerId, currentUserId])
 
   const initialLoad = useCallback(async () => {
@@ -539,8 +542,28 @@ export default function TradeDetailScreen() {
             try {
               setConfirmingReceipt(true)
               await confirmTradeReceipt(trade.id)
-              Alert.alert('受取確認完了', '受取状態を更新しました。')
-              await loadTrade()
+              const fresh = await loadTrade()
+              // 申告導線: 双方確認で completed になった時のみ「問題なし/あり」を1枚挟む。
+              //   未完了(相手の受取確認待ち)は従来どおり '受取確認完了' Alert を維持(非破壊)。
+              if (fresh?.trade?.status === 'completed') {
+                Alert.alert(
+                  '受け取り完了',
+                  '問題なく取引できましたか？',
+                  [
+                    { text: '問題なく完了', style: 'cancel' },
+                    {
+                      text: '問題があった',
+                      onPress: () =>
+                        router.push({
+                          pathname: '/trade/report',
+                          params: { normalTradeId: trade.id },
+                        } as never),
+                    },
+                  ],
+                )
+              } else {
+                Alert.alert('受取確認完了', '受取状態を更新しました。')
+              }
             } catch (error: unknown) {
               const message = error instanceof Error ? error.message : '受取確認に失敗しました。'
               Alert.alert('受取確認エラー', message)
@@ -966,6 +989,21 @@ export default function TradeDetailScreen() {
           </Text>
         </View>
 
+        {/* 申告導線 (常設): 完了取引で問題があれば運営に申告できる (任意・非公開・収集のみ)。 */}
+        {uiState === 'completed' && (
+          <Pressable
+            style={styles.reportLink}
+            onPress={() =>
+              router.push({
+                pathname: '/trade/report',
+                params: { normalTradeId: trade.id },
+              } as never)
+            }
+          >
+            <Text style={styles.reportLinkText}>取引に問題を報告する</Text>
+          </Pressable>
+        )}
+
         {/* キャンセル（waiting_my_ship 以外で表示可能なケース） */}
         {canCancelTrade && uiState !== 'waiting_my_ship' && (
           <View style={styles.sectionCard}>
@@ -1246,6 +1284,18 @@ const styles = StyleSheet.create({
   cancelLinkText: {
     fontSize: 13,
     color: '#B91C1C',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  // 申告導線 (常設・控えめ)。主張しすぎない副導線として中央下に。
+  reportLink: {
+    marginTop: 4,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  reportLinkText: {
+    fontSize: 13,
+    color: '#8A8499',
     fontWeight: '600',
     textDecorationLine: 'underline',
   },

@@ -334,12 +334,6 @@ export default function VenueHoldsScreen() {
             try {
               setActingId(hold.id)
               await confirmVenueTrade(trade.id, userId, role)
-              Alert.alert(
-                '確認しました',
-                role === 'proposer'
-                  ? '相手の確認待ちです。'
-                  : '双方確認完了！取引が完了しました。'
-              )
               // PR4a: completed への遷移は両者確認時のみ。partially_confirmed の
               // 場合は status='held' のまま (venue_trade.status のみ更新済)。
               // hold.venue_trade を最新化して以降の判定を正しく動かす。
@@ -348,6 +342,27 @@ export default function VenueHoldsScreen() {
                   ? trade.receiver_confirmed_at
                   : trade.proposer_confirmed_at
               const becameCompleted = otherTimestamp != null
+              // 申告導線: 双方確認で completed になった時のみ「問題なし/あり」を1枚挟む。
+              //   相手待ち(partially)は従来どおりの Alert を維持(非破壊)。
+              if (becameCompleted) {
+                Alert.alert(
+                  '取引完了',
+                  '問題なく取引できましたか？',
+                  [
+                    { text: '問題なく完了', style: 'cancel' },
+                    {
+                      text: '問題があった',
+                      onPress: () =>
+                        router.push({
+                          pathname: '/trade/report',
+                          params: { venueTradeId: trade.id },
+                        } as never),
+                    },
+                  ],
+                )
+              } else {
+                Alert.alert('確認しました', '相手の確認待ちです。')
+              }
               setHolds((prev) =>
                 prev.map((h) => {
                   if (h.id !== hold.id) return h

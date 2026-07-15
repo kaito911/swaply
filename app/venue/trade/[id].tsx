@@ -42,7 +42,7 @@ import {
 } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { useBadge } from '@/providers/BadgeProvider'
-import { useFocusEffect, useLocalSearchParams } from 'expo-router'
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -733,6 +733,20 @@ export default function VenueTradeDMScreen() {
                 ? 'この取引は完了済みです。メッセージは閲覧のみ可能です。'
                 : 'この取引はキャンセル済みです。メッセージは閲覧のみ可能です。'}
             </Text>
+            {/* 申告導線 (常設): 完了取引で問題があれば運営に申告できる (任意・非公開・収集のみ)。 */}
+            {trade.status === 'completed' && (
+              <Pressable
+                style={styles.reportLink}
+                onPress={() =>
+                  router.push({
+                    pathname: '/trade/report',
+                    params: { venueTradeId: trade.id },
+                  } as never)
+                }
+              >
+                <Text style={styles.reportLinkText}>取引に問題を報告する</Text>
+              </Pressable>
+            )}
           </View>
         )}
       </KeyboardAvoidingView>
@@ -975,5 +989,16 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  // 申告導線 (常設・控えめ)。
+  reportLink: {
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  reportLinkText: {
+    fontSize: fontSize.sm,
+    color: colors.textTertiary,
+    fontWeight: fontWeight.semibold,
+    textDecorationLine: 'underline',
   },
 })

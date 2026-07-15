@@ -4,13 +4,13 @@
 // タブ分離:
 //   - received: 自分が受信者 (= supply_post 投稿者) の Hold。承認 / 拒否ボタン。
 //   - sent:     自分が申請者の Hold。取消ボタン。
-//   - converted: held / converted (= venue_trade 生成後)。手渡し完了確認 (legacy)。
+//   - converted: held / converted (= venue_trade 生成後)。完了確認 (legacy)。
 //
 // lazy expiry:
 //   - pending かつ expires_at < now() を UI 上「期限切れ」扱いで承認 / 拒否 / 取消ボタン非表示。
 //   - DB 上は pending のまま (PR2 では expired への遷移はしない。P1 で pg_cron)。
 //
-// 手渡し完了確認 (converted タブ) は B1 (in-memory trade) / B2 (receiver 先行 CHECK 違反)
+// 完了確認 (converted タブ) は B1 (in-memory trade) / B2 (receiver 先行 CHECK 違反)
 // バグを残したまま温存。PR4a で再設計予定。
 import {
   acceptVenueHold,
@@ -92,13 +92,13 @@ function venueAcceptErrorMessage(rawMessage: string): { title: string; body: str
   if (rawMessage.startsWith('HOLD_EXPIRED')) {
     return {
       title: '期限切れ',
-      body: 'この Hold は期限切れです。申請者に再申請してもらってください。',
+      body: 'この提案は期限切れです。申請者に再度提案してもらってください。',
     }
   }
   if (rawMessage.startsWith('SUPPLY_POST_ALREADY_TAKEN')) {
     return {
       title: '成立済み',
-      body: 'この会場投稿には既に別の Hold が成立しています。',
+      body: 'この会場投稿は既に別の相手と成立しています。',
     }
   }
   if (rawMessage.startsWith('SUPPLY_POST_NOT_FOUND')) {
@@ -118,13 +118,13 @@ function venueAcceptErrorMessage(rawMessage: string): { title: string; body: str
     const status = rawMessage.split(':')[1] ?? 'unknown'
     return {
       title: '承認できません',
-      body: `この Hold は既に処理されています（${status}）。一度画面を更新してください。`,
+      body: `この提案は既に処理されています（${status}）。一度画面を更新してください。`,
     }
   }
   if (rawMessage.startsWith('NOT_RECEIVER')) {
     return {
       title: '権限がありません',
-      body: 'この Hold の受信者でないため承認できません。',
+      body: 'この提案の受信者でないため承認できません。',
     }
   }
   if (rawMessage.startsWith('AUTH_REQUIRED')) {
@@ -211,8 +211,8 @@ export default function VenueHoldsScreen() {
 
   const handleAccept = (hold: VenueHoldWithRelations) => {
     Alert.alert(
-      'Hold申請を承認しますか？',
-      '承認するとHoldが確定し、イベント当日中に手渡しで交換完了してください。',
+      '交換の提案を承認しますか？',
+      '承認すると成立します。イベント当日中に会場で交換してください。',
       [
         { text: 'キャンセル', style: 'cancel' },
         {
@@ -222,7 +222,7 @@ export default function VenueHoldsScreen() {
               setActingId(hold.id)
               const trade = await acceptVenueHold(hold.id)
               // PR4a: 戻り値の trade を hold オブジェクトに埋め込む (再 fetch なしで
-              // 即座に成立済タブの「手渡し完了確認」ボタンへ到達可能にする)
+              // 即座に成立タブの「交換の完了を確認」ボタンへ到達可能にする)
               setHolds((prev) =>
                 prev.map((h) =>
                   h.id === hold.id
@@ -257,8 +257,8 @@ export default function VenueHoldsScreen() {
   const handleDecline = (hold: VenueHoldWithRelations) => {
     if (userId == null) return
     Alert.alert(
-      'Hold申請を拒否しますか？',
-      '拒否すると申請者には「拒否済み」と表示されます。',
+      '交換の提案を拒否しますか？',
+      '拒否すると相手には「拒否済み」と表示されます。',
       [
         { text: 'キャンセル', style: 'cancel' },
         {
@@ -288,7 +288,7 @@ export default function VenueHoldsScreen() {
   const handleCancel = (hold: VenueHoldWithRelations) => {
     if (userId == null) return
     Alert.alert(
-      'Hold申請を取り消しますか？',
+      '交換の提案を取り消しますか？',
       '取り消すと相手側にも「キャンセル」として表示されます。',
       [
         { text: '戻る', style: 'cancel' },
@@ -324,7 +324,7 @@ export default function VenueHoldsScreen() {
     const role = hold.proposer_id === userId ? 'proposer' : 'receiver'
 
     Alert.alert(
-      '手渡し完了を確認しますか？',
+      '交換の完了を確認しますか？',
       'カードを受け取ったことを確認します。双方が確認すると取引完了となりTrustが更新されます。',
       [
         { text: 'キャンセル', style: 'cancel' },
@@ -405,11 +405,11 @@ export default function VenueHoldsScreen() {
   // PR-5-b: 成立済タブのみ urgent (対応待ち件数) を持たせる。他タブは undefined のまま
   // で描画時に赤ドットが出ない。
   const TABS: { key: Tab; label: string; count: number; urgent?: number }[] = [
-    { key: 'received', label: '受信', count: receivedCount },
-    { key: 'sent', label: '送信', count: sentCount },
+    { key: 'received', label: '受けた提案', count: receivedCount },
+    { key: 'sent', label: '送った提案', count: sentCount },
     {
       key: 'converted',
-      label: '成立済',
+      label: '成立',
       count: convertedCount,
       urgent: convertedUrgentCount,
     },
@@ -454,17 +454,17 @@ export default function VenueHoldsScreen() {
         <View style={styles.emptyBox}>
           <Text style={styles.emptyTitle}>
             {tab === 'received'
-              ? '受信中のHoldはありません'
+              ? '受けた提案はありません'
               : tab === 'sent'
-              ? '送信中のHoldはありません'
-              : '成立済みのHoldはありません'}
+              ? '送った提案はありません'
+              : '成立した交換はありません'}
           </Text>
           <Text style={styles.emptyBody}>
             {tab === 'received'
-              ? 'あなたの会場投稿に届いたHoldがここに表示されます'
+              ? 'あなたの会場投稿に届いた提案がここに表示されます'
               : tab === 'sent'
-              ? '会場で気になる相手にHoldを送ると、ここに表示されます'
-              : '承認したHoldがここに集まります'}
+              ? '会場で気になる相手に交換を提案すると、ここに表示されます'
+              : '成立した交換がここに集まります'}
           </Text>
         </View>
       ) : (
@@ -514,7 +514,7 @@ export default function VenueHoldsScreen() {
               trade.status !== 'completed' &&
               trade.status !== 'cancelled' &&
               !myConfirmed
-            // バグ2 修正: キャンセル申請中は完了系アクションを隠す (誤って手渡し完了しない)。
+            // バグ2 修正: キャンセル申請中は完了系アクションを隠す (誤って完了しない)。
             // 申請が拒否/取下げされ cancel_requested_at が NULL に戻ると reload で復活する。
             const showConfirmTrade = confirmEligible && !isCancelRequested
             // 完全な無表示は避け、「申請中は完了できない」ことを一文で伝える (案Y)。
@@ -708,7 +708,7 @@ export default function VenueHoldsScreen() {
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
                       <Text style={styles.confirmButtonText}>
-                        手渡し完了を確認する
+                        交換の完了を確認する
                       </Text>
                     )}
                   </Pressable>
@@ -717,7 +717,7 @@ export default function VenueHoldsScreen() {
                 {/* バグ2 修正 (案Y): キャンセル申請中は完了ボタンを隠し、理由を一文で明示。 */}
                 {showCancelBlockedHint && (
                   <Text style={styles.cancelBlockedHint}>
-                    キャンセル申請中のため、手渡し完了はできません
+                    キャンセル申請中のため、完了できません
                   </Text>
                 )}
 
@@ -764,7 +764,7 @@ export default function VenueHoldsScreen() {
                   trade.status === 'partially_confirmed' &&
                   myConfirmed && (
                     <Text style={styles.partiallyHint}>
-                      ✓ あなたの手渡し完了確認は記録されました。相手の確認待ちです。
+                      ✓ あなたの完了確認は記録されました。相手の確認待ちです。
                     </Text>
                   )}
 
@@ -773,7 +773,7 @@ export default function VenueHoldsScreen() {
                   trade != null &&
                   trade.status === 'completed' && (
                     <Text style={styles.completedHint}>
-                      ✓ 取引完了。双方が手渡し完了を確認しました。
+                      ✓ 取引完了。双方が完了を確認しました。
                     </Text>
                   )}
 

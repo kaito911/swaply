@@ -140,10 +140,10 @@ export default function VenueHoldScreen() {
         supplyPostId: postId,
         proposerImageUrl: uploadedUrl,
       })
-      // 成功: 会場ホームは useFocusEffect で最新化。Hold 一覧へ誘導。
-      Alert.alert('Hold申請を送りました', '相手の承認待ちです。承認されるとHoldが確定します。', [
+      // 成功: 会場ホームは useFocusEffect で最新化。自分の会場交換一覧へ誘導。
+      Alert.alert('交換の提案を送りました', '相手の承認待ちです。相手が承認すると成立します。', [
         {
-          text: 'Hold一覧を見る',
+          text: '自分の会場交換を見る',
           onPress: () =>
             router.replace({ pathname: '/venue/holds', params: { venueId } } as never),
         },
@@ -151,7 +151,7 @@ export default function VenueHoldScreen() {
       ])
     } catch (error) {
       console.error('[VenueHold][submit]', error)
-      Alert.alert('エラー', 'Hold申請に失敗しました')
+      Alert.alert('エラー', '提案の送信に失敗しました')
     } finally {
       setSubmittingHold(false)
     }
@@ -159,8 +159,8 @@ export default function VenueHoldScreen() {
 
   return (
     <VenueComposerScreen
-      title="Hold申請"
-      ctaLabel="Hold申請を送る"
+      title="交換を提案"
+      ctaLabel="交換を提案する"
       onSubmit={handleSubmitHold}
       submitting={submittingHold}
       submitDisabled={!holdAgreed || myCardInput.trim() === ''}
@@ -182,7 +182,7 @@ export default function VenueHoldScreen() {
       </View>
 
       <View style={styles.infoBox}>
-        <Text style={styles.infoText}>申請 → 相手承認 → イベント当日中に手渡し で完了。</Text>
+        <Text style={styles.infoText}>提案 → 相手が承認 → イベント当日中に会場で交換。</Text>
       </View>
 
       {/* あなたが出す */}
@@ -271,13 +271,13 @@ export default function VenueHoldScreen() {
         )}
       </View>
 
-      {/* 会場内即手渡し同意 */}
+      {/* 会場内その場交換の同意 */}
       <Pressable style={styles.agreeRow} onPress={() => setHoldAgreed((v) => !v)}>
         <View style={[styles.checkbox, holdAgreed && styles.checkboxChecked]}>
           {holdAgreed && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
         </View>
         <Text style={styles.agreeText}>
-          会場内での即手渡し条件でHold申請します。承認後は時間内に必ず交換します。
+          会場内でその場で交換する条件で提案します。承認後は時間内に必ず交換します。
         </Text>
       </Pressable>
     </VenueComposerScreen>

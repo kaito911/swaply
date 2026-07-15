@@ -187,7 +187,7 @@ function RootNavigator() {
           name="venue/holds"
           options={{
             headerShown: true,
-            title: 'Venue Hold一覧',
+            title: '自分の会場交換',
             headerStyle: { backgroundColor: colors.background },
             headerTintColor: colors.textPrimary,
             headerShadowVisible: false,

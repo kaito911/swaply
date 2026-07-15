@@ -66,8 +66,8 @@ export default function NotificationsScreen() {
     items.push({
       key: 'received-hold',
       icon: 'location-outline',
-      title: '会場でHold申請が届いています',
-      subtitle: `${receivedHoldCount}件のHold申請があります`,
+      title: '会場で交換の提案が届いています',
+      subtitle: `${receivedHoldCount}件の交換の提案があります`,
       // 会場 Hold inbox は per-venue 動線 (/venue/holds は venueId 必須) のため、
       // 直接遷移ではなく会場タブの一覧経由で該当会場に入ってもらう。
       onPress: () => router.push('/venue-tab' as never),
@@ -93,7 +93,7 @@ export default function NotificationsScreen() {
         <View style={styles.center}>
           <Text style={styles.emptyTitle}>今対応が必要な通知はありません</Text>
           <Text style={styles.emptySub}>
-            申請や会場Hold、未読メッセージがあるとここに表示されます。
+            申請や会場の交換、未読メッセージがあるとここに表示されます。
           </Text>
         </View>
       ) : (

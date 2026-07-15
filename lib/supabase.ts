@@ -3285,7 +3285,7 @@ export async function acceptVenueHold(holdId: string): Promise<VenueTrade> {
 }
 
 /**
- * 会場交換の手渡し完了確認 (PR4a で role 中立対称確定に再設計)。
+ * 会場交換の完了確認 (PR4a で role 中立対称確定に再設計)。
  *
  * 設計方針:
  *   - status 文字列に role を含めない (旧 `${role}_confirmed` テンプレート廃止)。

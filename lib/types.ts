@@ -678,12 +678,14 @@ export const TRADE_STATUS_LABELS: Record<TradeStatus, string> = {
 // venue_holds.status の表示ラベル。VenueHoldStatus と 1:1 で対応。
 // 'expired' は lazy 判定 (expires_at < now() の pending を UI 上で expired 扱い) でも使用するため、
 // 「期限切れ」表示はこの値を流用する。
+// ★表示ラベルのみ (enum 値 held/converted は不変)。会場交換はその場で行うのが
+//   共通認識のため冗長な語を出さず、通常取引と同じ「成立」語彙に統一。
 export const VENUE_HOLD_STATUS_LABELS: Record<VenueHoldStatus, string> = {
   pending: '承認待ち',
-  held: 'Hold確定',
+  held: '成立',
   expired: '期限切れ',
   cancelled: 'キャンセル',
-  converted: '取引化済み',
+  converted: '成立',
   declined: '拒否済み',
 }
 

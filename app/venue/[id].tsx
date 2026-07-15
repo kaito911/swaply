@@ -612,7 +612,7 @@ export default function VenueHomeScreen() {
         >
           <Ionicons name="notifications" size={18} color="#FFFFFF" />
           <Text style={styles.holdBannerText}>
-            届いた Hold が {receivedHoldCount} 件あります
+            届いた提案が {receivedHoldCount} 件あります
           </Text>
           <Text style={styles.holdBannerArrow}>→</Text>
         </Pressable>
@@ -653,7 +653,7 @@ export default function VenueHomeScreen() {
         >
           <Ionicons name="list-outline" size={16} color={colors.primary} />
           <Text style={styles.quickLinkText} numberOfLines={1}>
-            送受信のHoldを見る
+            自分の会場交換を見る
           </Text>
           {/* PR-7: 受信中 pending Hold 件数バッジ (= 既存の receivedHoldCount、
               loadHoldCount で取得済)。新規 fetch なし。cancel 応答待ちは
@@ -792,10 +792,10 @@ export default function VenueHomeScreen() {
                       onPress={() =>
                         handleHoldRequest(pair.theirPost, pair.myPost.card_name)
                       }
-                      accessibilityLabel="この組み合わせでHold申請"
+                      accessibilityLabel="この組み合わせで交換を提案"
                     >
                       <Text style={styles.matchCardButtonText}>
-                        この組み合わせでHold
+                        この組み合わせで提案
                       </Text>
                     </Pressable>
                   </View>
@@ -1071,9 +1071,9 @@ export default function VenueHomeScreen() {
                     ]}
                     onPress={() => handleHoldRequest(post)}
                     accessibilityRole="button"
-                    accessibilityLabel="Holdする"
+                    accessibilityLabel="交換を提案"
                   >
-                    <Text style={styles.holdCtaText}>Holdする</Text>
+                    <Text style={styles.holdCtaText}>交換を提案</Text>
                   </Pressable>
                 </View>
               )

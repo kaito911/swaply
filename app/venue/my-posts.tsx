@@ -232,7 +232,7 @@ export default function VenueMyPostsScreen() {
                     onPress={handleOpenReceivedHolds}
                   >
                     <Text style={styles.holdCountText}>
-                      🔔 受信中の Hold: {count} 件
+                      🔔 届いた提案: {count} 件
                     </Text>
                     <Text style={styles.holdCountArrow}>→</Text>
                   </Pressable>

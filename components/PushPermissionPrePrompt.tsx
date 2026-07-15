@@ -116,7 +116,7 @@ export function PushPermissionPrePrompt({ userId }: Props) {
         <View style={styles.sheet}>
           <Text style={styles.title}>通知をオンにしますか？</Text>
           <Text style={styles.body}>
-            Hold申請・DM・交換申請を見逃さないように、通知を受け取れます。あとからでも変更できます。
+            交換の提案・DM・交換申請を見逃さないように、通知を受け取れます。あとからでも変更できます。
           </Text>
           <PrimaryCTA
             label="通知を許可する"

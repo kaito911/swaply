@@ -41,6 +41,8 @@ export default function LikesScreen() {
 
   const [likedCards, setLikedCards] = useState<LikedCardWithCard[]>([])
   const [loading, setLoading] = useState(true)
+  // A1: 読み込み失敗フラグ。catch で立て、再試行UIを出す (永久スピナー是正)。
+  const [loadFailed, setLoadFailed] = useState(false)
   const [removingCardId, setRemovingCardId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -49,10 +51,19 @@ export default function LikesScreen() {
       setLoading(false)
       return
     }
-    setLoading(true)
-    const data = await fetchMyLikedCards(userId)
-    setLikedCards(data)
-    setLoading(false)
+    // A1: try/catch/finally で包み、fetch 失敗でも finally で必ず loading を落とす。
+    //   成功時の setLikedCards は従来通り (非破壊)。
+    try {
+      setLoading(true)
+      setLoadFailed(false)
+      const data = await fetchMyLikedCards(userId)
+      setLikedCards(data)
+    } catch (e) {
+      console.error('[likes][load]', e)
+      setLoadFailed(true)
+    } finally {
+      setLoading(false)
+    }
   }, [userId])
 
   useFocusEffect(
@@ -99,6 +110,21 @@ export default function LikesScreen() {
         <ScreenHeader title="いいね" />
         <View style={styles.center}>
           <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  // A1: 読み込み失敗時は固まらせず再試行できるようにする (load を再呼び出すだけ)。
+  if (loadFailed) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <ScreenHeader title="いいね" />
+        <View style={styles.center}>
+          <Text style={styles.retryText}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => void load()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     )
@@ -209,6 +235,25 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // A1: 読み込み失敗時の再試行UI。
+  retryText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+  },
+  retryButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
   note: {
     fontSize: fontSize.xs,

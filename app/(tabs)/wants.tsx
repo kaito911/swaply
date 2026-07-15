@@ -114,6 +114,8 @@ export default function WantsScreen() {
 
   const [wants, setWants] = useState<WantedCard[]>([])
   const [loading, setLoading] = useState(true)
+  // A1: 読み込み失敗フラグ。catch で立て、再試行UIを出す (永久スピナー是正)。
+  const [loadFailed, setLoadFailed] = useState(false)
   const [archivingId, setArchivingId] = useState<string | null>(null)
 
   // 「+ 追加」モーダル state
@@ -141,10 +143,19 @@ export default function WantsScreen() {
       setLoading(false)
       return
     }
-    setLoading(true)
-    const data = await fetchMyWantedCards(userId)
-    setWants(data)
-    setLoading(false)
+    // A1: try/catch/finally で包み、fetch 失敗でも finally で必ず loading を落とす。
+    //   成功時の setWants は従来通り (非破壊)。
+    try {
+      setLoading(true)
+      setLoadFailed(false)
+      const data = await fetchMyWantedCards(userId)
+      setWants(data)
+    } catch (e) {
+      console.error('[wants][load]', e)
+      setLoadFailed(true)
+    } finally {
+      setLoading(false)
+    }
   }, [userId])
 
   useFocusEffect(
@@ -320,6 +331,21 @@ export default function WantsScreen() {
         <ScreenHeader title="求リスト" />
         <View style={styles.center}>
           <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  // A1: 読み込み失敗時は固まらせず再試行できるようにする (load を再呼び出すだけ)。
+  if (loadFailed) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <ScreenHeader title="求リスト" />
+        <View style={styles.center}>
+          <Text style={styles.retryText}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => void load()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     )
@@ -610,6 +636,25 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // A1: 読み込み失敗時の再試行UI。
+  retryText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginBottom: 16,
+  },
+  retryButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
   note: {
     fontSize: 13,

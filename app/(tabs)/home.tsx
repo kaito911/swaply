@@ -44,6 +44,7 @@ import {
   ActivityIndicator,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -62,6 +63,9 @@ export default function HomeScreen() {
   const [oshiMatchCards, setOshiMatchCards] = useState<Card[]>([])
   const [easyCards, setEasyCards] = useState<Card[]>([])
   const [loading, setLoading] = useState(true)
+  // A1: 初回ロード失敗フラグ。★initial 失敗時のみ true にする (refresh 失敗では
+  //   既存レーンを消さない)。永久スピナー是正。
+  const [loadFailed, setLoadFailed] = useState(false)
   // pull-to-refresh 専用フラグ。★loading とは厳密に分離: refresh 時は loading を触らない
   // (loading=true にするとレーンが loadingBox に潰れ scroll offset が飛ぶため)。
   const [refreshing, setRefreshing] = useState(false)
@@ -94,6 +98,10 @@ export default function HomeScreen() {
       if (mode === 'refresh') setRefreshing(true)
       else setLoading(true)
 
+      // A1: try/catch/finally で包み、途中の await が失敗しても finally で必ず
+      //   loading/refreshing を落とす (永久スピナー是正)。成功時の各 setter・出し順は不変。
+      setLoadFailed(false)
+      try {
         // ①レーン: get_best_trade_candidate RPC（ログイン時のみ）
         let candidateData: BestTradeCandidateData | null = null
 
@@ -198,8 +206,15 @@ export default function HomeScreen() {
         })
         setGridCards(firstPage)
         if (firstPage.length < GRID_PAGE) setGridEnd(true)
-      if (mode === 'refresh') setRefreshing(false)
-      else setLoading(false)
+      } catch (e) {
+        console.error('[home][load]', e)
+        // ★initial 失敗時のみ error 表示に切替。refresh 失敗は既存レーンを消さず、
+        //   finally で spinner を止めるだけ (現在の表示を維持=非破壊)。
+        if (mode === 'initial') setLoadFailed(true)
+      } finally {
+        if (mode === 'refresh') setRefreshing(false)
+        else setLoading(false)
+      }
     },
     [user?.id],
   )
@@ -342,6 +357,14 @@ export default function HomeScreen() {
           <View style={styles.loadingBox}>
             <ActivityIndicator color={colors.primary} />
             <Text style={styles.loadingText}>カードを読み込み中...</Text>
+          </View>
+        ) : loadFailed ? (
+          // A1: 初回ロード失敗。固まらせず再試行 (load('initial') 再呼び出し)。
+          <View style={styles.loadingBox}>
+            <Text style={styles.loadingText}>読み込みに失敗しました</Text>
+            <Pressable style={styles.retryButton} onPress={() => void load('initial')}>
+              <Text style={styles.retryButtonText}>再試行</Text>
+            </Pressable>
           </View>
         ) : oshiMatchCards.length === 0 &&
           easyCards.length === 0 &&
@@ -502,6 +525,21 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     marginTop: spacing.md,
+  },
+  // A1: 初回ロード失敗時の再試行ボタン。
+  retryButton: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
   laneContent: {
     paddingHorizontal: spacing.base,

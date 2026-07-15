@@ -1438,6 +1438,134 @@ export async function createReport(params: {
 }
 
 // ─────────────────────────────────────────
+// コンテンツ通報 (content_reports) — 審査要件 Apple 1.2 の本格版。
+// 器・RPC は本番適用済 (create_content_report / get_content_reports /
+//   operator_resolve_content_report / operator_accounts)。ここはその薄いクライアント。
+// ※ 旧 createReport (reports テーブル) は content_reports に一本化のため書込停止。
+//    createReport 関数自体は非破壊で残置 (未使用)。
+// ─────────────────────────────────────────
+
+// card 6 + user 5 (other 共有) = 10 値。UI で対象別に出し分ける。
+export type ContentReportCategory =
+  | 'prohibited_item'
+  | 'counterfeit'
+  | 'inappropriate_image'
+  | 'spam'
+  | 'miscategorized'
+  | 'harassment'
+  | 'monetary_demand'
+  | 'impersonation'
+  | 'inappropriate_profile'
+  | 'other'
+
+export type ContentReportStatus = 'open' | 'actioned' | 'dismissed'
+
+// get_content_reports RPC の返す 1 行 (card/reporter/対象user を join 済)。
+export type ContentReportRow = {
+  id: string
+  reporter_id: string
+  reporter_handle: string | null
+  reporter_display_name: string | null
+  reported_card_id: string | null
+  card_name: string | null
+  card_image_url: string | null
+  card_is_public: boolean | null
+  card_owner_id: string | null
+  reported_user_id: string | null
+  reported_user_handle: string | null
+  reported_user_display_name: string | null
+  category: ContentReportCategory
+  note: string | null
+  status: ContentReportStatus
+  created_at: string
+  resolved_at: string | null
+}
+
+/**
+ * コンテンツ通報を作成する (create_content_report RPC、SECURITY DEFINER)。
+ * reporter=auth.uid() はサーバ導出。cardId / userId のどちらか一方のみ渡す (XOR)。
+ * 想定エラー(error.message): AUTH_REQUIRED / TARGET_REF_INVALID / INVALID_CATEGORY /
+ *   TARGET_NOT_FOUND / SELF_REPORT_NOT_ALLOWED / ALREADY_REPORTED。
+ */
+export async function createContentReport(params: {
+  cardId?: string | null
+  userId?: string | null
+  category: ContentReportCategory
+  note?: string | null
+}): Promise<void> {
+  const cardId = params.cardId ?? null
+  const userId = params.userId ?? null
+  if ((cardId == null) === (userId == null)) {
+    // 両 NULL / 両指定は RPC でも弾かれるが、往復コストを避けて先に投げる
+    throw new Error('TARGET_REF_INVALID')
+  }
+  const { error } = await supabase.rpc('create_content_report', {
+    p_card_id: cardId,
+    p_user_id: userId,
+    p_category: params.category,
+    p_note: params.note ?? null,
+  })
+  if (error != null) {
+    throw new Error(error.message !== '' ? error.message : 'CREATE_CONTENT_REPORT_FAILED')
+  }
+}
+
+/**
+ * 運営用: 通報一覧を取得する (get_content_reports RPC、operator_accounts ゲート)。
+ * 非 operator が呼ぶと NOT_OPERATOR。status 省略で全件、指定で絞り込み。
+ */
+export async function getContentReports(
+  status?: ContentReportStatus,
+): Promise<ContentReportRow[]> {
+  const { data, error } = await supabase.rpc('get_content_reports', {
+    p_status: status ?? null,
+  })
+  if (error != null) {
+    throw new Error(error.message !== '' ? error.message : 'GET_CONTENT_REPORTS_FAILED')
+  }
+  return (data as ContentReportRow[]) ?? []
+}
+
+/**
+ * 運営用: 通報を対処する (operator_resolve_content_report RPC、operator ゲート)。
+ * 'unpublish' = 対象出品を is_public=false + status='actioned'、
+ * 'dismiss'   = status='dismissed'。非 operator は NOT_OPERATOR。
+ */
+export async function operatorResolveContentReport(
+  reportId: string,
+  action: 'unpublish' | 'dismiss',
+): Promise<void> {
+  const { error } = await supabase.rpc('operator_resolve_content_report', {
+    p_report_id: reportId,
+    p_action: action,
+  })
+  if (error != null) {
+    throw new Error(error.message !== '' ? error.message : 'RESOLVE_CONTENT_REPORT_FAILED')
+  }
+}
+
+/**
+ * 自分が運営 (operator_accounts に登録) かを判定する。
+ * operator_accounts は "Anyone can read" RLS のため authenticated が自分の行を直読み可能。
+ * 運営リンク/画面の表示制御用 (実際の権限は各 RPC の operator ゲートで二重に担保)。
+ */
+export async function isOperator(): Promise<boolean> {
+  const { data: authData } = await supabase.auth.getUser()
+  const uid = authData.user?.id
+  if (uid == null) return false
+  const { data, error } = await supabase
+    .from('operator_accounts')
+    .select('user_id')
+    .eq('user_id', uid)
+    .maybeSingle()
+  if (error != null) {
+    console.error('[isOperator]', error)
+    return false
+  }
+  return data != null
+}
+
+// ─────────────────────────────────────────
 // ユーザーブロック (user_blocks)
 // Phase 0 PR-C: 「自分がブロックした相手」を保存する単方向リスト。
 // β1 では home / search / listing 一覧から相手の出品を除外する目的で使用。

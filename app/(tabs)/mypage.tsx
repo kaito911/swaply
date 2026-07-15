@@ -17,6 +17,7 @@ import {
   fetchMyOffers,
   fetchProfile,
   fetchUserCards,
+  isOperator,
   supabase,
 } from '@/lib/supabase'
 import {
@@ -87,6 +88,8 @@ export default function MyPageScreen() {
   // 交換人数: get_distinct_partner_count RPC (INVOKER・引数なし)。
   // completed な trades / venue_trades の distinct 相手数。「信頼の記録」で表示。
   const [partnerCount, setPartnerCount] = useState(0)
+  // 運営(operator)のみ「通報管理」リンクを出すための判定。既定 false (一般ユーザーには出さない)。
+  const [operator, setOperator] = useState(false)
   const [dataLoading, setDataLoading] = useState(true)
 
   useFocusEffect(
@@ -99,10 +102,13 @@ export default function MyPageScreen() {
         fetchMyOffers(userId),
         // 交換人数 RPC。失敗しても他データ表示を止めないよう個別に握り潰す (0 fallback)。
         fetchDistinctPartnerCount().catch(() => 0),
-      ]).then(([p, c, offers, partners]) => {
+        // 運営判定。失敗時は false (安全側=リンクを出さない)。
+        isOperator().catch(() => false),
+      ]).then(([p, c, offers, partners, op]) => {
         if (p != null) setProfile(p)
         setCards(c)
         setPartnerCount(partners)
+        setOperator(op)
         setHistoryOffers(
           offers.filter(
             (o) =>
@@ -475,6 +481,20 @@ export default function MyPageScreen() {
             </Pressable>
           ))}
         </View>
+
+        {/* 運営専用リンク: operator (operator_accounts 登録者) のときだけ表示。
+            一般ユーザーには一切出さない。実権限は operator RPC 側で二重に担保。 */}
+        {operator && (
+          <View style={styles.settingsSection}>
+            <Pressable
+              style={styles.settingRow}
+              onPress={() => router.push('/operator/reports' as never)}
+            >
+              <Text style={styles.settingLabel}>通報管理</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+            </Pressable>
+          </View>
+        )}
 
         {/* 法務・サポートリンク群 (App Store 審査必須項目) */}
         <View style={styles.settingsSection}>

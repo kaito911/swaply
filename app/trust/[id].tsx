@@ -30,6 +30,7 @@ import {
     Profile,
     TrustBadgeLevel,
 } from '@/lib/types'
+import { useAuthContext } from '@/providers/AuthProvider'
 
 // ─────────────────────────────────────────
 // 統計ボックス
@@ -97,6 +98,9 @@ const statStyles = StyleSheet.create({
 
 export default function TrustProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
+  const { session } = useAuthContext()
+  // 自分のプロフィールでは通報リンクを出さない (自己通報は RPC でも弾かれる)。
+  const isOwnProfile = session?.user?.id != null && session.user.id === id
   const [profile, setProfile] = useState<Profile | null>(null)
   const [cards, setCards] = useState<Card[]>([])
   const [loading, setLoading] = useState(true)
@@ -270,6 +274,27 @@ export default function TrustProfileScreen() {
           )}
         </View>
 
+        {/* 通報導線: 自分以外のプロフィールで「このユーザーを報告」(content_reports) */}
+        {!isOwnProfile && (
+          <View style={styles.reportLinkSection}>
+            <TouchableOpacity
+              onPress={() =>
+                router.push({
+                  pathname: '/report' as never,
+                  params: {
+                    targetType: 'user',
+                    targetId: id,
+                    targetLabel: profile.handle ?? profile.display_name ?? '',
+                  } as never,
+                })
+              }
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <Text style={styles.reportLinkText}>このユーザーを報告する</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* スクロール下余白 (固定CTA分) */}
         <View style={{ height: 120 }} />
       </ScrollView>
@@ -402,6 +427,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     fontSize: fontSize.sm,
     color: colors.textTertiary,
+  },
+  // 通報導線 (控えめ・中央)
+  reportLinkSection: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  reportLinkText: {
+    fontSize: fontSize.sm,
+    color: colors.textTertiary,
+    textDecorationLine: 'underline',
   },
 
   // ── 固定CTA

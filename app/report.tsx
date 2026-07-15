@@ -20,7 +20,12 @@
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
-import { createReport, type ReportTargetType } from '@/lib/supabase'
+import {
+  createContentReport,
+  type ContentReportCategory,
+  type ReportTargetType,
+} from '@/lib/supabase'
+import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useState } from 'react'
 import {
@@ -36,15 +41,57 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-const REPORT_REASONS: readonly string[] = [
-  '不適切な内容',
-  '権利侵害の可能性',
-  '交換条件が不明確',
-  '迷惑行為の可能性',
-  'その他',
+// content_reports の構造化カテゴリを対象別に出し分ける (card6 / user5、other 共有)。
+const CATEGORY_LABELS: Record<ContentReportCategory, string> = {
+  prohibited_item: '禁止・違法な出品',
+  counterfeit: '偽物・権利侵害',
+  inappropriate_image: '不適切な画像',
+  spam: 'スパム・宣伝',
+  miscategorized: '内容と違う（誤カテゴリ）',
+  harassment: '嫌がらせ・迷惑行為',
+  monetary_demand: '金銭を要求された',
+  impersonation: 'なりすまし',
+  inappropriate_profile: '不適切なプロフィール',
+  other: 'その他',
+}
+
+const CARD_CATEGORIES: ContentReportCategory[] = [
+  'prohibited_item',
+  'counterfeit',
+  'inappropriate_image',
+  'spam',
+  'miscategorized',
+  'other',
+]
+
+const USER_CATEGORIES: ContentReportCategory[] = [
+  'harassment',
+  'monetary_demand',
+  'impersonation',
+  'inappropriate_profile',
+  'other',
 ]
 
 const MAX_DETAIL_LENGTH = 1000
+
+// RPC の raise exception 文字列 → ユーザー向け日本語。
+function messageForError(raw: string): string {
+  switch (raw) {
+    case 'ALREADY_REPORTED':
+      return 'この対象にはすでに通報済みです。'
+    case 'TARGET_NOT_FOUND':
+      return '対象が見つかりませんでした。前の画面に戻ってお試しください。'
+    case 'SELF_REPORT_NOT_ALLOWED':
+      return '自分自身は通報できません。'
+    case 'AUTH_REQUIRED':
+      return 'ログインが必要です。再ログインしてからお試しください。'
+    case 'INVALID_CATEGORY':
+    case 'TARGET_REF_INVALID':
+      return '通報内容が正しくありません。前の画面に戻ってお試しください。'
+    default:
+      return '通報の送信に失敗しました。時間をおいてもう一度お試しください。'
+  }
+}
 
 function isValidTargetType(value: string | undefined): value is ReportTargetType {
   return value === 'card' || value === 'user'
@@ -63,14 +110,17 @@ export default function ReportScreen() {
   const targetId = params.targetId ?? ''
   const targetLabel = params.targetLabel ?? ''
 
-  const [reason, setReason] = useState<string | null>(null)
+  const categories = targetType === 'user' ? USER_CATEGORIES : CARD_CATEGORIES
+
+  const [category, setCategory] = useState<ContentReportCategory | null>(null)
   const [detail, setDetail] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  const canSubmit = reason != null && targetId !== '' && !submitting
+  const canSubmit = category != null && confirmed && targetId !== '' && !submitting
 
   const handleSubmit = () => {
-    if (!canSubmit || reason == null) return
+    if (!canSubmit || category == null) return
 
     Alert.alert(
       '通報を送信しますか?',
@@ -83,15 +133,15 @@ export default function ReportScreen() {
           onPress: async () => {
             try {
               setSubmitting(true)
-              await createReport({
-                targetType,
-                targetId,
-                reason,
-                detail: detail.trim() !== '' ? detail.trim() : null,
+              await createContentReport({
+                cardId: targetType === 'card' ? targetId : null,
+                userId: targetType === 'user' ? targetId : null,
+                category,
+                note: detail.trim() !== '' ? detail.trim() : null,
               })
               Alert.alert(
                 '通報を受け付けました',
-                'ご協力ありがとうございます。お送りいただいた内容は運営が確認します。',
+                'ご協力ありがとうございます。お送りいただいた内容は運営が確認します。相手や第三者には公開されません。',
                 [
                   {
                     text: 'OK',
@@ -105,11 +155,8 @@ export default function ReportScreen() {
               )
             } catch (err) {
               console.error('[ReportScreen][handleSubmit]', err)
-              const message =
-                err instanceof Error && err.message === 'AUTH_REQUIRED'
-                  ? 'ログインが必要です。再ログインしてからお試しください。'
-                  : '通報の送信に失敗しました。時間をおいてもう一度お試しください。'
-              Alert.alert('送信エラー', message)
+              const raw = err instanceof Error ? err.message : ''
+              Alert.alert('送信エラー', messageForError(raw))
             } finally {
               setSubmitting(false)
             }
@@ -172,12 +219,12 @@ export default function ReportScreen() {
             理由を選択してください<Text style={styles.required}> *</Text>
           </Text>
           <View style={styles.reasonList}>
-            {REPORT_REASONS.map((r) => {
-              const selected = reason === r
+            {categories.map((c) => {
+              const selected = category === c
               return (
                 <Pressable
-                  key={r}
-                  onPress={() => setReason(r)}
+                  key={c}
+                  onPress={() => setCategory(c)}
                   style={({ pressed }) => [
                     styles.reasonRow,
                     selected && styles.reasonRowSelected,
@@ -198,7 +245,7 @@ export default function ReportScreen() {
                       selected && styles.reasonLabelSelected,
                     ]}
                   >
-                    {r}
+                    {CATEGORY_LABELS[c]}
                   </Text>
                 </Pressable>
               )
@@ -228,6 +275,19 @@ export default function ReportScreen() {
           <Text style={styles.footerNote}>
             通報者の情報は被通報者に開示されません。プライバシーポリシーをご確認ください。
           </Text>
+
+          {/* 誤送信防止チェック */}
+          <Pressable
+            style={styles.checkRow}
+            onPress={() => setConfirmed((v) => !v)}
+          >
+            <Ionicons
+              name={confirmed ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={confirmed ? colors.primary : colors.textTertiary}
+            />
+            <Text style={styles.checkLabel}>この内容で通報します</Text>
+          </Pressable>
         </ScrollView>
 
         <View style={styles.ctaWrap}>
@@ -390,6 +450,18 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     marginTop: spacing.lg,
     lineHeight: 17,
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+  },
+  checkLabel: {
+    fontSize: 14,
+    color: colors.textPrimary,
+    fontWeight: fontWeight.semibold,
   },
   // CTA
   ctaWrap: {

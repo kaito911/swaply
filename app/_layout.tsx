@@ -82,6 +82,7 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="listing" options={{ headerShown: false }} />
         <Stack.Screen name="trade" options={{ headerShown: false }} />
+        <Stack.Screen name="operator" options={{ headerShown: false }} />
 
         <Stack.Screen
           name="listing/new"

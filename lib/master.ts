@@ -343,6 +343,17 @@ export function getUnifiedSearchSuggestions(
 }
 
 /**
+ * character 系の属性ラベルを work の category から出し分ける単一情報源。
+ *   idol (STARTO/K-POP 等) → 「メンバー」／それ以外 (anime/character/manga/other) → 「キャラ」。
+ *   category 不明 (null) は「メンバー」を既定とする (K 指定)。
+ * 出品(single-page/bulk)・検索サジェスト・その他で共有し、表記の一貫性を担保する。
+ * ※ 表示ラベルのみ。DB カラム characters[] 等は不変。
+ */
+export function getMemberLabel(category: MasterCategory | null | undefined): string {
+  return category === 'idol' ? 'メンバー' : category == null ? 'メンバー' : 'キャラ'
+}
+
+/**
  * SearchSuggestion を UI 表示用の type ラベル文字列に変換する。
  * character は所属 work.category を参照するため getWorkById を経由する。
  */
@@ -352,7 +363,7 @@ export function getSearchSuggestionTypeLabel(s: SearchSuggestion): string {
   }
   if (s.type === 'character') {
     const work = cache.worksById.get(s.data.work_id)
-    return work?.category === 'idol' ? 'メンバー' : 'キャラ'
+    return getMemberLabel(work?.category)
   }
   return 'グッズ種別'
 }

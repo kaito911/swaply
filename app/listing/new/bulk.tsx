@@ -36,6 +36,7 @@ import {
   fetchListingKeywordHistory,
   getCharacterById,
   getItemTypeById,
+  getMemberLabel,
   getWorkById,
   recordListingKeyword,
 } from '@/lib/master'
@@ -507,7 +508,7 @@ export default function ListingNewBulkScreen() {
     }
     Alert.alert(
       '作品を変更しますか?',
-      '入力済みのメンバー・グッズ種類・補足はリセットされます。番号の位置 (タップした場所) は残ります。',
+      `入力済みの${getMemberLabel(work?.category ?? null)}・グッズ種類・補足はリセットされます。番号の位置 (タップした場所) は残ります。`,
       [
         { text: 'キャンセル', style: 'cancel' },
         {
@@ -821,7 +822,7 @@ export default function ListingNewBulkScreen() {
           <Text style={styles.emptyHint}>
             {points.length === 0
               ? '出品したいグッズを1つ以上タップしてください'
-              : 'すべての番号に、メンバーか種類を1つ以上入れてください'}
+              : `すべての番号に、${getMemberLabel(work?.category ?? null)}か種類を1つ以上入れてください`}
           </Text>
         )}
         <PrimaryCTA
@@ -864,7 +865,7 @@ export default function ListingNewBulkScreen() {
                   contentContainerStyle={styles.sheetScrollContent}
                   keyboardShouldPersistTaps="handled"
                 >
-                  <Text style={styles.sheetSectionLabel}>メンバー</Text>
+                  <Text style={styles.sheetSectionLabel}>{getMemberLabel(work?.category ?? null)}</Text>
                   <CharactersSection
                     value={activePoint.characters}
                     onChange={(v) => updatePoint(activePoint.id, { characters: v })}

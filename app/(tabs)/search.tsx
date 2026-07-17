@@ -467,7 +467,7 @@ function getEmptyHint(args: {
   hasChips: boolean
 }): string {
   if (!args.masterReady) return 'キーワードを入力してください'
-  if (!args.hasChips && args.inputTrimmed === '') return 'キャラを選んで検索'
+  if (!args.hasChips && args.inputTrimmed === '') return 'メンバー/キャラを選んで検索'
   if (args.hasChips) return '条件を変えてみてください'
   return '見つかりませんでした'
 }
@@ -595,7 +595,7 @@ function TextSearchPane({
         inputText={input}
         onChangeInputText={setInput}
         onSubmitFreeText={handleSubmitFreeText}
-        placeholder="グループ・作品・キャラ・アイテム名で検索"
+        placeholder="グループ・作品・メンバー/キャラ・アイテム名で検索"
       />
 
       <ResultArea

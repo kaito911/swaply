@@ -151,7 +151,7 @@ export function SearchAutocomplete(props: SearchAutocompleteProps) {
   // ── render ──
 
   const effectivePlaceholder = masterReady
-    ? props.placeholder ?? 'グループ・作品・キャラ・アイテム名で検索'
+    ? props.placeholder ?? 'グループ・作品・メンバー/キャラ・アイテム名で検索'
     : 'キーワードで検索'
 
   const hasSelected =

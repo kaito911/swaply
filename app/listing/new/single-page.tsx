@@ -50,6 +50,7 @@ import { useToast } from '@/providers/ToastProvider'
 import {
   getCharacterById,
   getItemTypeById,
+  getMemberLabel,
   getWorkById,
 } from '@/lib/master'
 import {
@@ -146,7 +147,7 @@ function missingRequired(state: ListingFormState): string[] {
   const missing: string[] = []
   if (!isImageDone(state.image)) missing.push('写真')
   if (!isWorkDone(state.work)) missing.push('作品名')
-  if (!isCharactersDone(state.characters)) missing.push('キャラ')
+  if (!isCharactersDone(state.characters)) missing.push(getMemberLabel(state.work?.category ?? null))
   if (!isItemsDone(state.itemTypes)) missing.push('種別')
   if (!isWantDone(state.want)) missing.push('求商品')
   return missing
@@ -484,10 +485,10 @@ export default function ListingNewSinglePageScreen() {
 
           <View style={styles.sectionDivider} />
 
-          {/* ③ キャラ */}
+          {/* ③ メンバー/キャラ (work.category 由来で出し分け) */}
           <SectionHeader
             index={3}
-            title="キャラ"
+            title={getMemberLabel(state.work?.category ?? null)}
             done={isCharactersDone(state.characters)}
           />
           <CharactersSection

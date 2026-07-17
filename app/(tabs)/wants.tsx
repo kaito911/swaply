@@ -486,7 +486,7 @@ export default function WantsScreen() {
                   editable={!submitting}
                 />
                 <Text style={styles.fieldHint}>
-                  グループ / キャラ / グッズ種別 / シリーズから自動で組み立てます。直接編集も可能です。
+                  グループ / メンバー・キャラ / グッズ種別 / シリーズから自動で組み立てます。直接編集も可能です。
                 </Text>
               </View>
 

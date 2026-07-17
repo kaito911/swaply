@@ -85,7 +85,7 @@ export function WantSuggestInput(props: WantSuggestInputProps) {
   }
 
   const effectivePlaceholder = masterReady
-    ? props.placeholder ?? 'グループ・作品・キャラ・グッズ種別で検索'
+    ? props.placeholder ?? 'グループ・作品・メンバー/キャラ・グッズ種別で検索'
     : 'キーワードを入力'
 
   return (

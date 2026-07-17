@@ -70,8 +70,10 @@ import React, {
 } from 'react'
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -224,6 +226,9 @@ export default function ListingNewSinglePageScreen() {
   const [state, dispatch] = useReducer(reducer, INITIAL_LISTING_FORM_STATE)
   const [hydrated, setHydrated] = useState<boolean>(isNew)
   const [submitting, setSubmitting] = useState(false)
+  // ② 出品前の確認画面を表示中か (bulk の STEP4 確認と体験を揃える)。
+  //   「出品する」で true → 確認ビュー → 「この内容で出品する」で既存 handleSubmit を呼ぶ。
+  const [confirming, setConfirming] = useState(false)
 
   // reducer state を常に最新の ref で保持 (unmount 時の flush 用)
   const stateRef = useRef(state)
@@ -446,6 +451,77 @@ export default function ListingNewSinglePageScreen() {
     )
   }
 
+  // ② 出品前の確認画面 (bulk の STEP4 と体験統一)。入力内容を一覧プレビュー →
+  //   「この内容で出品する」で既存 handleSubmit を呼ぶ (insert 処理は不変)。
+  if (confirming) {
+    const workName =
+      state.work != null
+        ? getWorkById(state.work.workId)?.display_name_ja ?? state.work.workId
+        : ''
+    const memberLabel = getMemberLabel(state.work?.category ?? null)
+    const charText = state.characters.map(characterDisplay).join('、')
+    const typeText = state.itemTypes.map(itemTypeDisplay).join('・')
+    const noteText = state.condition.want_description
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScreenHeader title="出品内容の確認" onBack={() => setConfirming(false)} />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.confirmLead}>この内容で出品します。修正する場合は「戻る」。</Text>
+
+          {(state.image.frontUri != null || state.image.backUri != null) && (
+            <View style={styles.confirmImageRow}>
+              {state.image.frontUri != null && state.image.frontUri !== '' && (
+                <Image source={{ uri: state.image.frontUri }} style={styles.confirmImage} />
+              )}
+              {state.image.backUri != null && state.image.backUri !== '' && (
+                <Image source={{ uri: state.image.backUri }} style={styles.confirmImage} />
+              )}
+            </View>
+          )}
+
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>作品 / グループ</Text>
+            <Text style={styles.confirmValue}>{workName !== '' ? workName : '—'}</Text>
+          </View>
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>{memberLabel}</Text>
+            <Text style={styles.confirmValue}>{charText !== '' ? charText : '—'}</Text>
+          </View>
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>グッズ種類</Text>
+            <Text style={styles.confirmValue}>{typeText !== '' ? typeText : '—'}</Text>
+          </View>
+          {noteText !== '' && (
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>補足</Text>
+              <Text style={styles.confirmValue}>{noteText}</Text>
+            </View>
+          )}
+
+          <View style={styles.submitWrap}>
+            <PrimaryCTA
+              label="この内容で出品する"
+              onPress={handleSubmit}
+              loading={submitting}
+              size="lg"
+            />
+            <Pressable
+              style={styles.confirmBackLink}
+              onPress={() => setConfirming(false)}
+              disabled={submitting}
+            >
+              <Text style={styles.confirmBackLinkText}>修正する（戻る）</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScreenHeader title="出品" />
@@ -547,8 +623,7 @@ export default function ListingNewSinglePageScreen() {
             )}
             <PrimaryCTA
               label="出品する"
-              onPress={handleSubmit}
-              loading={submitting}
+              onPress={() => setConfirming(true)}
               disabled={!canSubmit}
               size="lg"
             />
@@ -658,6 +733,50 @@ const styles = StyleSheet.create({
   submitWrap: {
     marginTop: spacing.xl,
     gap: spacing.sm,
+  },
+  // ② 出品前確認ビュー
+  confirmLead: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+    lineHeight: 20,
+  },
+  confirmImageRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  confirmImage: {
+    width: 96,
+    height: 128,
+    borderRadius: radius.md,
+    backgroundColor: colors.backgroundMuted,
+  },
+  confirmRow: {
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: 3,
+  },
+  confirmLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: colors.textTertiary,
+  },
+  confirmValue: {
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+    lineHeight: 22,
+  },
+  confirmBackLink: {
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+  },
+  confirmBackLinkText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    fontWeight: fontWeight.semibold,
+    textDecorationLine: 'underline',
   },
   missingHint: {
     fontSize: fontSize.sm,

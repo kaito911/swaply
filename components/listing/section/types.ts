@@ -65,11 +65,31 @@ export type ItemsSectionValue = HybridMasterIds
 // ─────────────────────────────────────────
 
 /**
- * 求として選択した wanted_cards.id の配列。
- * confirm.tsx で card_wanted_links に bulk INSERT される。
- * cards.want_* は空配列で投入し、card_wanted_links を正とする (案 X、want.tsx L11)。
+ * 【legacy / bulk 用】求として選択した wanted_cards.id の配列。
+ * bulk.tsx が WantSection (wanted_cards 選択 + card_wanted_links) で使用。
+ * ★single-page (PR-1a) は master 構造化の WantMasterValue に移行済のため本型は使わない。
+ *   bulk (PR-1b) が master 構造化へ移る際に整理する。
  */
 export type WantSectionValue = string[]
+
+/**
+ * 【PR-1a / single-page 用】master 構造化した求。
+ *
+ * works / characters / itemTypes は master ID 配列 (ハイブリッド: master ID + free text 混在可)。
+ * 出品 submit で cards.want_works[] / want_characters[] / want_item_types[] にそのまま投入する
+ * (既存列、DDL 不要)。wanted_cards + card_wanted_links への書込は行わない (案 X を上書き、
+ * 版特定を諦めた設計変更に伴い「求は出品時に master 入力・cards.want_* を正」へ方針転換)。
+ *
+ * sameSeriesAsOffer: 「譲と同シリーズのグッズを求む」チェック状態。
+ *   ON のとき works = [譲の work_id]、求メンバーは譲グループ (work_id) 基準で絞る
+ *   (譲メンバー基準ではない = コンプ狙いで複数メンバーを求むが成立する)。
+ */
+export type WantMasterValue = {
+  works: string[]
+  characters: string[]
+  itemTypes: string[]
+  sameSeriesAsOffer: boolean
+}
 
 // ─────────────────────────────────────────
 // ConditionSection
@@ -105,7 +125,7 @@ export type ListingFormState = {
   work: WorkSectionValue
   characters: CharactersSectionValue
   itemTypes: ItemsSectionValue
-  want: WantSectionValue
+  want: WantMasterValue
   condition: ConditionSectionValue
 }
 
@@ -115,7 +135,7 @@ export const INITIAL_LISTING_FORM_STATE: ListingFormState = {
   work: null,
   characters: [],
   itemTypes: [],
-  want: [],
+  want: { works: [], characters: [], itemTypes: [], sameSeriesAsOffer: false },
   condition: {
     want_description: '',
     allows_adjustment: false,

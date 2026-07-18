@@ -38,10 +38,10 @@ import {
   type ImageSectionValue,
   type ItemsSectionValue,
   type ListingFormState,
-  type WantSectionValue,
+  type WantMasterValue,
   type WorkSectionValue,
 } from '@/components/listing/section/types'
-import { WantSection } from '@/components/listing/section/WantSection'
+import { WantMasterSection } from '@/components/listing/section/WantMasterSection'
 import { WorkSection } from '@/components/listing/section/WorkSection'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
@@ -53,11 +53,7 @@ import {
   getMemberLabel,
   getWorkById,
 } from '@/lib/master'
-import {
-  addCardWantedLinks,
-  supabase,
-  uploadCardImage,
-} from '@/lib/supabase'
+import { supabase, uploadCardImage } from '@/lib/supabase'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams, useNavigation } from 'expo-router'
 import React, {
@@ -92,7 +88,7 @@ type Action =
   | { type: 'SET_CHARACTERS'; value: CharactersSectionValue }
   | { type: 'SET_ITEMS'; value: ItemsSectionValue }
   | { type: 'SET_CONDITION'; value: ConditionSectionValue }
-  | { type: 'SET_WANT'; value: WantSectionValue }
+  | { type: 'SET_WANT'; value: WantMasterValue }
 
 function reducer(state: ListingFormState, action: Action): ListingFormState {
   switch (action.type) {
@@ -137,8 +133,9 @@ function isConditionDone(): boolean {
   // Phase B では常に✓とする (want.tsx / condition.tsx の既存挙動と整合)
   return true
 }
-function isWantDone(v: WantSectionValue): boolean {
-  return v.length >= 1
+function isWantDone(v: WantMasterValue): boolean {
+  // 求グループ + 求メンバー が必須 (グッズ種別は任意)
+  return v.works.length >= 1 && v.characters.length >= 1
 }
 
 /**
@@ -151,7 +148,9 @@ function missingRequired(state: ListingFormState): string[] {
   if (!isWorkDone(state.work)) missing.push('作品名')
   if (!isCharactersDone(state.characters)) missing.push(getMemberLabel(state.work?.category ?? null))
   if (!isItemsDone(state.itemTypes)) missing.push('種別')
-  if (!isWantDone(state.want)) missing.push('求商品')
+  if (state.want.works.length === 0) missing.push('求グループ')
+  else if (state.want.characters.length === 0)
+    missing.push(`求${getMemberLabel(getWorkById(state.want.works[0])?.category ?? null)}`)
   return missing
 }
 
@@ -355,55 +354,23 @@ export default function ListingNewSinglePageScreen() {
         adjustment_max: state.condition.allows_adjustment
           ? state.condition.adjustment_max
           : null,
-        // 求の構造化 (案 X: card_wanted_links を正、want_* は空配列)
-        want_works: [] as string[],
-        want_characters: [] as string[],
-        want_item_types: [] as string[],
+        // 求の master 構造化 (PR-1a: cards.want_* を正とする。既存列、DDL 不要)。
+        // wanted_cards + card_wanted_links への書込は廃止 (案 X を上書き)。
+        want_works: state.want.works,
+        want_characters: state.want.characters,
+        want_item_types: state.want.itemTypes,
         // legacy K-POP 列
         group_name: null,
         member_name: null,
         series: null,
       }
 
-      const { data: createdCard, error: cardError } = await supabase
-        .from('cards')
-        .insert(row)
-        .select()
-        .single()
+      // 求は cards.want_* に含めて 1 回の INSERT で完結
+      // (card_wanted_links への二次書込は廃止 = 部分成功分岐も不要)。
+      const { error: cardError } = await supabase.from('cards').insert(row)
       if (cardError) throw cardError
-      if (createdCard == null) {
-        throw new Error('cards INSERT did not return a row')
-      }
 
-      // card_wanted_links bulk INSERT
-      try {
-        await addCardWantedLinks({
-          cardId: createdCard.id as string,
-          wantedCardIds: state.want,
-          ownerUserId: userId,
-        })
-      } catch (linkErr) {
-        console.error(
-          '[single-page][addCardWantedLinks]',
-          linkErr,
-        )
-        // partial success: card は作成済、link 失敗
-        submittedRef.current = true
-        await deleteDraft(draftId)
-        Alert.alert(
-          '一部完了',
-          '出品は作成されましたが、求商品の紐づけに失敗しました。求リスト画面から再設定してください。',
-          [
-            {
-              text: 'OK',
-              onPress: () => router.replace('/(tabs)/mypage' as never),
-            },
-          ],
-        )
-        return
-      }
-
-      // 全成功: draft 削除 → 出品完了 → mypage
+      // 成功: draft 削除 → 出品完了 → mypage
       submittedRef.current = true
       await deleteDraft(draftId)
       Alert.alert('出品完了', '出品が完了しました。', [
@@ -462,6 +429,14 @@ export default function ListingNewSinglePageScreen() {
     const charText = state.characters.map(characterDisplay).join('、')
     const typeText = state.itemTypes.map(itemTypeDisplay).join('・')
     const noteText = state.condition.want_description
+    const wantWorkName = state.want.works
+      .map((id) => getWorkById(id)?.display_name_ja ?? id)
+      .join('、')
+    const wantMemberLabel = getMemberLabel(
+      getWorkById(state.want.works[0])?.category ?? null,
+    )
+    const wantCharText = state.want.characters.map(characterDisplay).join('、')
+    const wantTypeText = state.want.itemTypes.map(itemTypeDisplay).join('・')
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScreenHeader title="出品内容の確認" onBack={() => setConfirming(false)} />
@@ -499,6 +474,24 @@ export default function ListingNewSinglePageScreen() {
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>補足</Text>
               <Text style={styles.confirmValue}>{noteText}</Text>
+            </View>
+          )}
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>求グループ</Text>
+            <Text style={styles.confirmValue}>
+              {wantWorkName !== '' ? wantWorkName : '—'}
+            </Text>
+          </View>
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>求{wantMemberLabel}</Text>
+            <Text style={styles.confirmValue}>
+              {wantCharText !== '' ? wantCharText : '—'}
+            </Text>
+          </View>
+          {wantTypeText !== '' && (
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>求グッズ種別</Text>
+              <Text style={styles.confirmValue}>{wantTypeText}</Text>
             </View>
           )}
 
@@ -610,10 +603,11 @@ export default function ListingNewSinglePageScreen() {
             title="求"
             done={isWantDone(state.want)}
           />
-          <WantSection
+          <WantMasterSection
             value={state.want}
             onChange={(v) => dispatch({ type: 'SET_WANT', value: v })}
             userId={userId}
+            offerWork={state.work}
           />
 
           {/* 出品 CTA */}

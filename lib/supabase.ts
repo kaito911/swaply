@@ -777,6 +777,9 @@ export async function searchDirectMatch(params: {
   excludeUserId?: string | null
   excludeOwnerIds?: string[]
   limit?: number
+  // owner 単位集約。既定 true = 1 オーナー最上位 1 件 (マッチタブ/ホーム)。
+  //   false = 集約せず該当カード全件 (求タブ・譲タブと挙動統一)。後方互換。
+  dedupByOwner?: boolean
 }): Promise<DirectMatchResult[]> {
   const { myOffers, myWants } = params
   // ★指定された軸だけを条件に積む (必須軸なし)。全6軸空なら何も返さない (案A)。
@@ -849,15 +852,20 @@ export async function searchDirectMatch(params: {
     return s
   }
 
-  // score 降順で並べ、ユーザー単位に最上位 1 件を採用。score は result に露出する (PR-2c)。
+  // score 降順で並べる。score は result に露出する (PR-2c)。
+  const dedupByOwner = params.dedupByOwner ?? true
   const scored = cards.map((card) => ({ card, s: scoreOf(card) }))
   scored.sort((a, b) => b.s - a.s)
   const results: DirectMatchResult[] = []
   const usedUserIds = new Set<string>()
   for (const { card, s } of scored) {
     if (card.owner == null) continue
-    if (usedUserIds.has(card.owner_user_id)) continue
-    usedUserIds.add(card.owner_user_id)
+    // dedupByOwner=true (既定): 1 オーナー最上位 1 件のみ (マッチタブ/ホーム不変)。
+    //   false: owner 集約せず該当カードを全件出す (求タブ・譲タブと挙動統一)。
+    if (dedupByOwner) {
+      if (usedUserIds.has(card.owner_user_id)) continue
+      usedUserIds.add(card.owner_user_id)
+    }
     results.push({ user: card.owner, offering_card: card, score: s })
   }
 

@@ -25,12 +25,9 @@ import {
   searchCards,
   searchCardsByMember,
   searchDirectMatch,
-  searchWantedCards,
   type DirectMatchResult,
-  type WantedCardWithOwner,
 } from '@/lib/supabase'
-import { Card, computeTrustBadge, formatCardTitle, MasterCharacter, MasterItemType, MasterWork, type SearchMode } from '@/lib/types'
-import { TrustBadge } from '@/components/TrustBadge'
+import { Card, formatCardTitle, MasterCharacter, MasterItemType, MasterWork, type SearchMode } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
@@ -721,8 +718,18 @@ function ResultArea({
 }
 
 // ─────────────────────────────────────────
-// 求検索ペイン (want モード、Pioneer #001 提案)
-// wanted_cards を検索者の譲商品名で fuzzy 検索、所有者を表示
+// 求検索ペイン (want モード、Pioneer #001 提案) — 道2整合 Card 化 (向きB)
+//
+// seller-side 検索: ユーザーが「自分が譲れるもの」をチップ入力 → それを want_* に持つ
+//   出品カード (= 相手が求めている出品) を出す。譲タブ (相手 characters 照合) とは
+//   照合軸が逆 (相手 want_* 照合)。同じ入力でも別結果になり重複しない。
+//
+// 実装: TextSearchPane を雛形に、engine を searchDirectMatch の片側版に差し替え。
+//   入力チップ → myOffers (engine で want_* overlap 照合)、myWants は空。
+//   dedupByOwner:false で owner 集約せず該当カード全件を出す (譲タブと挙動統一)。
+//   結果は Card[] → ResultArea 共有 (【譲】=characters / 【求】=want_*・譲/マッチと同じ)。
+// ※ 旧実装 (wanted_cards + 素テキスト + 人返し) は searchWantedCards/WantedCardWithOwner
+//   として supabase.ts に温存。UI 経路のみ Card 化に切替。
 // ─────────────────────────────────────────
 
 function WantedSearchPane({
@@ -733,112 +740,84 @@ function WantedSearchPane({
   blockedUserIds: string[]
 }) {
   const [input, setInput] = useState('')
-  const [results, setResults] = useState<WantedCardWithOwner[]>([])
+  const [selectedWorks, setSelectedWorks] = useState<MasterWork[]>([])
+  const [selectedChars, setSelectedChars] = useState<MasterCharacter[]>([])
+  const [selectedItems, setSelectedItems] = useState<MasterItemType[]>([])
+  const [results, setResults] = useState<Card[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
 
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const trimmed = input.trim()
+  const selectedWorkIds = useMemo(() => selectedWorks.map((w) => w.id), [selectedWorks])
+  const selectedCharIds = useMemo(() => selectedChars.map((c) => c.id), [selectedChars])
+  const selectedItemTypeIds = useMemo(() => selectedItems.map((t) => t.id), [selectedItems])
 
+  const hasChips =
+    selectedWorkIds.length > 0 ||
+    selectedCharIds.length > 0 ||
+    selectedItemTypeIds.length > 0
+
+  // 向きB: 入力チップ (自分が譲れるもの) → myOffers → engine で相手カードの want_* と
+  //   overlap 照合。myWants は空。dedupByOwner:false で全カード表示 (譲タブと統一)。
+  //   チップ変化で即時ライブ (テキスト fallback なし = engine はチップ専用)。
   useEffect(() => {
-    if (debounceTimer.current != null) clearTimeout(debounceTimer.current)
-    if (trimmed === '') {
+    if (!hasChips) {
       setResults([])
       setSearched(false)
       return
     }
-    debounceTimer.current = setTimeout(async () => {
+    let cancelled = false
+    const run = async () => {
       setLoading(true)
-      const data = await searchWantedCards({
-        query: trimmed,
+      const data = await searchDirectMatch({
+        myOffers: {
+          works: selectedWorkIds,
+          characters: selectedCharIds,
+          itemTypes: selectedItemTypeIds,
+        },
+        myWants: { works: [], characters: [], itemTypes: [] },
         excludeUserId: currentUserId,
         excludeOwnerIds: blockedUserIds,
+        dedupByOwner: false,
       })
-      setResults(data)
+      if (cancelled) return
+      setResults(data.map((r) => r.offering_card))
       setSearched(true)
       setLoading(false)
-    }, 400)
-    return () => {
-      if (debounceTimer.current != null) clearTimeout(debounceTimer.current)
     }
-  }, [trimmed, currentUserId, blockedUserIds])
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [hasChips, selectedWorkIds, selectedCharIds, selectedItemTypeIds, currentUserId, blockedUserIds])
 
-  const handleUserPress = (userId: string) => {
-    router.push({ pathname: '/trust/[id]', params: { id: userId } } as never)
-  }
+  const handleFreeTextNoop = useCallback(() => {}, [])
 
   return (
     <View style={styles.pane}>
-      <View style={styles.inputWrap}>
-        <View style={styles.inputBar}>
-          <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
-          <TextInput
-            style={styles.input}
-            placeholder="グループ・作品・メンバー/キャラ・アイテム名で検索"
-            placeholderTextColor={colors.textTertiary}
-            value={input}
-            onChangeText={setInput}
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-          />
-        </View>
-      </View>
+      <SearchAutocomplete
+        selectedWorks={selectedWorks}
+        onChangeWorks={setSelectedWorks}
+        selectedCharacters={selectedChars}
+        onChangeCharacters={setSelectedChars}
+        selectedItemTypes={selectedItems}
+        onChangeItemTypes={setSelectedItems}
+        inputText={input}
+        onChangeInputText={setInput}
+        onSubmitFreeText={handleFreeTextNoop}
+        placeholder="グループ・作品・メンバー/キャラ・アイテム名で検索"
+      />
 
-      {loading ? (
-        <View style={styles.centerBox}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
-      ) : searched && results.length === 0 ? (
-        <View style={styles.centerBox}>
-          <Text style={styles.emptyTitle}>該当する求が見つかりませんでした</Text>
-          <Text style={styles.emptySub}>別のキーワードで試してください</Text>
-        </View>
-      ) : !searched ? (
-        <View style={styles.centerBox}>
-          <Ionicons name="search-outline" size={40} color={colors.border} />
-          <Text style={styles.emptySub}>譲りたい商品名を入力</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={results}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => {
-            const o = item.owner
-            const trustLevel = o
-              ? computeTrustBadge({
-                  trade_count: o.trade_count,
-                  ship_rate: o.ship_rate,
-                  reply_median_hours: o.reply_median_hours,
-                  trouble_count: o.trouble_count,
-                  last_active_at: o.last_active_at,
-                })
-              : 'green'
-            const ownerName = o?.handle ? `@${o.handle}` : (o?.display_name ?? 'ユーザー')
-            return (
-              <Pressable
-                style={({ pressed }) => [styles.cardItem, pressed && styles.cardItemPressed]}
-                onPress={() => handleUserPress(item.user_id)}
-              >
-                <View style={styles.wantAvatar}>
-                  <Text style={styles.wantAvatarText}>
-                    {(o?.handle || o?.display_name || '?').slice(0, 1).toUpperCase()}
-                  </Text>
-                </View>
-                <View style={styles.cardMeta}>
-                  <Text style={styles.cardOwner} numberOfLines={1}>{ownerName}</Text>
-                  <Text style={styles.cardName} numberOfLines={2}>求: {item.card_name}</Text>
-                  <View style={styles.wantTrustRow}>
-                    <TrustBadge level={trustLevel} size="sm" />
-                  </View>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-              </Pressable>
-            )
-          }}
-        />
-      )}
+      <ResultArea
+        loading={loading}
+        searched={searched}
+        results={results}
+        currentUserId={currentUserId}
+        emptyHint={
+          hasChips
+            ? '条件に一致する出品（相手の求）が見つかりませんでした'
+            : '譲れる作品・キャラ・アイテムをチップで選ぶと、それを求めている出品を探します'
+        }
+      />
     </View>
   )
 }

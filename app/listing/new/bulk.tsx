@@ -45,11 +45,12 @@ import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
 import { router } from 'expo-router'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   GestureResponderEvent,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   LayoutChangeEvent,
   Modal,
@@ -246,6 +247,20 @@ export default function ListingNewBulkScreen() {
       cancelled = true
     }
   }, [userId])
+
+  // 属性シートの補足(note)入力用: キーボード表示【完了後】に note を可視域へスクロール。
+  //   transparent Modal では automaticallyAdjustKeyboardInsets が不安定なため insets に頼らず、
+  //   keyboardDidShow (せり上がりアニメ完了後) で明示 scrollToEnd する (note フォーカス時のみ)。
+  const sheetScrollRef = useRef<ScrollView>(null)
+  const noteFocused = useRef(false)
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      if (noteFocused.current) {
+        sheetScrollRef.current?.scrollToEnd({ animated: true })
+      }
+    })
+    return () => sub.remove() // unmount 時に listener を除去 (リーク防止)
+  }, [])
 
   // letterbox を除いた実画像矩形 (contain)。タップ判定・座標変換・バッジ描画の基準。
   const rect = image
@@ -526,25 +541,21 @@ export default function ListingNewBulkScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScreenHeader title="作品・グループを選ぶ" onBack={backFromWork} />
-        <KeyboardAvoidingView
+        <ScrollView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={80}
+          contentContainerStyle={styles.workContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets
         >
-          <ScrollView
-            style={styles.flex}
-            contentContainerStyle={styles.workContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Text style={styles.workLead}>
-              この写真のグッズは、どの作品・グループですか?
-            </Text>
-            <Text style={styles.workSub}>
-              1枚の写真は1つの作品・グループを想定しています。メンバーや種類は、この後グッズごとに選びます。
-            </Text>
-            <WorkSection value={work} onChange={setWork} />
-          </ScrollView>
-        </KeyboardAvoidingView>
+          <Text style={styles.workLead}>
+            この写真のグッズは、どの作品・グループですか?
+          </Text>
+          <Text style={styles.workSub}>
+            1枚の写真は1つの作品・グループを想定しています。メンバーや種類は、この後グッズごとに選びます。
+          </Text>
+          <WorkSection value={work} onChange={setWork} />
+        </ScrollView>
       </SafeAreaView>
     )
   }
@@ -555,46 +566,42 @@ export default function ListingNewBulkScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScreenHeader title="求める商品を入力" onBack={backWantToTap} />
-        <KeyboardAvoidingView
+        <ScrollView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={80}
+          contentContainerStyle={styles.workContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets
         >
-          <ScrollView
-            style={styles.flex}
-            contentContainerStyle={styles.workContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Text style={styles.workLead}>この出品で受け付けたい「求」は?</Text>
-            <Text style={styles.workSub}>
-              この写真から出品するすべてのグッズに共通の求です。
-              「同シリーズ」を選ぶと、各グッズと同じ作品・種別で他メンバーを集められます。
-            </Text>
-            <View style={{ marginTop: spacing.lg }}>
-              <WantMasterSection
-                value={bulkWant}
-                onChange={setBulkWant}
-                userId={userId}
-                offerWork={work}
-                offerItemTypes={[]}
-                sameSeriesItemTypeLabel="各グッズと同じ種別"
-              />
-            </View>
-          </ScrollView>
-          <View style={styles.ctaWrap}>
-            {!isBulkWantDone && (
-              <Text style={styles.emptyHint}>
-                求グループと求{getMemberLabel(work?.category ?? null)}を入れてください
-              </Text>
-            )}
-            <PrimaryCTA
-              label="確認へ進む"
-              onPress={() => setReviewMode(true)}
-              disabled={!isBulkWantDone}
-              size="lg"
+          <Text style={styles.workLead}>この出品で受け付けたい「求」は?</Text>
+          <Text style={styles.workSub}>
+            この写真から出品するすべてのグッズに共通の求です。
+            「同シリーズ」を選ぶと、各グッズと同じ作品・種別で他メンバーを集められます。
+          </Text>
+          <View style={{ marginTop: spacing.lg }}>
+            <WantMasterSection
+              value={bulkWant}
+              onChange={setBulkWant}
+              userId={userId}
+              offerWork={work}
+              offerItemTypes={[]}
+              sameSeriesItemTypeLabel="各グッズと同じ種別"
             />
           </View>
-        </KeyboardAvoidingView>
+        </ScrollView>
+        <View style={styles.ctaWrap}>
+          {!isBulkWantDone && (
+            <Text style={styles.emptyHint}>
+              求グループと求{getMemberLabel(work?.category ?? null)}を入れてください
+            </Text>
+          )}
+          <PrimaryCTA
+            label="確認へ進む"
+            onPress={() => setReviewMode(true)}
+            disabled={!isBulkWantDone}
+            size="lg"
+          />
+        </View>
       </SafeAreaView>
     )
   }
@@ -869,6 +876,7 @@ export default function ListingNewBulkScreen() {
                 </View>
 
                 <ScrollView
+                  ref={sheetScrollRef}
                   style={styles.sheetScroll}
                   contentContainerStyle={styles.sheetScrollContent}
                   keyboardShouldPersistTaps="handled"
@@ -918,6 +926,12 @@ export default function ListingNewBulkScreen() {
                     style={styles.noteInput}
                     value={activePoint.note}
                     onChangeText={(v) => updatePoint(activePoint.id, { note: v })}
+                    onFocus={() => {
+                      noteFocused.current = true
+                    }}
+                    onBlur={() => {
+                      noteFocused.current = false
+                    }}
                     placeholder="例: 傷なし、未開封、スリーブ付き、初回盤特典"
                     placeholderTextColor={colors.textTertiary}
                     multiline

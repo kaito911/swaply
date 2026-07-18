@@ -774,7 +774,7 @@ function WantedSearchPane({
           <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
           <TextInput
             style={styles.input}
-            placeholder="譲りたい商品名で検索 (例: アクリルスタンド)"
+            placeholder="グループ・作品・メンバー/キャラ・アイテム名で検索"
             placeholderTextColor={colors.textTertiary}
             value={input}
             onChangeText={setInput}

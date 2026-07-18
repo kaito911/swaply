@@ -223,8 +223,8 @@ export default function ListingNewBulkScreen() {
     itemTypes: [],
     sameSeriesAsOffer: false,
   })
-  // 求ステップを完了したか (作品 → 求 → タップ の進行管理)。
-  const [wantDone, setWantDone] = useState(false)
+  // タップ属性入力を完了したか (作品 → タップ → 求 → 確認 の進行管理、PR-B)。
+  const [attrsDone, setAttrsDone] = useState(false)
   const [points, setPoints] = useState<TapPoint[]>([])
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
   // 属性シートを開いている点の id (null = 閉じている)。
@@ -449,15 +449,17 @@ export default function ListingNewBulkScreen() {
     setActivePointId(null)
   }
 
-  // step-back: タップ → 求 → 作品 → 写真 → choose の順に 1 段ずつ戻る。
-  //   タップ画面の戻り = 求ステップへ (点はそのまま保持、求を編集し直せる)。
-  const backFromTap = () => {
+  // step-back: 確認 → 求 → タップ → 作品 → 写真 → choose の順に 1 段ずつ戻る (PR-B)。
+  //   求ステップの戻り = タップへ (点・bulkWant はそのまま保持、属性を編集し直せる)。
+  const backWantToTap = () => {
     setActivePointId(null)
-    setWantDone(false)
+    setAttrsDone(false)
   }
-  // 求ステップの戻り = 作品選択へ。作品を変えると求フィルタ前提が崩れるわけではないが、
-  //   点の属性 (旧 work のメンバー) が残るため、属性ありなら Alert で確認しリセット。
-  const backFromWant = () => {
+  // タップ画面の戻り = 作品選択へ。作品を変えると点の属性 (旧 work のメンバー) が残るため、
+  //   属性ありなら Alert で確認しリセット (座標は保持)。
+  //   ※同シリーズ ON 中の bulkWant.works(旧work) は、求ステップ再入時に WantMasterSection の
+  //     useEffect が現 offerWork へ再同期するため、ここでは触らない。
+  const backTapToWork = () => {
     const hasAttrs = points.some(
       (p) => p.characters.length + p.itemTypes.length > 0 || p.note.trim() !== '',
     )
@@ -547,11 +549,12 @@ export default function ListingNewBulkScreen() {
     )
   }
 
-  // ── STEP 2.5: 求を入力 (N 商品共通・master 構造化・グループ+メンバー必須) ──
-  if (!wantDone) {
+  // ── STEP 3.5: 求を入力 (N 商品共通・master 構造化・グループ+メンバー必須)。
+  //   PR-B: タップ属性完了後 (attrsDone) かつ確認前 (!reviewMode) に表示する終端手前ステップ。 ──
+  if (attrsDone && !reviewMode) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScreenHeader title="求める商品を入力" onBack={backFromWant} />
+        <ScreenHeader title="求める商品を入力" onBack={backWantToTap} />
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -585,8 +588,8 @@ export default function ListingNewBulkScreen() {
               </Text>
             )}
             <PrimaryCTA
-              label="次へ"
-              onPress={() => setWantDone(true)}
+              label="確認へ進む"
+              onPress={() => setReviewMode(true)}
               disabled={!isBulkWantDone}
               size="lg"
             />
@@ -637,7 +640,11 @@ export default function ListingNewBulkScreen() {
                 height: ev.nativeEvent.layout.height,
               })
             }
-            onPress={() => setReviewMode(false)}
+            onPress={() => {
+              // 写真タップ = 点の編集へ (タップ画面へ戻る)
+              setReviewMode(false)
+              setAttrsDone(false)
+            }}
           >
             {image != null && (
               <Image
@@ -681,7 +688,9 @@ export default function ListingNewBulkScreen() {
                 key={pt.id}
                 style={styles.reviewItemRow}
                 onPress={() => {
+                  // 各商品タップ = タップ画面へ戻ってその点の属性シートを開く
                   setReviewMode(false)
+                  setAttrsDone(false)
                   setActivePointId(pt.id)
                 }}
               >
@@ -712,8 +721,8 @@ export default function ListingNewBulkScreen() {
           <Pressable
             style={styles.reviewWantRow}
             onPress={() => {
+              // 共通の求タップ = 求ステップへ戻る (attrsDone のまま reviewMode を下ろす)
               setReviewMode(false)
-              setWantDone(false)
             }}
           >
             <View style={styles.reviewItemBody}>
@@ -757,7 +766,7 @@ export default function ListingNewBulkScreen() {
       <ScreenHeader
         title="出品するグッズをタップ"
         subtitle={`${points.length}点`}
-        onBack={backFromTap}
+        onBack={backTapToWork}
       />
 
       <View style={styles.hintRow}>
@@ -815,9 +824,9 @@ export default function ListingNewBulkScreen() {
         <Text style={styles.retakeText}>写真を選び直す</Text>
       </Pressable>
 
-      {/* 確認へ進む */}
+      {/* 求の入力へ (PR-B: タップ属性が全点埋まったら求ステップへ) */}
       <View style={styles.ctaWrap}>
-        {!canProceed && (
+        {!allPointsHaveAttrs && (
           <Text style={styles.emptyHint}>
             {points.length === 0
               ? '出品したいグッズを1つ以上タップしてください'
@@ -825,9 +834,9 @@ export default function ListingNewBulkScreen() {
           </Text>
         )}
         <PrimaryCTA
-          label={canProceed ? `確認へ進む（${points.length}点）` : '確認へ進む'}
-          onPress={() => setReviewMode(true)}
-          disabled={!canProceed}
+          label={allPointsHaveAttrs ? `求の入力へ（${points.length}点）` : '求の入力へ'}
+          onPress={() => setAttrsDone(true)}
+          disabled={!allPointsHaveAttrs}
           size="lg"
         />
       </View>

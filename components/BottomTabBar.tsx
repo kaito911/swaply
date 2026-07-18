@@ -2,6 +2,7 @@
 import { colors, spacing } from '@/constants/theme'
 import { VENUE_DARK } from '@/lib/venueIgnition'
 import { Ionicons } from '@expo/vector-icons'
+import { router } from 'expo-router'
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs'
 import React from 'react'
 import {
@@ -14,15 +15,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useBadge } from '@/providers/BadgeProvider'
 
 type VisibleTab = {
-  name: 'index' | 'trades' | 'search' | 'venue-tab' | 'wants'
+  name: 'index' | 'trades' | 'search' | 'venue-tab' | 'wants' | 'submit'
   icon: keyof typeof Ionicons.glyphMap
   iconActive: keyof typeof Ionicons.glyphMap
   label: string
 }
 
-// 確定タブ構成: ホーム / 検索 / 求リスト / 取引 / 会場 の 5 スロット (均等配置)。
-// 出品は下部タブから外し、右下 FAB (SubmitFab) に移動。
-// マイページはボトム外、右上 HeaderActions のアバターからのみ到達可能。
+// 確定タブ構成 (7/18): ホーム / 検索 / 出品 / 取引 / 会場 の 5 スロット (均等配置)。
+// 「出品」は画面ではなく action タブ (/listing/new/choose へ push)。グローバル出品 FAB は廃止し
+// 出品導線を下タブ中央に移設。求リスト (wants) は道2 で cards.want_* が正になり責務喪失のため
+// 下タブから外す (画面は href:null で温存)。マイページは右上アバターからのみ到達。
 const TABS: VisibleTab[] = [
   {
     name: 'index',
@@ -37,10 +39,11 @@ const TABS: VisibleTab[] = [
     label: '検索',
   },
   {
-    name: 'wants',
-    icon: 'bookmark-outline',
-    iconActive: 'bookmark',
-    label: '求リスト',
+    // action タブ: 押すと /listing/new/choose へ push (通常ラベル型・中央強調 CTA にしない)。
+    name: 'submit',
+    icon: 'add-circle-outline',
+    iconActive: 'add-circle',
+    label: '出品',
   },
   {
     name: 'trades',
@@ -67,25 +70,35 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const inactiveColor = isVenue ? 'rgba(255,255,255,0.55)' : colors.textTertiary
 
   const renderTab = (tab: VisibleTab) => {
-    const route = state.routes.find((r) => r.name === tab.name)
-    if (route == null) return null
+    // 出品は action タブ (登録画面なし)。route.find の null 経路を通さず特別扱いする
+    //   (通さないと空スロット化する = 過去の tab 名不一致地雷)。
+    const isSubmit = tab.name === 'submit'
+    const route = isSubmit ? null : state.routes.find((r) => r.name === tab.name)
+    if (!isSubmit && route == null) return null
 
-    const isFocused = currentRouteName === tab.name
+    // submit は currentRouteName に現れない → 常に非 active (通常ラベル型・地味な見た目)。
+    const isFocused = !isSubmit && currentRouteName === tab.name
 
     const onPress = () => {
+      if (isSubmit) {
+        // 現グローバル FAB と同一遷移先。出品導線を下タブ中央へ移設。
+        router.push('/listing/new/choose' as never)
+        return
+      }
       const event = navigation.emit({
         type: 'tabPress',
-        target: route.key,
+        target: route!.key,
         canPreventDefault: true,
       })
 
       if (!isFocused && !event.defaultPrevented) {
-        navigation.navigate(route.name)
+        navigation.navigate(route!.name)
       }
     }
 
     // PR2: trades タブは pending offer。
     // PR5: venue タブは受信 Hold + venue_trade DM 未読の合算。二重バッジにはしない。
+    // submit (action タブ) はバッジなし → 0。
     const badgeCount =
       tab.name === 'trades'
         ? pendingOfferCount

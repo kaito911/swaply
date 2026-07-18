@@ -31,8 +31,8 @@ import {
   WantedCard,
   WantMatchScore,
 } from './types'
-import { scoreWantMatchV2 } from './matcher' // ★ Step 3 commit 3: v1 → v2 切替
-import { findCharacterIdsByText, findItemTypeIdsByText, getWorkById } from './master' // searchCards 経路 2 の master fuzzy 解決 + 経路 1 work_id legacy fallback の aliases 取得
+import { scoreSearchMatch, scoreWantMatchV2, type SearchMatchScore } from './matcher' // ★ Step 3 commit 3: v1 → v2 切替 / PR-2a: DirectMatch score tier
+import { findCharacterIdsByText, findItemTypeIdsByText, getCharacterById, getWorkById } from './master' // searchCards 経路 2 の master fuzzy 解決 + 経路 1 work_id legacy fallback / PR-2a: legacy name ILIKE 用 display 名解決
 import { computeVenueExpiry } from './venueExpiry' // 会場出品 / Hold のイベント当日中有効 expires_at 計算
 import { readAsStringAsync } from 'expo-file-system/legacy'
 
@@ -735,106 +735,123 @@ export async function searchWantedCards(params: {
   return (data ?? []) as unknown as WantedCardWithOwner[]
 }
 
-/** 直接交換マッチング結果: 相手の Profile + 提供 card + 求 want */
-export interface DirectMatchResult {
-  user: Profile
-  offering_card: Card    // 相手が持っている card (検索者の求と一致)
-  wanted_card: WantedCard // 相手が欲しがっている want (検索者の譲と一致)
+/** 双方向マッチ照合の入力軸 (自分の譲 / 求)。master ID chip 配列 (PR-2a)。 */
+export interface DirectMatchAxes {
+  characters: string[]
+  works: string[]
+  itemTypes: string[]
 }
 
 /**
- * 直接交換マッチング: 譲 + 求 並列検索 (Pioneer #001 提案)
+ * 直接交換マッチング結果: 相手の Profile + 提供 card。
+ * ★PR-2a で wanted_card(wanted_cards 由来) を廃止。相手の求は offering_card.want_* で表現し、
+ *   表示側は formatStructuredWant で組む (②統一と整合)。
+ */
+export interface DirectMatchResult {
+  user: Profile
+  offering_card: Card // 相手が持つ card (双方向: 自分の求と一致 かつ 相手の求が自分の譲と一致)
+}
+
+/**
+ * 直接交換マッチング (PR-2a: master ID の双方向 overlap を 1 クエリで判定)。
  *
- * クエリ意味論:
- *   - userWants (= 検索者が欲しい) と cards.name を ILIKE → 相手の提供候補
- *   - userOffers (= 検索者が出す) と wanted_cards.card_name を ILIKE → 相手の欲求
- *   - 上記両方を同一ユーザーが満たす場合に「相互交換可能」と判定
+ * 双方向条件 (characters 一致でフィルタ、overlap≧1):
+ *   - cards.characters      && myWants.characters   … 相手の譲が自分の求メンバーを含む
+ *   - cards.want_characters && myOffers.characters  … 相手の求が自分の譲メンバーを含む
+ *   両方満たす card = 相互交換可能。どちらかの characters が空なら成立不能 → 早期 []。
  *
- * 実装: 2 段階 fetch + client-side join (Postgres function 化は Phase 2 で検討)
- *   1. cards (status=active) を userWants で ILIKE 検索、owner_user_id の集合取得
- *   2. その owner 集合に対して wanted_cards を userOffers で ILIKE 検索
- *   3. JS でユーザー単位に pair してマッチング結果生成
+ * item_types はフィルタに使わず (絞らない)、score 加点で上位へ (種別まで合うほど先頭)。
+ * works は任意で score 加点。並びは scoreSearchMatch(単独優先 tier) + item_types/works overlap。
+ *
+ * legacy 保険: characters[] 空の旧 card は overlap で落ちるため、offer 側のみ
+ *   name ILIKE(myWants の char 表示名) を OR 併存 (低コスト)。ただし want_characters も
+ *   空の完全 legacy card は want 側 AND で結局落ちる (bidirectional 不能)。
+ *
+ * 入力は master ID chip 配列 (DirectMatchAxes)。検索 UI(PR-2b) / ホーム(PR-2c) が
+ *   入力源を変えて同一エンジンを叩けるよう設計。overlap は GIN index-backed (既存)。
  */
 export async function searchDirectMatch(params: {
-  userOffers: string
-  userWants: string
+  myOffers: DirectMatchAxes
+  myWants: DirectMatchAxes
   excludeUserId?: string | null
   excludeOwnerIds?: string[]
   limit?: number
 }): Promise<DirectMatchResult[]> {
-  const userOffers = params.userOffers.trim()
-  const userWants = params.userWants.trim()
-  if (userOffers === '' || userWants === '') return []
+  const myOfferChars = params.myOffers.characters
+  const myWantChars = params.myWants.characters
+  // 双方向メンバー一致は両側必須。どちらか空なら成立不能。
+  if (myOfferChars.length === 0 || myWantChars.length === 0) return []
 
   const excludeOwnerIds = params.excludeOwnerIds ?? []
   const excludeFilter =
     excludeOwnerIds.length > 0 ? `(${excludeOwnerIds.join(',')})` : null
 
-  // Step 1: cards (相手が持っている、検索者が欲しい商品名) を取得
-  let cardsQuery = supabase
+  // offer 側 (相手の譲 ∋ 自分の求メンバー): characters overlap OR legacy name ILIKE。
+  const offerOrParts: string[] = [`characters.ov.{${myWantChars.join(',')}}`]
+  for (const id of myWantChars) {
+    const name = getCharacterById(id)?.display_name_ja
+    // .or() のセパレータ衝突を避けるため , ( ) を含む名前はスキップ。
+    if (name != null && name !== '' && !/[,()]/.test(name)) {
+      offerOrParts.push(`name.ilike.%${name}%`)
+    }
+  }
+
+  let query = supabase
     .from('cards')
     .select(`*, owner:profiles!cards_owner_user_id_fkey(*), ${CARD_WANT_LINKS_SELECT}`)
-    .ilike('name', `%${userWants}%`)
     .eq('status', 'active')
     .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
+    .or(offerOrParts.join(',')) // offer 側: characters overlap OR name ILIKE
+    .overlaps('want_characters', myOfferChars) // want 側: 相手の求 ∋ 自分の譲メンバー (AND)
     .order('created_at', { ascending: false })
     .limit(100)
 
   if (params.excludeUserId != null && params.excludeUserId !== '') {
-    cardsQuery = cardsQuery.neq('owner_user_id', params.excludeUserId)
+    query = query.neq('owner_user_id', params.excludeUserId)
   }
   if (excludeFilter != null) {
-    cardsQuery = cardsQuery.not('owner_user_id', 'in', excludeFilter)
+    query = query.not('owner_user_id', 'in', excludeFilter)
   }
 
-  const { data: cardsData, error: cardsError } = await cardsQuery
-  if (cardsError) {
-    console.error('[searchDirectMatch] cards', cardsError)
+  const { data, error } = await query
+  if (error) {
+    console.error('[searchDirectMatch]', error)
     return []
   }
-  if (cardsData == null || cardsData.length === 0) return []
+  const cards = (data ?? []) as (Card & { owner: Profile | null })[]
 
-  // Step 2: candidate user 集合に対して wanted_cards を検索者の譲で照合
-  const candidateUserIds = Array.from(
-    new Set(
-      (cardsData as { owner_user_id: string }[]).map((c) => c.owner_user_id),
-    ),
-  )
-
-  const { data: wantsData, error: wantsError } = await supabase
-    .from('wanted_cards')
-    .select('*')
-    .ilike('card_name', `%${userOffers}%`)
-    .eq('status', 'active')
-    .in('user_id', candidateUserIds)
-
-  if (wantsError) {
-    console.error('[searchDirectMatch] wants', wantsError)
-    return []
+  // score: characters tier (scoreSearchMatch 単独優先) + item_types/works overlap 加点。
+  const tierScore: Record<SearchMatchScore, number> = {
+    strong: 30,
+    medium: 20,
+    weak: 10,
+    none: 0,
   }
-  if (wantsData == null || wantsData.length === 0) return []
-
-  // Step 3: client-side join (ユーザー単位、最初の card + 最初の want を pair)
-  const wantsByUser = new Map<string, WantedCard[]>()
-  for (const w of wantsData as WantedCard[]) {
-    const arr = wantsByUser.get(w.user_id) ?? []
-    arr.push(w)
-    wantsByUser.set(w.user_id, arr)
+  const overlapCount = (a: string[] | undefined | null, b: string[]): number => {
+    if (a == null || a.length === 0 || b.length === 0) return 0
+    const set = new Set(b)
+    return a.filter((x) => set.has(x)).length
+  }
+  const scoreOf = (card: Card): number => {
+    let s = tierScore[scoreSearchMatch(card, myWantChars, params.myWants.itemTypes)]
+    // 種別まで合うほど上位 (双方向: 相手の譲種別∋自分の求種別 / 相手の求種別∋自分の譲種別)。
+    s += overlapCount(card.item_types, params.myWants.itemTypes) * 15
+    s += overlapCount(card.want_item_types, params.myOffers.itemTypes) * 15
+    // works 一致 (任意・微加点)。
+    s += overlapCount(card.want_works, params.myOffers.works) * 5
+    if (card.work_id != null && params.myWants.works.includes(card.work_id)) s += 5
+    return s
   }
 
+  // score 降順で並べ、ユーザー単位に最上位 1 件を採用。
+  const sorted = [...cards].sort((a, b) => scoreOf(b) - scoreOf(a))
   const results: DirectMatchResult[] = []
   const usedUserIds = new Set<string>()
-  for (const cardRow of cardsData as Array<Card & { owner: Profile | null }>) {
-    if (usedUserIds.has(cardRow.owner_user_id)) continue
-    const userWants = wantsByUser.get(cardRow.owner_user_id)
-    if (userWants == null || userWants.length === 0) continue
-    if (cardRow.owner == null) continue
-    usedUserIds.add(cardRow.owner_user_id)
-    results.push({
-      user: cardRow.owner,
-      offering_card: cardRow,
-      wanted_card: userWants[0]!,
-    })
+  for (const card of sorted) {
+    if (card.owner == null) continue
+    if (usedUserIds.has(card.owner_user_id)) continue
+    usedUserIds.add(card.owner_user_id)
+    results.push({ user: card.owner, offering_card: card })
   }
 
   return results.slice(0, params.limit ?? 50)

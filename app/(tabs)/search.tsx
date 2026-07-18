@@ -11,7 +11,7 @@ import { HeaderActions } from '@/components/HeaderActions'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SearchAutocomplete } from '@/components/SearchAutocomplete'
 import { MemberMaster } from '@/constants/members'
-import { formatStructuredWant, isMasterCacheReady } from '@/lib/master'
+import { findCharacterIdsByText, formatStructuredWant, isMasterCacheReady } from '@/lib/master'
 import { scoreSearchMatch, type SearchMatchScore } from '@/lib/matcher'
 import {
   fetchMyBlockedUserIds,
@@ -863,9 +863,13 @@ function DirectMatchPane({
   const handleSearch = async () => {
     if (!canSearch) return
     setLoading(true)
+    // PR-2a ブリッジ: 現行のテキスト入力を master char ID に解決して構造化エンジンへ渡す。
+    //   チップ UI 化 (works/item_types も指定) は PR-2b。未解決テキストは空 → 非マッチ (cards=0 で実害なし)。
+    const offerChars = findCharacterIdsByText(offerTrim)
+    const wantChars = findCharacterIdsByText(wantTrim)
     const data = await searchDirectMatch({
-      userOffers: offerTrim,
-      userWants: wantTrim,
+      myOffers: { characters: offerChars, works: [], itemTypes: [] },
+      myWants: { characters: wantChars, works: [], itemTypes: [] },
       excludeUserId: currentUserId,
       excludeOwnerIds: blockedUserIds,
     })
@@ -977,7 +981,8 @@ function DirectMatchPane({
                   <View style={styles.directMatchSide}>
                     <Text style={styles.directMatchSideLabel}>相手が欲しい (求)</Text>
                     <Text style={styles.directMatchSideValue} numberOfLines={2}>
-                      {item.wanted_card.card_name}
+                      {/* PR-2a: wanted_card 廃止 → offering_card.want_* を formatStructuredWant で表示 */}
+                      {formatStructuredWant(item.offering_card).text ?? '—'}
                     </Text>
                   </View>
                 </View>

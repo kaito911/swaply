@@ -79,6 +79,9 @@ type TapPoint = {
   characters: string[]
   itemTypes: string[]
   note: string
+  // per-item 求 override (PR-1b-2)。null/undefined = 共通 bulkWant を継承。
+  //   ★ pt.want != null が override フラグそのもの (別フラグ不要)。共通再変更の影響を受けない。
+  want?: WantMasterValue | null
 }
 
 // 選択した写真 (uri + 元画像ピクセルサイズ、contain 矩形算出に使う)。
@@ -239,6 +242,11 @@ export default function ListingNewBulkScreen() {
   const [submitting, setSubmitting] = useState(false)
   // 出品前の最終確認画面を表示中か (STEP 4)。
   const [reviewMode, setReviewMode] = useState(false)
+  // per-item 求 個別編集モーダル (PR-1b-2)。draft-commit 方式で「開いただけで override 化」を防ぐ:
+  //   モーダルは wantDraft(ローカル)を編集し、「完了」で初めて pt.want に commit する。
+  //   → WantMasterSection の mount useEffect(同シリーズ同期)が draft を書いても pt.want は不変。
+  const [wantEditPointId, setWantEditPointId] = useState<string | null>(null)
+  const [wantDraft, setWantDraft] = useState<WantMasterValue | null>(null)
 
   // 履歴を初回取得 (userId 確定後)。
   useEffect(() => {
@@ -271,6 +279,7 @@ export default function ListingNewBulkScreen() {
   const step2KA = useKeyboardAwareScroll()
   const wantKA = useKeyboardAwareScroll()
   const sheetKA = useKeyboardAwareScroll(sheetScrollRef)
+  const wantEditKA = useKeyboardAwareScroll() // per-item 求 個別編集モーダル用
 
   // letterbox を除いた実画像矩形 (contain)。タップ判定・座標変換・バッジ描画の基準。
   const rect = image
@@ -312,6 +321,39 @@ export default function ListingNewBulkScreen() {
     patch: Partial<Pick<TapPoint, 'characters' | 'itemTypes' | 'note'>>,
   ) => {
     setPoints((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+  }
+
+  // ── per-item 求 個別編集 (PR-1b-2) ──
+  const wantEditPoint = points.find((p) => p.id === wantEditPointId) ?? null
+
+  // 個別編集モーダルを開く: draft を pt.want(既存 override) or 共通 bulkWant のコピーで初期化。
+  const openWantEditor = (pt: TapPoint) => {
+    setWantDraft(pt.want ?? { ...bulkWant })
+    setWantEditPointId(pt.id)
+  }
+  const closeWantEditor = () => {
+    setWantEditPointId(null)
+    setWantDraft(null)
+  }
+  // 「完了」: draft を pt.want に commit (override 確定)。
+  const commitWantEditor = () => {
+    if (wantEditPointId != null && wantDraft != null) {
+      const id = wantEditPointId
+      setPoints((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, want: wantDraft } : p)),
+      )
+    }
+    closeWantEditor()
+  }
+  // 「共通に戻す」: pt.want = null (override 解除、共通 bulkWant を継承)。
+  const resetWantToCommon = () => {
+    if (wantEditPointId != null) {
+      const id = wantEditPointId
+      setPoints((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, want: null } : p)),
+      )
+    }
+    closeWantEditor()
   }
 
   // 補足チップをタップ → 補足欄に挿入 (末尾に追記、空なら置換)。
@@ -394,8 +436,12 @@ export default function ListingNewBulkScreen() {
 
       // 各点 → 1 cards row。single-page の row 形状に準拠。
       //   bbox_x/y = 元画像基準のタップ割合 (contain 変換済)。bbox_w/h・image_url_cropped は NULL。
-      //   求は共通 bulkWant を master 構造化して各 card の want_* に保存 (PR-1b-1)。
-      const rows = points.map((pt) => ({
+      //   求は per-card override (pt.want) があればそれを、無ければ共通 bulkWant を解決して
+      //   各 card の want_* に保存 (PR-1b-1 / 1b-2)。
+      const rows = points.map((pt) => {
+        // 同シリーズは常に work.workId(共通work) と pt.itemTypes(そのcard譲種別) を使う。
+        const w = pt.want ?? bulkWant
+        return {
         owner_user_id: userId,
         name: buildPointName(work, pt.characters, pt.itemTypes),
         category: work.category,
@@ -417,13 +463,11 @@ export default function ListingNewBulkScreen() {
         allows_handoff: false,
         allows_adjustment: false,
         adjustment_max: null,
-        // 求 (共通 bulkWant) を各 card の want_* に保存。同シリーズ ON は per-card 解決:
+        // 求 (w = pt.want ?? bulkWant) を各 card の want_* に保存。同シリーズ ON は per-card 解決:
         //   作品 = 譲 work、種別 = その card 自身の種別 (pt.itemTypes、コンプ狙い)。
-        want_works: bulkWant.sameSeriesAsOffer ? [work.workId] : bulkWant.works,
-        want_characters: bulkWant.characters,
-        want_item_types: bulkWant.sameSeriesAsOffer
-          ? pt.itemTypes
-          : bulkWant.itemTypes,
+        want_works: w.sameSeriesAsOffer ? [work.workId] : w.works,
+        want_characters: w.characters,
+        want_item_types: w.sameSeriesAsOffer ? pt.itemTypes : w.itemTypes,
         group_name: null,
         member_name: null,
         series: null,
@@ -432,7 +476,8 @@ export default function ListingNewBulkScreen() {
         bbox_w: null,
         bbox_h: null,
         image_url_cropped: null,
-      }))
+        }
+      })
 
       // 配列 insert = 単一 INSERT 文 = 原子的 (全成功 or 全ロールバック)。
       //   求は各 row の want_* に含めて 1 回の INSERT で完結
@@ -710,37 +755,64 @@ export default function ListingNewBulkScreen() {
           {points.map((pt, idx) => {
             const memberNames = pt.characters.map((c) => getCharacterById(c)?.display_name_ja ?? c)
             const typeNames = pt.itemTypes.map((t) => getItemTypeById(t)?.display_name_ja ?? t)
+            // per-item 求の実効値 (override or 共通) と表示。
+            const isOverride = pt.want != null
+            const cw = pt.want ?? bulkWant
+            const cwCharText = cw.characters
+              .map((c) => getCharacterById(c)?.display_name_ja ?? c)
+              .join('、')
             return (
-              <Pressable
-                key={pt.id}
-                style={styles.reviewItemRow}
-                onPress={() => {
-                  // 各商品タップ = タップ画面へ戻ってその点の属性シートを開く
-                  setReviewMode(false)
-                  setAttrsDone(false)
-                  setActivePointId(pt.id)
-                }}
-              >
-                <View style={styles.reviewItemBadge}>
-                  <Text style={styles.badgeText}>{idx + 1}</Text>
-                </View>
-                <View style={styles.reviewItemBody}>
-                  <Text style={styles.reviewItemMain} numberOfLines={1}>
-                    {memberNames.length > 0 ? memberNames.join('、') : '(メンバー未設定)'}
+              <View key={pt.id} style={styles.reviewItemGroup}>
+                {/* 譲: タップで属性シートへ */}
+                <Pressable
+                  style={styles.reviewItemRow}
+                  onPress={() => {
+                    // 各商品タップ = タップ画面へ戻ってその点の属性シートを開く
+                    setReviewMode(false)
+                    setAttrsDone(false)
+                    setActivePointId(pt.id)
+                  }}
+                >
+                  <View style={styles.reviewItemBadge}>
+                    <Text style={styles.badgeText}>{idx + 1}</Text>
+                  </View>
+                  <View style={styles.reviewItemBody}>
+                    <Text style={styles.reviewItemMain} numberOfLines={1}>
+                      {memberNames.length > 0 ? memberNames.join('、') : '(メンバー未設定)'}
+                    </Text>
+                    {typeNames.length > 0 && (
+                      <Text style={styles.reviewItemSub} numberOfLines={1}>
+                        {typeNames.join('・')}
+                      </Text>
+                    )}
+                    {pt.note.trim() !== '' && (
+                      <Text style={styles.reviewItemNote} numberOfLines={2}>
+                        補足: {pt.note.trim()}
+                      </Text>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                </Pressable>
+                {/* 求: 個別/共通の出し分け + 個別に変更 */}
+                <Pressable
+                  style={styles.reviewItemWantRow}
+                  onPress={() => openWantEditor(pt)}
+                >
+                  <Text style={styles.reviewItemWantLabel}>
+                    求{isOverride ? '（個別）' : '（共通）'}
                   </Text>
-                  {typeNames.length > 0 && (
-                    <Text style={styles.reviewItemSub} numberOfLines={1}>
-                      {typeNames.join('・')}
-                    </Text>
+                  <Text style={styles.reviewItemWantValue} numberOfLines={1}>
+                    {cwCharText !== '' ? cwCharText : '—'}
+                    {cw.sameSeriesAsOffer ? '・同シリーズ' : ''}
+                  </Text>
+                  {isOverride && (
+                    <View style={styles.overrideBadge}>
+                      <Text style={styles.overrideBadgeText}>個別</Text>
+                    </View>
                   )}
-                  {pt.note.trim() !== '' && (
-                    <Text style={styles.reviewItemNote} numberOfLines={2}>
-                      補足: {pt.note.trim()}
-                    </Text>
-                  )}
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-              </Pressable>
+                  <Text style={styles.reviewItemWantEdit}>個別に変更</Text>
+                </Pressable>
+              </View>
             )
           })}
 
@@ -754,6 +826,9 @@ export default function ListingNewBulkScreen() {
           >
             <View style={styles.reviewItemBody}>
               <Text style={styles.reviewSectionTitle}>求める商品（共通）</Text>
+              <Text style={styles.reviewItemNote}>
+                個別設定していない商品に適用されます
+              </Text>
               {bulkWant.sameSeriesAsOffer && (
                 <Text style={styles.reviewItemNote}>譲と同シリーズのグッズを求む</Text>
               )}
@@ -783,6 +858,68 @@ export default function ListingNewBulkScreen() {
             size="lg"
           />
         </View>
+
+        {/* per-item 求 個別編集モーダル (PR-1b-2)。draft を編集し「完了」で pt.want に commit。 */}
+        <Modal
+          visible={wantEditPoint != null && wantDraft != null}
+          transparent
+          animationType="slide"
+          onRequestClose={closeWantEditor}
+        >
+          <KeyboardAvoidingView
+            style={styles.sheetOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.sheet}>
+              {wantEditPoint != null && wantDraft != null && (
+                <>
+                  <View style={styles.sheetHeader}>
+                    <Text style={styles.sheetTitle}>
+                      {points.findIndex((p) => p.id === wantEditPoint.id) + 1} 番の求を個別設定
+                    </Text>
+                    <Pressable
+                      onPress={closeWantEditor}
+                      hitSlop={12}
+                      style={styles.sheetClose}
+                    >
+                      <Ionicons name="close" size={22} color={colors.textSecondary} />
+                    </Pressable>
+                  </View>
+                  <KeyboardAwareScrollProvider value={wantEditKA.ensureVisible}>
+                  <ScrollView
+                    ref={wantEditKA.scrollRef}
+                    onScroll={wantEditKA.onScroll}
+                    scrollEventThrottle={16}
+                    style={styles.sheetScroll}
+                    contentContainerStyle={styles.sheetScrollContent}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    <WantMasterSection
+                      value={wantDraft}
+                      onChange={setWantDraft}
+                      userId={userId}
+                      offerWork={work}
+                      offerItemTypes={wantEditPoint.itemTypes}
+                    />
+                  </ScrollView>
+                  </KeyboardAwareScrollProvider>
+                  <View style={styles.sheetActions}>
+                    <Pressable
+                      onPress={resetWantToCommon}
+                      style={styles.sheetDeleteBtn}
+                    >
+                      <Ionicons name="refresh-outline" size={16} color={colors.primary} />
+                      <Text style={styles.wantResetText}>共通に戻す</Text>
+                    </Pressable>
+                    <View style={styles.sheetDoneWrap}>
+                      <PrimaryCTA label="完了" onPress={commitWantEditor} size="md" />
+                    </View>
+                  </View>
+                </>
+              )}
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </SafeAreaView>
     )
   }
@@ -1096,6 +1233,59 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textTertiary,
     lineHeight: 16,
+  },
+  // per-item 求 (PR-1b-2)
+  reviewItemGroup: {
+    marginBottom: spacing.sm,
+  },
+  reviewItemWantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundMuted,
+  },
+  reviewItemWantLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: colors.textSecondary,
+    flexShrink: 0,
+  },
+  reviewItemWantValue: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+  },
+  overrideBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    backgroundColor: colors.primary,
+    flexShrink: 0,
+  },
+  overrideBadgeText: {
+    fontSize: 10,
+    fontWeight: fontWeight.bold,
+    color: colors.textInverse,
+  },
+  reviewItemWantEdit: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+    flexShrink: 0,
+  },
+  wantResetText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
   },
   reviewWantRow: {
     flexDirection: 'row',

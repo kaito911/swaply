@@ -42,6 +42,10 @@ import {
   type WorkSectionValue,
 } from '@/components/listing/section/types'
 import { WantMasterSection } from '@/components/listing/section/WantMasterSection'
+import {
+  KeyboardAwareScrollProvider,
+  useKeyboardAwareScroll,
+} from '@/components/KeyboardAwareScroll'
 import { WorkSection } from '@/components/listing/section/WorkSection'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
@@ -216,6 +220,8 @@ export default function ListingNewSinglePageScreen() {
   const navigation = useNavigation()
   const { userId, loading: authLoading } = useAuth()
   const { showToast } = useToast()
+  // ① 候補ドロップダウンのキーボード被り対策 (メインフォームの ScrollView に注入)。
+  const { scrollRef, onScroll, ensureVisible } = useKeyboardAwareScroll()
 
   const draftId = params.draftId
   const isNew = params.isNew === '1'
@@ -516,7 +522,11 @@ export default function ListingNewSinglePageScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScreenHeader title="出品" />
+      <KeyboardAwareScrollProvider value={ensureVisible}>
       <ScrollView
+        ref={scrollRef}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -619,6 +629,7 @@ export default function ListingNewSinglePageScreen() {
             />
           </View>
       </ScrollView>
+      </KeyboardAwareScrollProvider>
     </SafeAreaView>
   )
 }

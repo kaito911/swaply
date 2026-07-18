@@ -30,6 +30,10 @@ import type {
 } from '@/components/listing/section/types'
 import { WantMasterSection } from '@/components/listing/section/WantMasterSection'
 import { WorkSection } from '@/components/listing/section/WorkSection'
+import {
+  KeyboardAwareScrollProvider,
+  useKeyboardAwareScroll,
+} from '@/components/KeyboardAwareScroll'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -261,6 +265,12 @@ export default function ListingNewBulkScreen() {
     })
     return () => sub.remove() // unmount 時に listener を除去 (リーク防止)
   }, [])
+
+  // ① 候補ドロップダウンのキーボード被り対策。3 サーフェス (STEP2作品 / 求 / 属性シート) の
+  //   各 ScrollView に個別注入する。シートは既存 sheetScrollRef を再利用。
+  const step2KA = useKeyboardAwareScroll()
+  const wantKA = useKeyboardAwareScroll()
+  const sheetKA = useKeyboardAwareScroll(sheetScrollRef)
 
   // letterbox を除いた実画像矩形 (contain)。タップ判定・座標変換・バッジ描画の基準。
   const rect = image
@@ -541,7 +551,11 @@ export default function ListingNewBulkScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScreenHeader title="作品・グループを選ぶ" onBack={backFromWork} />
+        <KeyboardAwareScrollProvider value={step2KA.ensureVisible}>
         <ScrollView
+          ref={step2KA.scrollRef}
+          onScroll={step2KA.onScroll}
+          scrollEventThrottle={16}
           style={styles.flex}
           contentContainerStyle={styles.workContent}
           keyboardShouldPersistTaps="handled"
@@ -556,6 +570,7 @@ export default function ListingNewBulkScreen() {
           </Text>
           <WorkSection value={work} onChange={setWork} />
         </ScrollView>
+        </KeyboardAwareScrollProvider>
       </SafeAreaView>
     )
   }
@@ -566,7 +581,11 @@ export default function ListingNewBulkScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScreenHeader title="求める商品を入力" onBack={backWantToTap} />
+        <KeyboardAwareScrollProvider value={wantKA.ensureVisible}>
         <ScrollView
+          ref={wantKA.scrollRef}
+          onScroll={wantKA.onScroll}
+          scrollEventThrottle={16}
           style={styles.flex}
           contentContainerStyle={styles.workContent}
           keyboardShouldPersistTaps="handled"
@@ -602,6 +621,7 @@ export default function ListingNewBulkScreen() {
             size="lg"
           />
         </View>
+        </KeyboardAwareScrollProvider>
       </SafeAreaView>
     )
   }
@@ -875,8 +895,11 @@ export default function ListingNewBulkScreen() {
                   </Pressable>
                 </View>
 
+                <KeyboardAwareScrollProvider value={sheetKA.ensureVisible}>
                 <ScrollView
                   ref={sheetScrollRef}
+                  onScroll={sheetKA.onScroll}
+                  scrollEventThrottle={16}
                   style={styles.sheetScroll}
                   contentContainerStyle={styles.sheetScrollContent}
                   keyboardShouldPersistTaps="handled"
@@ -938,6 +961,7 @@ export default function ListingNewBulkScreen() {
                     textAlignVertical="top"
                   />
                 </ScrollView>
+                </KeyboardAwareScrollProvider>
 
                 <View style={styles.sheetActions}>
                   <Pressable

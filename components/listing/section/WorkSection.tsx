@@ -16,9 +16,10 @@
 
 import { Ionicons } from '@expo/vector-icons'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
+import { useEnsureVisible } from '@/components/KeyboardAwareScroll'
 import { getWorkById, getWorkSuggestions } from '@/lib/master'
 import type { MasterCategory, MasterWork } from '@/lib/types'
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import {
   Pressable,
   StyleSheet,
@@ -87,6 +88,10 @@ export function WorkSection({ value, onChange }: WorkSectionProps) {
   // 画面を無駄に長くする問題を解消。onBlur は 150ms 遅延して Pressable onPress が
   // 先に発火するようにする (候補タップと blur の競合回避)。
   const [isFocused, setIsFocused] = useState(false)
+
+  // 候補出現時に入力欄を親 ScrollView 可視域上部へ寄せる (① キーボード被り対策)。
+  const ensureVisible = useEnsureVisible()
+  const inputRef = useRef<TextInput>(null)
 
   const handleFocus = () => setIsFocused(true)
   const handleBlur = () => {
@@ -173,6 +178,7 @@ export function WorkSection({ value, onChange }: WorkSectionProps) {
 
       {/* 入力欄 */}
       <TextInput
+        ref={inputRef}
         value={input}
         onChangeText={handleInputChange}
         onFocus={handleFocus}
@@ -187,7 +193,10 @@ export function WorkSection({ value, onChange }: WorkSectionProps) {
 
       {/* マスタ候補: フォーカス時のみ展開 */}
       {isFocused && selectedWork == null && suggestions.length > 0 && (
-        <View style={styles.suggestionList}>
+        <View
+          style={styles.suggestionList}
+          onLayout={() => ensureVisible(inputRef)}
+        >
           {suggestions.map((w) => (
             <Pressable
               key={w.id}

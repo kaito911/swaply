@@ -14,7 +14,8 @@
 import { Ionicons } from '@expo/vector-icons'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
-import React, { useEffect, useState } from 'react'
+import { useEnsureVisible } from '@/components/KeyboardAwareScroll'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Modal,
@@ -82,6 +83,10 @@ export function MultiSelectAutocomplete<T>(props: MultiSelectAutocompleteProps<T
   const [suggestions, setSuggestions] = useState<T[]>([])
   const [loading, setLoading] = useState(false)
   const [showFreeTextModal, setShowFreeTextModal] = useState(false)
+
+  // 候補出現時に入力欄を親 ScrollView 可視域上部へ寄せる (① キーボード被り対策)。
+  const ensureVisible = useEnsureVisible()
+  const inputBarRef = useRef<View>(null)
 
   // fetchSuggestions の結果反映 (sync/async どちらでも)
   useEffect(() => {
@@ -171,7 +176,7 @@ export function MultiSelectAutocomplete<T>(props: MultiSelectAutocompleteProps<T
       )}
 
       {/* 入力欄 */}
-      <View style={styles.inputBar}>
+      <View ref={inputBarRef} style={styles.inputBar}>
         <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
         <TextInput
           value={input}
@@ -189,7 +194,10 @@ export function MultiSelectAutocomplete<T>(props: MultiSelectAutocompleteProps<T
 
       {/* 候補リスト */}
       {showSuggestList && (
-        <View style={styles.suggestList}>
+        <View
+          style={styles.suggestList}
+          onLayout={() => ensureVisible(inputBarRef)}
+        >
           {loading ? (
             <View style={styles.loadingWrap}>
               <ActivityIndicator size="small" color={colors.primary} />

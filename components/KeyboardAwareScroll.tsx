@@ -77,7 +77,11 @@ export function useKeyboardAwareScroll(
         target.measureLayout(
           scroll as unknown as React.ElementRef<typeof View>,
           (_left, top) => {
-            const TOP_MARGIN = 12
+            // TOP_MARGIN = 入力欄を画面上端から何 px 下に置くか (= 上に残す余白)。
+            //   小さすぎると入力欄が上端に貼り付きセクション見出しが画面外へ飛ぶため、
+            //   見出し1行 + 余白が残る ~80px に置く (実機で 72〜88 の範囲で微調整可)。
+            //   ★下げすぎると候補(最大280pt)がキーボード裏に戻るトレードオフの中間点。
+            const TOP_MARGIN = 80
             // guard は一旦外し毎回 scrollTo (まず効かせる最小構成)。top は content 相対 y。
             scroll.scrollTo({ y: Math.max(0, top - TOP_MARGIN), animated: true })
           },

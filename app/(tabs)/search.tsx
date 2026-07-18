@@ -10,8 +10,12 @@
 import { HeaderActions } from '@/components/HeaderActions'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SearchAutocomplete } from '@/components/SearchAutocomplete'
+import {
+  KeyboardAwareScrollProvider,
+  useKeyboardAwareScroll,
+} from '@/components/KeyboardAwareScroll'
 import { MemberMaster } from '@/constants/members'
-import { findCharacterIdsByText, formatStructuredWant, isMasterCacheReady } from '@/lib/master'
+import { formatStructuredWant, isMasterCacheReady } from '@/lib/master'
 import { scoreSearchMatch, type SearchMatchScore } from '@/lib/matcher'
 import {
   fetchMyBlockedUserIds,
@@ -37,6 +41,7 @@ import {
   FlatList,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -850,150 +855,137 @@ function DirectMatchPane({
   currentUserId: string | null
   blockedUserIds: string[]
 }) {
+  const [offerWorks, setOfferWorks] = useState<MasterWork[]>([])
+  const [offerChars, setOfferChars] = useState<MasterCharacter[]>([])
+  const [offerItems, setOfferItems] = useState<MasterItemType[]>([])
   const [offerInput, setOfferInput] = useState('')
+  const [wantWorks, setWantWorks] = useState<MasterWork[]>([])
+  const [wantChars, setWantChars] = useState<MasterCharacter[]>([])
+  const [wantItems, setWantItems] = useState<MasterItemType[]>([])
   const [wantInput, setWantInput] = useState('')
   const [results, setResults] = useState<DirectMatchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
 
-  const offerTrim = offerInput.trim()
-  const wantTrim = wantInput.trim()
-  const canSearch = offerTrim !== '' && wantTrim !== ''
+  // ① 候補ドロップダウンのキーボード被り対策 (入力域 ScrollView に注入)。
+  const { scrollRef, onScroll, ensureVisible } = useKeyboardAwareScroll()
 
-  const handleSearch = async () => {
-    if (!canSearch) return
-    setLoading(true)
-    // PR-2a ブリッジ: 現行のテキスト入力を master char ID に解決して構造化エンジンへ渡す。
-    //   チップ UI 化 (works/item_types も指定) は PR-2b。未解決テキストは空 → 非マッチ (cards=0 で実害なし)。
-    const offerChars = findCharacterIdsByText(offerTrim)
-    const wantChars = findCharacterIdsByText(wantTrim)
-    const data = await searchDirectMatch({
-      myOffers: { characters: offerChars, works: [], itemTypes: [] },
-      myWants: { characters: wantChars, works: [], itemTypes: [] },
-      excludeUserId: currentUserId,
-      excludeOwnerIds: blockedUserIds,
-    })
-    setResults(data)
-    setSearched(true)
-    setLoading(false)
-  }
+  // 選択チップ → master ID 配列。★findCharacterIdsByText(テキスト漢字照合)を通さない = 異体字回避。
+  const offerWorkIds = useMemo(() => offerWorks.map((w) => w.id), [offerWorks])
+  const offerCharIds = useMemo(() => offerChars.map((c) => c.id), [offerChars])
+  const offerItemIds = useMemo(() => offerItems.map((t) => t.id), [offerItems])
+  const wantWorkIds = useMemo(() => wantWorks.map((w) => w.id), [wantWorks])
+  const wantCharIds = useMemo(() => wantChars.map((c) => c.id), [wantChars])
+  const wantItemIds = useMemo(() => wantItems.map((t) => t.id), [wantItems])
 
-  const handleMatchPress = (cardId: string) => {
-    router.push({ pathname: '/listing/[id]', params: { id: cardId } } as never)
-  }
+  const hasAnyAxis =
+    offerWorkIds.length +
+      offerCharIds.length +
+      offerItemIds.length +
+      wantWorkIds.length +
+      wantCharIds.length +
+      wantItemIds.length >
+    0
+
+  // ライブ検索: 6軸のいずれか変化で即時 searchDirectMatch。全軸空なら結果クリア (gating無し)。
+  useEffect(() => {
+    if (!hasAnyAxis) {
+      setResults([])
+      setSearched(false)
+      return
+    }
+    let cancelled = false
+    const run = async () => {
+      setLoading(true)
+      const data = await searchDirectMatch({
+        myOffers: { works: offerWorkIds, characters: offerCharIds, itemTypes: offerItemIds },
+        myWants: { works: wantWorkIds, characters: wantCharIds, itemTypes: wantItemIds },
+        excludeUserId: currentUserId,
+        excludeOwnerIds: blockedUserIds,
+      })
+      if (cancelled) return
+      setResults(data)
+      setSearched(true)
+      setLoading(false)
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    hasAnyAxis,
+    offerWorkIds,
+    offerCharIds,
+    offerItemIds,
+    wantWorkIds,
+    wantCharIds,
+    wantItemIds,
+    currentUserId,
+    blockedUserIds,
+  ])
+
+  const handleFreeTextNoop = useCallback(() => {}, [])
 
   return (
     <View style={styles.pane}>
-      <View style={styles.directInputWrap}>
-        <Text style={styles.directLabel}>あなたが出す商品 (譲)</Text>
-        <View style={styles.inputBar}>
-          <Ionicons name="arrow-up-circle-outline" size={18} color={colors.textTertiary} />
-          <TextInput
-            style={styles.input}
-            placeholder="例: アイドルカード セット A"
-            placeholderTextColor={colors.textTertiary}
-            value={offerInput}
-            onChangeText={setOfferInput}
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-          />
-        </View>
-        <Text style={[styles.directLabel, { marginTop: spacing.sm }]}>
-          あなたが欲しい商品 (求)
-        </Text>
-        <View style={styles.inputBar}>
-          <Ionicons name="arrow-down-circle-outline" size={18} color={colors.textTertiary} />
-          <TextInput
-            style={styles.input}
-            placeholder="例: アクリルスタンド L サイズ"
-            placeholderTextColor={colors.textTertiary}
-            value={wantInput}
-            onChangeText={setWantInput}
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-          />
-        </View>
-        <Pressable
-          onPress={handleSearch}
-          disabled={!canSearch || loading}
-          style={({ pressed }) => [
-            styles.directSearchBtn,
-            (!canSearch || loading) && styles.directSearchBtnDisabled,
-            pressed && canSearch && styles.directSearchBtnPressed,
-          ]}
-        >
-          <Text style={styles.directSearchBtnText}>
-            {loading ? '検索中…' : 'マッチする相手を探す'}
-          </Text>
-        </Pressable>
-        <Text style={styles.directNote} numberOfLines={2}>
-          あなたが出す商品を求めている人 × あなたが欲しい商品を持っている人を一発で発見
-        </Text>
-      </View>
-
-      {loading ? (
-        <View style={styles.centerBox}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
-      ) : searched && results.length === 0 ? (
-        <View style={styles.centerBox}>
-          <Text style={styles.emptyTitle}>マッチング相手が見つかりませんでした</Text>
-          <Text style={styles.emptySub}>条件を緩めて再検索してください</Text>
-        </View>
-      ) : !searched ? (
-        <View style={styles.centerBox}>
-          <Ionicons name="git-compare-outline" size={40} color={colors.border} />
-          <Text style={styles.emptySub}>譲 + 求 を入力して検索</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={results}
-          keyExtractor={(item) => item.offering_card.id}
-          contentContainerStyle={styles.listContent}
+      {/* 入力域: SearchAutocomplete×2 (譲/求・各3軸チップ)。ライブ検索 (ボタンなし)。
+          ResultArea(FlatList) とは兄弟に置き、二重スクロールを避ける。 */}
+      <KeyboardAwareScrollProvider value={ensureVisible}>
+        <ScrollView
+          ref={scrollRef}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          style={styles.directInputScroll}
+          contentContainerStyle={styles.directInputContent}
           keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => {
-            const o = item.user
-            const trustLevel = computeTrustBadge({
-              trade_count: o.trade_count,
-              ship_rate: o.ship_rate,
-              reply_median_hours: o.reply_median_hours,
-              trouble_count: o.trouble_count,
-              last_active_at: o.last_active_at,
-            })
-            const ownerName = o.handle ? `@${o.handle}` : (o.display_name ?? 'ユーザー')
-            return (
-              <Pressable
-                style={({ pressed }) => [styles.directMatchCard, pressed && styles.cardItemPressed]}
-                onPress={() => handleMatchPress(item.offering_card.id)}
-              >
-                <View style={styles.directMatchHeader}>
-                  <Text style={styles.cardOwner} numberOfLines={1}>{ownerName}</Text>
-                  <TrustBadge level={trustLevel} size="sm" />
-                </View>
-                <View style={styles.directMatchRow}>
-                  <View style={styles.directMatchSide}>
-                    <Text style={styles.directMatchSideLabel}>相手が出す (譲)</Text>
-                    <Text style={styles.directMatchSideValue} numberOfLines={2}>
-                      {item.offering_card.name}
-                    </Text>
-                  </View>
-                  <Ionicons name="swap-horizontal" size={22} color={colors.primary} />
-                  <View style={styles.directMatchSide}>
-                    <Text style={styles.directMatchSideLabel}>相手が欲しい (求)</Text>
-                    <Text style={styles.directMatchSideValue} numberOfLines={2}>
-                      {/* PR-2a: wanted_card 廃止 → offering_card.want_* を formatStructuredWant で表示 */}
-                      {formatStructuredWant(item.offering_card).text ?? '—'}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.directMatchCta}>
-                  <Text style={styles.directMatchCtaText}>提案する →</Text>
-                </View>
-              </Pressable>
-            )
-          }}
-        />
-      )}
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets
+        >
+          <Text style={styles.directLabel}>あなたが出す商品 (譲)</Text>
+          <SearchAutocomplete
+            selectedWorks={offerWorks}
+            onChangeWorks={setOfferWorks}
+            selectedCharacters={offerChars}
+            onChangeCharacters={setOfferChars}
+            selectedItemTypes={offerItems}
+            onChangeItemTypes={setOfferItems}
+            inputText={offerInput}
+            onChangeInputText={setOfferInput}
+            onSubmitFreeText={handleFreeTextNoop}
+            placeholder="譲る作品・メンバー・種別で絞る"
+          />
+          <Text style={[styles.directLabel, { marginTop: spacing.md }]}>
+            あなたが欲しい商品 (求)
+          </Text>
+          <SearchAutocomplete
+            selectedWorks={wantWorks}
+            onChangeWorks={setWantWorks}
+            selectedCharacters={wantChars}
+            onChangeCharacters={setWantChars}
+            selectedItemTypes={wantItems}
+            onChangeItemTypes={setWantItems}
+            inputText={wantInput}
+            onChangeInputText={setWantInput}
+            onSubmitFreeText={handleFreeTextNoop}
+            placeholder="欲しい作品・メンバー・種別で絞る"
+          />
+          <Text style={styles.directNote} numberOfLines={2}>
+            あなたが出す商品を求めている人 × あなたが欲しい商品を持っている人を発見
+          </Text>
+        </ScrollView>
+      </KeyboardAwareScrollProvider>
+
+      <ResultArea
+        loading={loading}
+        searched={searched}
+        results={results.map((r) => r.offering_card)}
+        currentUserId={currentUserId}
+        emptyHint={
+          hasAnyAxis
+            ? 'マッチする相手が見つかりませんでした'
+            : '譲・求の条件をチップで選ぶと、双方向マッチを探します'
+        }
+      />
     </View>
   )
 }
@@ -1062,6 +1054,19 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.backgroundCard,
+  },
+  // 入力域 ScrollView (PR-2b): ResultArea(FlatList)の上に置く。maxHeight で ResultArea に領域を残す。
+  directInputScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxHeight: '55%',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  directInputContent: {
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.md,
   },
   directLabel: {
     fontSize: fontSize.xs,

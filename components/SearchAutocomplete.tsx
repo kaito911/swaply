@@ -22,6 +22,7 @@
 
 import { Ionicons } from '@expo/vector-icons'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
+import { useEnsureVisible } from '@/components/KeyboardAwareScroll'
 import {
   getSearchSuggestionSubLabel,
   getUnifiedSearchSuggestions,
@@ -29,7 +30,7 @@ import {
   type SearchSuggestion,
 } from '@/lib/master'
 import type { MasterCharacter, MasterItemType, MasterWork } from '@/lib/types'
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Pressable,
   StyleSheet,
@@ -90,6 +91,11 @@ export function SearchAutocomplete(props: SearchAutocompleteProps) {
       clearTimeout(timeoutId)
     }
   }, [masterReady])
+
+  // 候補出現時に入力欄を親 ScrollView 可視域上部へ寄せる (① キーボード被り対策)。
+  //   Provider が無い親では no-op なので無害。
+  const ensureVisible = useEnsureVisible()
+  const inputBarRef = useRef<View>(null)
 
   // 候補計算 (sync、master cache 前提)
   const trimmedInput = props.inputText.trim()
@@ -210,7 +216,7 @@ export function SearchAutocomplete(props: SearchAutocompleteProps) {
       )}
 
       {/* 入力欄 */}
-      <View style={styles.inputBar}>
+      <View ref={inputBarRef} style={styles.inputBar}>
         <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
         <TextInput
           value={props.inputText}
@@ -228,7 +234,10 @@ export function SearchAutocomplete(props: SearchAutocompleteProps) {
 
       {/* 候補 / 該当なし (master ready かつ minInputChars 以上のときのみ) */}
       {showSuggest && (
-        <View style={styles.suggestList}>
+        <View
+          style={styles.suggestList}
+          onLayout={() => ensureVisible(inputBarRef)}
+        >
           {hasCandidates &&
             candidates.map((s) => (
               <Pressable

@@ -32,8 +32,10 @@ import {
   fetchMyWantedCards,
   fetchCardsPaged,
   fetchOshiMatchCards,
+  fetchUserCards,
   fetchUserOshi,
   removeLike,
+  searchDirectMatch,
   supabase,
 } from '@/lib/supabase'
 import { findCharacterIdsByText, getWorkSuggestions } from '@/lib/master'
@@ -56,9 +58,16 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 const GRID_PAGE = 30
 
+// PR-2c「マッチ率が高い交換」: card 毎 searchDirectMatch の並列数上限 (直近の自分出品 N 枚)。
+const MATCH_LANE_CARD_CAP = 12
+// レーンに出す最終件数 (dedup + score 降順後)。
+const MATCH_LANE_LIMIT = 20
+
 export default function HomeScreen() {
   const { user } = useAuthContext()
 
+  // 「マッチ率が高い交換」レーン (PR-2c: 自分の譲/求 × searchDirectMatch 双方向)。
+  const [matchCards, setMatchCards] = useState<Card[]>([])
   // 「推しと一致!」レーン (推し登録に基づく本物のパーソナライズ)。
   const [oshiMatchCards, setOshiMatchCards] = useState<Card[]>([])
   const [easyCards, setEasyCards] = useState<Card[]>([])
@@ -159,6 +168,44 @@ export default function HomeScreen() {
           }
         }
         setOshiMatchCards(oshiMatch.filter((c) => c.owner_user_id !== myId))
+
+        // 「マッチ率が高い交換」(PR-2c): 自分の active 出品 (直近 MATCH_LANE_CARD_CAP 枚) 毎に、
+        //   その card の 譲(characters/work_id/item_types) と 求(want_*) で双方向 searchDirectMatch を
+        //   並列実行 → 相手 card 単位で最高 score dedup → score 降順 → limit。1 枚=1 対 1 交換単位。
+        let matchLane: Card[] = []
+        if (user != null) {
+          const myCards = (await fetchUserCards(user.id, 'active')).slice(0, MATCH_LANE_CARD_CAP)
+          const perCard = await Promise.all(
+            myCards.map((c) =>
+              searchDirectMatch({
+                myOffers: {
+                  works: c.work_id != null ? [c.work_id] : [],
+                  characters: c.characters,
+                  itemTypes: c.item_types,
+                },
+                myWants: {
+                  works: c.want_works ?? [],
+                  characters: c.want_characters ?? [],
+                  itemTypes: c.want_item_types ?? [],
+                },
+                excludeUserId: user.id,
+                excludeOwnerIds: blockedUserIds,
+              }),
+            ),
+          )
+          const bestByCard = new Map<string, { card: Card; score: number }>()
+          for (const r of perCard.flat()) {
+            const prev = bestByCard.get(r.offering_card.id)
+            if (prev == null || r.score > prev.score) {
+              bestByCard.set(r.offering_card.id, { card: r.offering_card, score: r.score })
+            }
+          }
+          matchLane = [...bestByCard.values()]
+            .sort((a, b) => b.score - a.score)
+            .slice(0, MATCH_LANE_LIMIT)
+            .map((x) => x.card)
+        }
+        setMatchCards(matchLane)
 
         const easy = await fetchEasyCards(user?.id, wants, blockedUserIds)
 
@@ -366,14 +413,29 @@ export default function HomeScreen() {
               <Text style={styles.retryButtonText}>再試行</Text>
             </Pressable>
           </View>
-        ) : oshiMatchCards.length === 0 &&
+        ) : matchCards.length === 0 &&
+          oshiMatchCards.length === 0 &&
           easyCards.length === 0 &&
           likedCards.length === 0 &&
           gridCards.length === 0 ? (
           <EmptyHomeState />
         ) : (
           <>
-            {/* Lane 1: いいねした交換 — LargeCard (3.5a commit 3 新規追加、最上部) */}
+            {/* Lane 1: マッチ率が高い交換 — 双方向マッチ (PR-2c、最上部)。0 件で非表示。 */}
+            {matchCards.length > 0 && (
+              <>
+                <LaneSectionLabel title="マッチ率が高い交換" />
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.laneContent}
+                >
+                  {matchCards.map(renderLargeCard)}
+                </ScrollView>
+              </>
+            )}
+
+            {/* Lane 2: いいねした交換 — LargeCard (3.5a commit 3 新規追加) */}
             {likedCards.length > 0 && (
               <>
                 <LaneSectionLabel

@@ -750,6 +750,7 @@ export interface DirectMatchAxes {
 export interface DirectMatchResult {
   user: Profile
   offering_card: Card // 相手が持つ card (双方向: 自分の求と一致 かつ 相手の求が自分の譲と一致)
+  score: number // 噛み合い度 (scoreOf: characters tier + item_types/works overlap 加点)。PR-2c の集約/並びで使用。
 }
 
 /**
@@ -848,15 +849,16 @@ export async function searchDirectMatch(params: {
     return s
   }
 
-  // score 降順で並べ、ユーザー単位に最上位 1 件を採用。
-  const sorted = [...cards].sort((a, b) => scoreOf(b) - scoreOf(a))
+  // score 降順で並べ、ユーザー単位に最上位 1 件を採用。score は result に露出する (PR-2c)。
+  const scored = cards.map((card) => ({ card, s: scoreOf(card) }))
+  scored.sort((a, b) => b.s - a.s)
   const results: DirectMatchResult[] = []
   const usedUserIds = new Set<string>()
-  for (const card of sorted) {
+  for (const { card, s } of scored) {
     if (card.owner == null) continue
     if (usedUserIds.has(card.owner_user_id)) continue
     usedUserIds.add(card.owner_user_id)
-    results.push({ user: card.owner, offering_card: card })
+    results.push({ user: card.owner, offering_card: card, score: s })
   }
 
   return results.slice(0, params.limit ?? 50)

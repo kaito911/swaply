@@ -15,12 +15,15 @@
 //   measureLayout + scrollTo はコンテンツ座標で完結するため transparent Modal 内でも動作する。
 
 import React, { createContext, useCallback, useContext, useRef } from 'react'
-import { findNodeHandle, ScrollView } from 'react-native'
+import { ScrollView, View } from 'react-native'
 
 // measureLayout を持つ最小 contract (View / TextInput などの host ref が満たす)。
+// ★第1引数は host component の ref(instance)。RN 0.81 + New Arch(Fabric) では
+//   findNodeHandle の数値ハンドルでは解決できず measureLayout が静かに失敗するため、
+//   ref を渡す (venue/[id].tsx:164 の実績パターンと同型)。
 type Measurable = {
   measureLayout: (
-    relativeToNativeNode: number,
+    relativeTo: React.ElementRef<typeof View>,
     onSuccess: (left: number, top: number, width: number, height: number) => void,
     onFail?: () => void,
   ) => void
@@ -64,23 +67,23 @@ export function useKeyboardAwareScroll(
 
   const ensureVisible = useCallback<EnsureVisibleFn>(
     (targetRef) => {
-      const target = targetRef.current
-      const scroll = scrollRef.current
-      if (target == null || scroll == null) return
-      const scrollNode = findNodeHandle(scroll)
-      if (scrollNode == null) return
-      target.measureLayout(
-        scrollNode,
-        (_left, top) => {
-          const TOP_MARGIN = 12
-          const NEAR_TOP = 80
-          // top = 入力欄の content 内 y。viewport 上端 = scrollY.current。
-          // 既に可視域上部にある (絞り込み再 layout / ユーザーが上へ scroll 済) → 何もしない。
-          if (top - scrollY.current <= NEAR_TOP) return
-          scroll.scrollTo({ y: Math.max(0, top - TOP_MARGIN), animated: true })
-        },
-        () => {},
-      )
+      // 候補 View の onLayout 後に測る。候補が描画し切ってから measure したいので短い遅延を噛ませる
+      //   (キーボードは候補出現時点で既に表示済のため、アニメ待ちは不要。~150ms で layout 確定を待つ)。
+      setTimeout(() => {
+        const target = targetRef.current
+        const scroll = scrollRef.current
+        if (target == null || scroll == null) return
+        // ★ref を渡す (findNodeHandle 数値は Fabric で失敗する)。venue/[id].tsx:164 と同型。
+        target.measureLayout(
+          scroll as unknown as React.ElementRef<typeof View>,
+          (_left, top) => {
+            const TOP_MARGIN = 12
+            // guard は一旦外し毎回 scrollTo (まず効かせる最小構成)。top は content 相対 y。
+            scroll.scrollTo({ y: Math.max(0, top - TOP_MARGIN), animated: true })
+          },
+          () => {},
+        )
+      }, 150)
     },
     [scrollRef],
   )

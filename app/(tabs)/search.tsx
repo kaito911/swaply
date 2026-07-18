@@ -34,6 +34,7 @@ import { router } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Pressable,
@@ -861,18 +862,27 @@ function DirectMatchPane({
   const canSearch = offerTrim !== '' && wantTrim !== ''
 
   const handleSearch = async () => {
+    // ★DBG: onPress 発火確認 (canSearch 判定より前に置く。押下自体が届いているかを可視化)。
+    Alert.alert('DBG1 押下', `canSearch=${canSearch} 譲=${offerTrim} 求=${wantTrim}`)
     if (!canSearch) return
     setLoading(true)
     // PR-2a ブリッジ: 現行のテキスト入力を master char ID に解決して構造化エンジンへ渡す。
     //   チップ UI 化 (works/item_types も指定) は PR-2b。未解決テキストは空 → 非マッチ (cards=0 で実害なし)。
     const offerChars = findCharacterIdsByText(offerTrim)
     const wantChars = findCharacterIdsByText(wantTrim)
+    // ★DBG: master 解決結果。
+    Alert.alert(
+      'DBG2 解決',
+      `offerChars=${JSON.stringify(offerChars)} wantChars=${JSON.stringify(wantChars)}`,
+    )
     const data = await searchDirectMatch({
       myOffers: { characters: offerChars, works: [], itemTypes: [] },
       myWants: { characters: wantChars, works: [], itemTypes: [] },
       excludeUserId: currentUserId,
       excludeOwnerIds: blockedUserIds,
     })
+    // ★DBG: エンジン返り値。
+    Alert.alert('DBG3 結果', `件数=${data?.length ?? 'null'}`)
     setResults(data)
     setSearched(true)
     setLoading(false)

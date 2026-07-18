@@ -94,24 +94,23 @@ export function WantMasterSection({
   const handleToggleSameSeries = () => {
     if (!hasOfferWork && !sameSeries) return // 譲 work 未選択時は ON にできない
     if (!sameSeries) {
-      // ON: 求 work = 譲 work、求種別 = 譲種別を流用、求メンバーはリセット
-      //     (譲グループ基準で選び直す = コンプ狙い)。
+      // ON: 求 work = 譲 work、求種別 = 譲種別を流用。
+      //   求メンバーは roster が変わる時だけリセット (handleWantWorkChange と同じ判定)。
+      //   既に求グループ = 譲 work を選んでいた場合は roster 不変 = 既選択メンバーを保持する
+      //   (無条件リセットすると gating(characters>=1) が落ちて「次へ」が無効化するバグを防ぐ)。
+      const rosterChanged = (value.works[0] ?? '') !== offerWorkId
       onChange({
         ...value,
         sameSeriesAsOffer: true,
         works: hasOfferWork ? [offerWorkId] : [],
-        characters: [],
+        characters: rosterChanged ? [] : value.characters,
         itemTypes: offerItemTypes,
       })
     } else {
-      // OFF: 求 work / 求メンバー / 求種別をクリア (独立選択に戻す)
-      onChange({
-        ...value,
-        sameSeriesAsOffer: false,
-        works: [],
-        characters: [],
-        itemTypes: [],
-      })
+      // OFF: フラグのみ解除して独立編集に戻す。works/characters/itemTypes は保持
+      //   (ON/OFF いずれの方向でも既選択メンバーを飛ばさない)。works は譲 work のまま残り、
+      //   変えたければ WorkSection で編集できる。
+      onChange({ ...value, sameSeriesAsOffer: false })
     }
   }
 

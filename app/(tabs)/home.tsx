@@ -190,6 +190,9 @@ export default function HomeScreen() {
                 },
                 excludeUserId: user.id,
                 excludeOwnerIds: blockedUserIds,
+                // 全カード表示 (owner集約せず該当card全件)。段2 bestByCard
+                //   (相手card.id単位・最高score) で同一card重複は引き続き除去。
+                dedupByOwner: false,
               }),
             ),
           )

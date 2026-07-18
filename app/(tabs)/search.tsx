@@ -885,6 +885,7 @@ function DirectMatchPane({
         myOffers: { works: wantWorkIds, characters: wantCharIds, itemTypes: wantItemIds },
         excludeUserId: currentUserId,
         excludeOwnerIds: blockedUserIds,
+        dedupByOwner: false, // 全カード表示 (owner集約せず該当card全件)。求タブと統一。
       })
       if (cancelled) return
       setResults(data)

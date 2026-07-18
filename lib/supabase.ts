@@ -32,7 +32,7 @@ import {
   WantMatchScore,
 } from './types'
 import { scoreSearchMatch, scoreWantMatchV2, type SearchMatchScore } from './matcher' // ★ Step 3 commit 3: v1 → v2 切替 / PR-2a: DirectMatch score tier
-import { findCharacterIdsByText, findItemTypeIdsByText, getCharacterById, getWorkById } from './master' // searchCards 経路 2 の master fuzzy 解決 + 経路 1 work_id legacy fallback / PR-2a: legacy name ILIKE 用 display 名解決
+import { findCharacterIdsByText, findItemTypeIdsByText, getWorkById } from './master' // searchCards 経路 2 の master fuzzy 解決 + 経路 1 work_id legacy fallback の aliases 取得
 import { computeVenueExpiry } from './venueExpiry' // 会場出品 / Hold のイベント当日中有効 expires_at 計算
 import { readAsStringAsync } from 'expo-file-system/legacy'
 
@@ -777,34 +777,39 @@ export async function searchDirectMatch(params: {
   excludeOwnerIds?: string[]
   limit?: number
 }): Promise<DirectMatchResult[]> {
-  const myOfferChars = params.myOffers.characters
-  const myWantChars = params.myWants.characters
-  // 双方向メンバー一致は両側必須。どちらか空なら成立不能。
-  if (myOfferChars.length === 0 || myWantChars.length === 0) return []
+  const { myOffers, myWants } = params
+  // ★指定された軸だけを条件に積む (必須軸なし)。全6軸空なら何も返さない (案A)。
+  const axisTotal =
+    myOffers.works.length +
+    myOffers.characters.length +
+    myOffers.itemTypes.length +
+    myWants.works.length +
+    myWants.characters.length +
+    myWants.itemTypes.length
+  if (axisTotal === 0) return []
 
   const excludeOwnerIds = params.excludeOwnerIds ?? []
   const excludeFilter =
     excludeOwnerIds.length > 0 ? `(${excludeOwnerIds.join(',')})` : null
-
-  // offer 側 (相手の譲 ∋ 自分の求メンバー): characters overlap OR legacy name ILIKE。
-  const offerOrParts: string[] = [`characters.ov.{${myWantChars.join(',')}}`]
-  for (const id of myWantChars) {
-    const name = getCharacterById(id)?.display_name_ja
-    // .or() のセパレータ衝突を避けるため , ( ) を含む名前はスキップ。
-    if (name != null && name !== '' && !/[,()]/.test(name)) {
-      offerOrParts.push(`name.ilike.%${name}%`)
-    }
-  }
 
   let query = supabase
     .from('cards')
     .select(`*, owner:profiles!cards_owner_user_id_fkey(*), ${CARD_WANT_LINKS_SELECT}`)
     .eq('status', 'active')
     .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
-    .or(offerOrParts.join(',')) // offer 側: characters overlap OR name ILIKE
-    .overlaps('want_characters', myOfferChars) // want 側: 相手の求 ∋ 自分の譲メンバー (AND)
-    .order('created_at', { ascending: false })
-    .limit(100)
+
+  // myWants 側 = 相手の譲 (card offers) が自分の求を含む。指定軸のみ AND。
+  //   work_id は単一 text (scalar) なので overlap でなく in (card の作品 ∈ 自分の求作品)。
+  if (myWants.works.length > 0) query = query.in('work_id', myWants.works)
+  if (myWants.characters.length > 0) query = query.overlaps('characters', myWants.characters)
+  if (myWants.itemTypes.length > 0) query = query.overlaps('item_types', myWants.itemTypes)
+
+  // myOffers 側 = 相手の求 (card wants) が自分の譲を含む。want_* は text[] なので overlap。
+  if (myOffers.works.length > 0) query = query.overlaps('want_works', myOffers.works)
+  if (myOffers.characters.length > 0) query = query.overlaps('want_characters', myOffers.characters)
+  if (myOffers.itemTypes.length > 0) query = query.overlaps('want_item_types', myOffers.itemTypes)
+
+  query = query.order('created_at', { ascending: false }).limit(100)
 
   if (params.excludeUserId != null && params.excludeUserId !== '') {
     query = query.neq('owner_user_id', params.excludeUserId)
@@ -833,13 +838,13 @@ export async function searchDirectMatch(params: {
     return a.filter((x) => set.has(x)).length
   }
   const scoreOf = (card: Card): number => {
-    let s = tierScore[scoreSearchMatch(card, myWantChars, params.myWants.itemTypes)]
+    let s = tierScore[scoreSearchMatch(card, myWants.characters, myWants.itemTypes)]
     // 種別まで合うほど上位 (双方向: 相手の譲種別∋自分の求種別 / 相手の求種別∋自分の譲種別)。
-    s += overlapCount(card.item_types, params.myWants.itemTypes) * 15
-    s += overlapCount(card.want_item_types, params.myOffers.itemTypes) * 15
+    s += overlapCount(card.item_types, myWants.itemTypes) * 15
+    s += overlapCount(card.want_item_types, myOffers.itemTypes) * 15
     // works 一致 (任意・微加点)。
-    s += overlapCount(card.want_works, params.myOffers.works) * 5
-    if (card.work_id != null && params.myWants.works.includes(card.work_id)) s += 5
+    s += overlapCount(card.want_works, myOffers.works) * 5
+    if (card.work_id != null && myWants.works.includes(card.work_id)) s += 5
     return s
   }
 

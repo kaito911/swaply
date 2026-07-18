@@ -18,6 +18,7 @@
 
 import { supabase } from './supabase'
 import type {
+  Card,
   MasterCategory,
   MasterCharacter,
   MasterItemType,
@@ -351,6 +352,60 @@ export function getUnifiedSearchSuggestions(
  */
 export function getMemberLabel(category: MasterCategory | null | undefined): string {
   return category === 'idol' ? 'メンバー' : category == null ? 'メンバー' : 'キャラ'
+}
+
+/**
+ * カード表示用の構造化求 (cards.want_*) を【求】行テキストに整形する。
+ *
+ * PR-1a 以降の単品出品は wanted_cards + card_wanted_links ではなく want_* を正とするため、
+ * カード部品はまず本関数を使い、text=null (= want_* が空 = legacy 出品) のときだけ
+ * formatCardTitle の card_wanted_links 由来 want に fallback する (非破壊)。
+ *
+ * sameSeries: want_works が自分の work_id を含む = 「譲と同シリーズのグッズを求む」。
+ *   専用フラグ列を持たず want_works == work_id で導出する (DB 不変)。text 末尾にも
+ *   「同シリーズ」を付すため、カード部品は text だけ描画すれば同シリーズ表記も出る。
+ *
+ * ※ 本関数は master cache lookup を使うため lib/master に置く (types.ts は master を
+ *   value import できない循環回避)。cache 未 ready 時は id 文字列に fallback。
+ */
+export function formatStructuredWant(
+  card: Pick<Card, 'work_id' | 'want_works' | 'want_characters' | 'want_item_types'>,
+): { text: string | null; sameSeries: boolean } {
+  const wantWorks = card.want_works ?? []
+  const charNames = (card.want_characters ?? [])
+    .map((id) => getCharacterById(id)?.display_name_ja ?? id)
+    .filter((s) => s !== '')
+  const typeNames = (card.want_item_types ?? [])
+    .map((id) => getItemTypeById(id)?.display_name_ja ?? id)
+    .filter((s) => s !== '')
+
+  const sameSeries =
+    card.work_id != null &&
+    card.work_id !== '' &&
+    wantWorks.includes(card.work_id)
+
+  // 構造化求が皆無 = legacy 出品 → null (呼出側で card_wanted_links に fallback)
+  if (charNames.length === 0 && typeNames.length === 0 && wantWorks.length === 0) {
+    return { text: null, sameSeries: false }
+  }
+
+  const parts: string[] = []
+  if (charNames.length > 0) {
+    parts.push(
+      charNames.length <= 3
+        ? charNames.join('・')
+        : `${charNames.slice(0, 3).join('・')} 他${charNames.length - 3}名`,
+    )
+  }
+  if (typeNames.length > 0) {
+    parts.push(`(${typeNames.join('・')})`)
+  }
+  if (sameSeries) {
+    parts.push('同シリーズ')
+  }
+
+  const text = parts.length > 0 ? '【求】' + parts.join('・') : null
+  return { text, sameSeries }
 }
 
 /**

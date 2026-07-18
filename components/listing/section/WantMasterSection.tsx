@@ -21,7 +21,7 @@
 //   同時に親 value.characters を [] にリセットして roster 齟齬を防ぐ。
 
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
-import { getMemberLabel, getWorkById } from '@/lib/master'
+import { getItemTypeById, getMemberLabel, getWorkById } from '@/lib/master'
 import { Ionicons } from '@expo/vector-icons'
 import React, { useEffect } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
@@ -38,6 +38,11 @@ export type WantMasterSectionProps = {
   userId: string | null
   /** 譲の作品/グループ (「同シリーズ」流用元)。譲未選択なら null */
   offerWork: WorkSectionValue
+  /**
+   * 譲のグッズ種別 (master ID 配列)。「同シリーズ」ON 時に want_item_types へ流用する。
+   * 同シリーズ = 同作品・同種別で他メンバーを集める (コンプ狙い) 用途のため。
+   */
+  offerItemTypes: string[]
 }
 
 export function WantMasterSection({
@@ -45,6 +50,7 @@ export function WantMasterSection({
   onChange,
   userId,
   offerWork,
+  offerItemTypes,
 }: WantMasterSectionProps) {
   const sameSeries = value.sameSeriesAsOffer
   const offerWorkId = offerWork?.workId ?? ''
@@ -54,35 +60,49 @@ export function WantMasterSection({
   //   同シリーズ ON → 譲 work_id / OFF → 求グループで選んだ work_id
   const effectiveWorkId = sameSeries ? offerWorkId : value.works[0] ?? ''
 
-  // 同シリーズ ON 中に譲 work が変わったら求 works を追従 + characters リセット。
-  // guard (works[0] !== 譲work) で反復更新ループを防ぐ。
+  // 同シリーズ ON 中に譲 work / 譲種別が変わったら求 works・itemTypes を追従。
+  // work が変わった場合のみ characters をリセット (別 roster)。
+  // work と itemTypes を 1 回の onChange でまとめて更新し、二重 effect による
+  // stale closure 上書きを避ける。guard (差分あり時のみ発火) で反復ループを防ぐ。
   useEffect(() => {
     if (!sameSeries) return
-    const desired = hasOfferWork ? [offerWorkId] : []
-    if ((value.works[0] ?? '') !== (desired[0] ?? '')) {
-      onChange({ ...value, works: desired, characters: [] })
+    const desiredWorks = hasOfferWork ? [offerWorkId] : []
+    const workChanged = (value.works[0] ?? '') !== (desiredWorks[0] ?? '')
+    const itemsSame =
+      value.itemTypes.length === offerItemTypes.length &&
+      value.itemTypes.every((v, i) => v === offerItemTypes[i])
+    if (workChanged || !itemsSame) {
+      onChange({
+        ...value,
+        works: desiredWorks,
+        characters: workChanged ? [] : value.characters,
+        itemTypes: offerItemTypes,
+      })
     }
     // value/onChange は guard 済のため依存に含めない (含めると余計な再実行)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sameSeries, offerWorkId])
+  }, [sameSeries, offerWorkId, offerItemTypes])
 
   const handleToggleSameSeries = () => {
     if (!hasOfferWork && !sameSeries) return // 譲 work 未選択時は ON にできない
     if (!sameSeries) {
-      // ON: 求 work = 譲 work、求メンバーはリセット (譲グループ基準で選び直す)
+      // ON: 求 work = 譲 work、求種別 = 譲種別を流用、求メンバーはリセット
+      //     (譲グループ基準で選び直す = コンプ狙い)。
       onChange({
         ...value,
         sameSeriesAsOffer: true,
         works: hasOfferWork ? [offerWorkId] : [],
         characters: [],
+        itemTypes: offerItemTypes,
       })
     } else {
-      // OFF: 求 work / 求メンバーをクリア (独立選択に戻す)
+      // OFF: 求 work / 求メンバー / 求種別をクリア (独立選択に戻す)
       onChange({
         ...value,
         sameSeriesAsOffer: false,
         works: [],
         characters: [],
+        itemTypes: [],
       })
     }
   }
@@ -122,6 +142,9 @@ export function WantMasterSection({
   const offerWorkName = hasOfferWork
     ? getWorkById(offerWorkId)?.display_name_ja ?? offerWorkId
     : ''
+  const offerItemTypeNames = offerItemTypes
+    .map((id) => getItemTypeById(id)?.display_name_ja ?? id)
+    .join('・')
 
   return (
     <View style={styles.wrap}>
@@ -189,15 +212,27 @@ export function WantMasterSection({
         )}
       </View>
 
-      {/* 求グッズ種別 (任意・work 非依存) */}
-      <View style={styles.field}>
-        <Text style={styles.fieldLabel}>求グッズ種別（任意）</Text>
-        <ItemsSection
-          value={value.itemTypes}
-          onChange={handleItemTypesChange}
-          userId={userId}
-        />
-      </View>
+      {/* 求グッズ種別: 同シリーズ ON は譲種別を流用しロック表示、OFF は任意入力 */}
+      {sameSeries ? (
+        <View style={styles.lockedGroup}>
+          <Text style={styles.fieldLabel}>求グッズ種別</Text>
+          <View style={styles.lockedGroupCard}>
+            <Ionicons name="link-outline" size={16} color={colors.primary} />
+            <Text style={styles.lockedGroupName}>
+              {offerItemTypeNames !== '' ? offerItemTypeNames : '譲と同じ種別'}
+            </Text>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>求グッズ種別（任意）</Text>
+          <ItemsSection
+            value={value.itemTypes}
+            onChange={handleItemTypesChange}
+            userId={userId}
+          />
+        </View>
+      )}
     </View>
   )
 }

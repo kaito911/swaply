@@ -8,6 +8,7 @@ import { LikeButton } from '@/components/LikeButton'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card, formatCardTitle } from '@/lib/types'
+import { formatStructuredWant } from '@/lib/master'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import React from 'react'
@@ -104,7 +105,8 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
 // 【譲】/【求】2行併記 (同サイズ・現場フォーマット準拠、求は card_wanted_links を正)。
 // 「提案する」CTA は撤去済 (詳細遷移がカード全体と同一で独自機能なし)。
 function HomeLargeTitle({ card }: { card: Card }) {
-  const { give, want } = formatCardTitle(card)
+  const { give, want: legacyWant } = formatCardTitle(card)
+  const want = formatStructuredWant(card).text ?? legacyWant
   return (
     <View style={styles.body}>
       <Text style={styles.line} numberOfLines={2}>

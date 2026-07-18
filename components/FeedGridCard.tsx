@@ -6,6 +6,7 @@
 import { LikeButton } from '@/components/LikeButton'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card, formatCardTitle } from '@/lib/types'
+import { formatStructuredWant } from '@/lib/master'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
@@ -73,9 +74,11 @@ export function FeedGridCard({
   )
 }
 
-// 【譲】/【求】2行併記 (同サイズ・現場フォーマット準拠、求は card_wanted_links を正)。
+// 【譲】/【求】2行併記 (同サイズ・現場フォーマット準拠)。
+// 求は PR-1a 以降の構造化求 (cards.want_*) を優先し、空なら legacy card_wanted_links に fallback。
 function FeedGridTitle({ card }: { card: Card }) {
-  const { give, want } = formatCardTitle(card)
+  const { give, want: legacyWant } = formatCardTitle(card)
+  const want = formatStructuredWant(card).text ?? legacyWant
   return (
     <View style={styles.body}>
       <Text style={styles.line} numberOfLines={2}>

@@ -11,7 +11,7 @@ import { HeaderActions } from '@/components/HeaderActions'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SearchAutocomplete } from '@/components/SearchAutocomplete'
 import { MemberMaster } from '@/constants/members'
-import { isMasterCacheReady } from '@/lib/master'
+import { formatStructuredWant, isMasterCacheReady } from '@/lib/master'
 import { scoreSearchMatch, type SearchMatchScore } from '@/lib/matcher'
 import {
   fetchMyBlockedUserIds,
@@ -659,7 +659,8 @@ function ResultArea({
             </Text>
           )}
           {(() => {
-            const { give, want } = formatCardTitle(item)
+            const { give, want: legacyWant } = formatCardTitle(item)
+            const want = formatStructuredWant(item).text ?? legacyWant
             return (
               <>
                 <Text style={styles.cardName} numberOfLines={2}>{give}</Text>

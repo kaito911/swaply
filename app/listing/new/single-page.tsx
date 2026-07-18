@@ -608,6 +608,7 @@ export default function ListingNewSinglePageScreen() {
             onChange={(v) => dispatch({ type: 'SET_WANT', value: v })}
             userId={userId}
             offerWork={state.work}
+            offerItemTypes={state.itemTypes}
           />
 
           {/* 出品 CTA */}

@@ -314,6 +314,12 @@ export default function ListingDetailScreen() {
     : 'green'
 
   const diff = getDiffInfo(card)
+  // 「譲と同シリーズのグッズを求む」判定 (want_works が自 work_id を含む)。
+  // 専用フラグ列は持たず want_works == work_id で導出する (DB 不変)。
+  const wantSameSeries =
+    card.work_id != null &&
+    card.work_id !== '' &&
+    (card.want_works ?? []).includes(card.work_id)
   const isOwn = currentUserId !== null && card.owner_user_id === currentUserId
   const cta = getCtaConfig(card, isOwn)
   const isNonActive = card.status !== 'active'
@@ -741,10 +747,26 @@ export default function ListingDetailScreen() {
                   })}
                 </View>
               ) : (
-                // 旧出品 fallback: 既存の cards.want_* / want_description 表示を維持
+                // want_* 表示: PR-1a 以降の構造化求 / 旧 condition.tsx 出品の cards.want_*。
+                // sameSeries は「同シリーズのグッズを求む」バッジで明示し、冗長な「求める作品」は畳む。
                 <>
-                  {/* 求める作品 */}
-                  {card.want_works != null && card.want_works.length > 0 && (
+                  {wantSameSeries && (
+                    <View style={styles.sameSeriesRow}>
+                      <Ionicons
+                        name="albums-outline"
+                        size={16}
+                        color={colors.primary}
+                      />
+                      <Text style={styles.sameSeriesText}>
+                        譲と同シリーズのグッズを求む
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* 求める作品 (同シリーズ時は畳む = 冗長回避) */}
+                  {!wantSameSeries &&
+                    card.want_works != null &&
+                    card.want_works.length > 0 && (
                     <View style={styles.wantChipBlock}>
                       <Text style={styles.wantChipBlockLabel}>求める作品</Text>
                       <View style={styles.wantChipsRow}>
@@ -1271,6 +1293,21 @@ const styles = StyleSheet.create({
   linkedWantSub: {
     fontSize: fontSize.xs,
     color: colors.textTertiary,
+  },
+  sameSeriesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.tagAccentBg,
+  },
+  sameSeriesText: {
+    fontSize: 13,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
   },
   wantChipBlock: {
     marginTop: spacing.sm,

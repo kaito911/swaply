@@ -468,7 +468,6 @@ export default function MyPageScreen() {
             { label: 'プロフィール編集', path: '/profile-edit' },
             { label: '推し編集', path: '/oshi-edit' },
             { label: 'いいね', path: '/likes' },
-            { label: '求リスト', path: '/wants' },
             { label: '配送情報', path: '/shipping' },
           ] as const).map((item, i, arr) => (
             <Pressable

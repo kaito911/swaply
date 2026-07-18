@@ -19,13 +19,6 @@ export function EmptyHomeState() {
           onPress={() => router.push('/listing/new/choose' as never)}
           size="lg"
         />
-        <PrimaryCTA
-          label="いいねを追加する"
-          onPress={() => router.push('/wants' as never)}
-          variant="ghost"
-          size="lg"
-          style={styles.subCta}
-        />
       </View>
     </View>
   )
@@ -64,8 +57,5 @@ const styles = StyleSheet.create({
   ctaWrap: {
     width: '100%',
     gap: spacing.sm,
-  },
-  subCta: {
-    marginTop: spacing.xs,
   },
 })

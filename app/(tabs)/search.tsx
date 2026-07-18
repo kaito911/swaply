@@ -898,8 +898,12 @@ function DirectMatchPane({
     const run = async () => {
       setLoading(true)
       const data = await searchDirectMatch({
-        myOffers: { works: offerWorkIds, characters: offerCharIds, itemTypes: offerItemIds },
-        myWants: { works: wantWorkIds, characters: wantCharIds, itemTypes: wantItemIds },
+        // ★上下スワップ (相手カード視点に統一): 上バー(offer* state)=相手の譲 → myWants
+        //   (engine searchDirectMatch で相手 characters と照合)。下バー(want* state)=相手の求
+        //   → myOffers (engine で相手 want_* と照合)。engine 本体は不変・割り当てのみ入替。
+        //   これで上バー入力→結果カード【譲】/ 下バー入力→結果カード【求】 と視点が揃う。
+        myWants: { works: offerWorkIds, characters: offerCharIds, itemTypes: offerItemIds },
+        myOffers: { works: wantWorkIds, characters: wantCharIds, itemTypes: wantItemIds },
         excludeUserId: currentUserId,
         excludeOwnerIds: blockedUserIds,
       })
@@ -941,7 +945,7 @@ function DirectMatchPane({
           keyboardDismissMode="interactive"
           automaticallyAdjustKeyboardInsets
         >
-          <Text style={styles.directLabel}>あなたが出す商品 (譲)</Text>
+          <Text style={styles.directLabel}>譲を検索：相手が譲る商品</Text>
           <SearchAutocomplete
             selectedWorks={offerWorks}
             onChangeWorks={setOfferWorks}
@@ -955,7 +959,7 @@ function DirectMatchPane({
             placeholder="譲る作品・メンバー・種別で絞る"
           />
           <Text style={[styles.directLabel, { marginTop: spacing.md }]}>
-            あなたが欲しい商品 (求)
+            求を検索：相手が求めている商品
           </Text>
           <SearchAutocomplete
             selectedWorks={wantWorks}
@@ -967,10 +971,10 @@ function DirectMatchPane({
             inputText={wantInput}
             onChangeInputText={setWantInput}
             onSubmitFreeText={handleFreeTextNoop}
-            placeholder="欲しい作品・メンバー・種別で絞る"
+            placeholder="求める作品・メンバー・種別で絞る"
           />
           <Text style={styles.directNote} numberOfLines={2}>
-            あなたが出す商品を求めている人 × あなたが欲しい商品を持っている人を発見
+            相手が譲る商品 × 相手が求める商品で、双方向に噛み合う出品を探します
           </Text>
         </ScrollView>
       </KeyboardAwareScrollProvider>

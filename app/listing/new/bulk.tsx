@@ -25,10 +25,10 @@ import { ScreenHeader } from '@/components/ScreenHeader'
 import { CharactersSection } from '@/components/listing/section/CharactersSection'
 import { ItemsSection } from '@/components/listing/section/ItemsSection'
 import type {
-  WantSectionValue,
+  WantMasterValue,
   WorkSectionValue,
 } from '@/components/listing/section/types'
-import { WantSection } from '@/components/listing/section/WantSection'
+import { WantMasterSection } from '@/components/listing/section/WantMasterSection'
 import { WorkSection } from '@/components/listing/section/WorkSection'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
@@ -40,13 +40,7 @@ import {
   getWorkById,
   recordListingKeyword,
 } from '@/lib/master'
-import {
-  addCardWantedLinks,
-  fetchMyWantedCards,
-  supabase,
-  uploadCardImage,
-} from '@/lib/supabase'
-import type { WantedCard } from '@/lib/types'
+import { supabase, uploadCardImage } from '@/lib/supabase'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
@@ -221,9 +215,14 @@ export default function ListingNewBulkScreen() {
   const [image, setImage] = useState<PickedImage | null>(null)
   // 作品/グループ: 冒頭で 1 回選択、N 商品で共通 (案 a)。
   const [work, setWork] = useState<WorkSectionValue>(null)
-  // 求: N 商品共通 (複数可・1 件以上必須)。全 cards に同じ card_wanted_links を紐づける。
-  //   作品確定後・タップ前に 1 回選択 (グッズごとには分けない)。
-  const [wantIds, setWantIds] = useState<WantSectionValue>([])
+  // 求: N 商品共通の master 構造化求 (PR-1b-1)。全 cards の want_* に同じ内容を保存する
+  //   (per-item override は PR-1b-2)。作品確定後・タップ前に 1 回入力 (グッズごとには分けない)。
+  const [bulkWant, setBulkWant] = useState<WantMasterValue>({
+    works: [],
+    characters: [],
+    itemTypes: [],
+    sameSeriesAsOffer: false,
+  })
   // 求ステップを完了したか (作品 → 求 → タップ の進行管理)。
   const [wantDone, setWantDone] = useState(false)
   const [points, setPoints] = useState<TapPoint[]>([])
@@ -235,8 +234,6 @@ export default function ListingNewBulkScreen() {
   const [submitting, setSubmitting] = useState(false)
   // 出品前の最終確認画面を表示中か (STEP 4)。
   const [reviewMode, setReviewMode] = useState(false)
-  // 求 (wanted_cards) の id → 名前 解決用。確認画面で求名を出すため保持。
-  const [myWants, setMyWants] = useState<WantedCard[]>([])
 
   // 履歴を初回取得 (userId 確定後)。
   useEffect(() => {
@@ -244,18 +241,6 @@ export default function ListingNewBulkScreen() {
     let cancelled = false
     void fetchListingKeywordHistory(userId, 10).then((list) => {
       if (!cancelled) setHistory(list)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [userId])
-
-  // 求リストを初回取得 (確認画面での求名解決用。WantSection とは別 fetch)。
-  useEffect(() => {
-    if (userId == null) return
-    let cancelled = false
-    void fetchMyWantedCards(userId).then((list) => {
-      if (!cancelled) setMyWants(list)
     })
     return () => {
       cancelled = true
@@ -384,7 +369,7 @@ export default function ListingNewBulkScreen() {
 
       // 各点 → 1 cards row。single-page の row 形状に準拠。
       //   bbox_x/y = 元画像基準のタップ割合 (contain 変換済)。bbox_w/h・image_url_cropped は NULL。
-      //   want_* は空 (一括フローは求の選択ステップを持たない、card_wanted_links なし)。
+      //   求は共通 bulkWant を master 構造化して各 card の want_* に保存 (PR-1b-1)。
       const rows = points.map((pt) => ({
         owner_user_id: userId,
         name: buildPointName(work, pt.characters, pt.itemTypes),
@@ -401,15 +386,19 @@ export default function ListingNewBulkScreen() {
         status: 'active',
         is_public: true, // 顔2: 通常出品は公開 (商品棚=false は顔2本体で別途)
         condition: null,
-        // bulk に「求の詳細フリーテキスト」欄は無い (求は STEP2.5 WantSection → card_wanted_links)。
+        // bulk に「求の詳細フリーテキスト」欄は無い。
         want_description: null,
         allows_mail: true,
         allows_handoff: false,
         allows_adjustment: false,
         adjustment_max: null,
-        want_works: [] as string[],
-        want_characters: [] as string[],
-        want_item_types: [] as string[],
+        // 求 (共通 bulkWant) を各 card の want_* に保存。同シリーズ ON は per-card 解決:
+        //   作品 = 譲 work、種別 = その card 自身の種別 (pt.itemTypes、コンプ狙い)。
+        want_works: bulkWant.sameSeriesAsOffer ? [work.workId] : bulkWant.works,
+        want_characters: bulkWant.characters,
+        want_item_types: bulkWant.sameSeriesAsOffer
+          ? pt.itemTypes
+          : bulkWant.itemTypes,
         group_name: null,
         member_name: null,
         series: null,
@@ -421,40 +410,10 @@ export default function ListingNewBulkScreen() {
       }))
 
       // 配列 insert = 単一 INSERT 文 = 原子的 (全成功 or 全ロールバック)。
-      //   .select() で挿入行 (id 含む) を取得 → 各 cards に共通求を紐づける。
-      const { data: createdCards, error } = await supabase
-        .from('cards')
-        .insert(rows)
-        .select('id')
+      //   求は各 row の want_* に含めて 1 回の INSERT で完結
+      //   (card_wanted_links への二次書込は廃止 = per-card link ループ不要)。
+      const { error } = await supabase.from('cards').insert(rows)
       if (error) throw error
-      if (createdCards == null || createdCards.length !== rows.length) {
-        throw new Error('cards INSERT が想定件数を返しませんでした')
-      }
-
-      // N 商品それぞれに共通求 (wantIds、複数可) を card_wanted_links で紐づける。
-      //   single-page 同様のクライアント 2 段階保存。link 失敗は partial-success として通知。
-      try {
-        for (const c of createdCards as { id: string }[]) {
-          await addCardWantedLinks({
-            cardId: c.id,
-            wantedCardIds: wantIds,
-            ownerUserId: userId,
-          })
-        }
-      } catch (linkErr) {
-        console.error('[bulk][addCardWantedLinks]', linkErr)
-        Alert.alert(
-          '一部完了',
-          `${rows.length}点は出品されましたが、求商品の紐づけに一部失敗しました。求リスト画面から再設定してください。`,
-          [
-            {
-              text: 'OK',
-              onPress: () => router.replace('/(tabs)/mypage' as never),
-            },
-          ],
-        )
-        return
-      }
 
       Alert.alert('出品完了', `${rows.length}点を出品しました。`, [
         {
@@ -535,8 +494,10 @@ export default function ListingNewBulkScreen() {
   const allPointsHaveAttrs =
     points.length > 0 &&
     points.every((p) => p.characters.length + p.itemTypes.length >= 1)
-  // 出品可能: 全点に属性 AND 共通求が 1 件以上 (single-page と対称、求なし出品は不可)。
-  const canProceed = allPointsHaveAttrs && wantIds.length > 0
+  // 出品可能: 全点に属性 AND 共通求が充足 (求グループ + 求メンバー、single-page と同基準)。
+  const isBulkWantDone =
+    bulkWant.works.length >= 1 && bulkWant.characters.length >= 1
+  const canProceed = allPointsHaveAttrs && isBulkWantDone
 
   // ── STEP 1: 写真未選択 → ピッカー起動画面 ──
   if (image == null) {
@@ -586,46 +547,75 @@ export default function ListingNewBulkScreen() {
     )
   }
 
-  // ── STEP 2.5: 求を選択 (N 商品共通・複数可・1 件以上必須) ──
+  // ── STEP 2.5: 求を入力 (N 商品共通・master 構造化・グループ+メンバー必須) ──
   if (!wantDone) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScreenHeader title="求める商品を選ぶ" onBack={backFromWant} />
-        <View style={styles.flex}>
-          <View style={styles.wantIntro}>
+        <ScreenHeader title="求める商品を入力" onBack={backFromWant} />
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={80}
+        >
+          <ScrollView
+            style={styles.flex}
+            contentContainerStyle={styles.workContent}
+            keyboardShouldPersistTaps="handled"
+          >
             <Text style={styles.workLead}>この出品で受け付けたい「求」は?</Text>
             <Text style={styles.workSub}>
-              この写真から出品するすべてのグッズに共通の求です。複数選べます (どれか1つでもOK)。
+              この写真から出品するすべてのグッズに共通の求です。
+              「同シリーズ」を選ぶと、各グッズと同じ作品・種別で他メンバーを集められます。
             </Text>
-          </View>
-          {/* WantSection 内に一覧 + 簡易追加 + スクロールを内包 */}
-          <View style={styles.flex}>
-            <WantSection value={wantIds} onChange={setWantIds} userId={userId} />
-          </View>
+            <View style={{ marginTop: spacing.lg }}>
+              <WantMasterSection
+                value={bulkWant}
+                onChange={setBulkWant}
+                userId={userId}
+                offerWork={work}
+                offerItemTypes={[]}
+                sameSeriesItemTypeLabel="各グッズと同じ種別"
+              />
+            </View>
+          </ScrollView>
           <View style={styles.ctaWrap}>
-            {wantIds.length === 0 && (
-              <Text style={styles.emptyHint}>求商品を1件以上選んでください</Text>
+            {!isBulkWantDone && (
+              <Text style={styles.emptyHint}>
+                求グループと求{getMemberLabel(work?.category ?? null)}を入れてください
+              </Text>
             )}
             <PrimaryCTA
-              label={
-                wantIds.length > 0 ? `次へ（求 ${wantIds.length}件）` : '次へ'
-              }
+              label="次へ"
               onPress={() => setWantDone(true)}
-              disabled={wantIds.length === 0}
+              disabled={!isBulkWantDone}
               size="lg"
             />
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     )
   }
 
   // ── STEP 4: 出品前の最終確認 (全量をまとめて確認、各項目から修正へ戻れる) ──
   if (reviewMode) {
-    const wantNames = wantIds
-      .map((id) => myWants.find((w) => w.id === id)?.card_name ?? '(求商品)')
     const workName =
       work != null ? getWorkById(work.workId)?.display_name_ja ?? work.workId : ''
+    // 共通求 (bulkWant) の構造化表示。同シリーズ ON は各 card の work/種別を流用するため
+    //   作品 = 譲 work、種別 = 「各グッズと同じ種別」と表示する。
+    const wantMemberLabel = getMemberLabel(work?.category ?? null)
+    const wantWorkName = bulkWant.sameSeriesAsOffer
+      ? workName
+      : bulkWant.works
+          .map((id) => getWorkById(id)?.display_name_ja ?? id)
+          .join('、')
+    const wantCharNames = bulkWant.characters
+      .map((id) => getCharacterById(id)?.display_name_ja ?? id)
+      .join('、')
+    const wantTypeNames = bulkWant.sameSeriesAsOffer
+      ? '各グッズと同じ種別'
+      : bulkWant.itemTypes
+          .map((id) => getItemTypeById(id)?.display_name_ja ?? id)
+          .join('・')
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScreenHeader
@@ -718,7 +708,7 @@ export default function ListingNewBulkScreen() {
             )
           })}
 
-          {/* 共通の求 (タップで求ステップへ) */}
+          {/* 共通の求 (タップで求ステップへ) — master 構造化表示 */}
           <Pressable
             style={styles.reviewWantRow}
             onPress={() => {
@@ -727,9 +717,18 @@ export default function ListingNewBulkScreen() {
             }}
           >
             <View style={styles.reviewItemBody}>
-              <Text style={styles.reviewSectionTitle}>求める商品（共通・{wantIds.length}件）</Text>
+              <Text style={styles.reviewSectionTitle}>求める商品（共通）</Text>
+              {bulkWant.sameSeriesAsOffer && (
+                <Text style={styles.reviewItemNote}>譲と同シリーズのグッズを求む</Text>
+              )}
               <Text style={styles.reviewItemSub} numberOfLines={3}>
-                {wantNames.join('、')}
+                {`求作品: ${wantWorkName !== '' ? wantWorkName : '—'}`}
+              </Text>
+              <Text style={styles.reviewItemSub} numberOfLines={3}>
+                {`求${wantMemberLabel}: ${wantCharNames !== '' ? wantCharNames : '—'}`}
+              </Text>
+              <Text style={styles.reviewItemSub} numberOfLines={2}>
+                {`求種別: ${wantTypeNames !== '' ? wantTypeNames : '（指定なし）'}`}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />

@@ -43,6 +43,13 @@ export type WantMasterSectionProps = {
    * 同シリーズ = 同作品・同種別で他メンバーを集める (コンプ狙い) 用途のため。
    */
   offerItemTypes: string[]
+  /**
+   * 「同シリーズ」ON 時の求グッズ種別ロック表示の上書きラベル (任意)。
+   * bulk のように「譲種別が出品ごとに異なり単一値を持てない」文脈で
+   * 「各グッズと同じ種別」等の汎用文言を出すために使う。
+   * 未指定時は offerItemTypes の名前 (single-page の従来挙動) を表示する。
+   */
+  sameSeriesItemTypeLabel?: string
 }
 
 export function WantMasterSection({
@@ -51,6 +58,7 @@ export function WantMasterSection({
   userId,
   offerWork,
   offerItemTypes,
+  sameSeriesItemTypeLabel,
 }: WantMasterSectionProps) {
   const sameSeries = value.sameSeriesAsOffer
   const offerWorkId = offerWork?.workId ?? ''
@@ -219,7 +227,8 @@ export function WantMasterSection({
           <View style={styles.lockedGroupCard}>
             <Ionicons name="link-outline" size={16} color={colors.primary} />
             <Text style={styles.lockedGroupName}>
-              {offerItemTypeNames !== '' ? offerItemTypeNames : '譲と同じ種別'}
+              {sameSeriesItemTypeLabel ??
+                (offerItemTypeNames !== '' ? offerItemTypeNames : '譲と同じ種別')}
             </Text>
           </View>
         </View>

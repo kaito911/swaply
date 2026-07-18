@@ -26,6 +26,8 @@ import {
   fetchRecommendedCards,
   fetchUserCards,
   removeLike,
+  searchCards,
+  searchDirectMatch,
 } from '@/lib/supabase'
 import {
   getCharacterSuggestionsAcrossWorks,
@@ -52,7 +54,15 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-type Section = 'recommended' | 'new' | 'easy' | 'liked' | 'my-listings'
+type Section =
+  | 'recommended'
+  | 'new'
+  | 'easy'
+  | 'liked'
+  | 'my-listings'
+  | 'search-offer'
+  | 'search-want'
+  | 'search-match'
 
 const SECTION_TITLES: Record<Section, string> = {
   recommended: 'あなたへのおすすめ',
@@ -60,9 +70,16 @@ const SECTION_TITLES: Record<Section, string> = {
   easy: '成立しやすい交換',
   liked: 'いいねした交換',
   'my-listings': '出品中',
+  'search-offer': '譲を探す結果',
+  'search-want': '求を探す結果',
+  'search-match': 'マッチ結果',
 }
 
 const LIMIT = 100
+
+// 検索系 section の条件 params (master ID slug のカンマ結合) を配列へ復元。
+const toIds = (s: string | undefined): string[] =>
+  (s ?? '').split(',').filter((x) => x !== '')
 
 function isSection(v: string | undefined): v is Section {
   return (
@@ -70,14 +87,29 @@ function isSection(v: string | undefined): v is Section {
     v === 'new' ||
     v === 'easy' ||
     v === 'liked' ||
-    v === 'my-listings'
+    v === 'my-listings' ||
+    v === 'search-offer' ||
+    v === 'search-want' ||
+    v === 'search-match'
   )
 }
 
 export default function ListSectionScreen() {
   const { session } = useAuthContext()
   const userId = session?.user?.id ?? null
-  const params = useLocalSearchParams<{ section?: string }>()
+  const params = useLocalSearchParams<{
+    section?: string
+    w?: string
+    c?: string
+    i?: string
+    q?: string
+    mw_w?: string
+    mw_c?: string
+    mw_i?: string
+    mo_w?: string
+    mo_c?: string
+    mo_i?: string
+  }>()
   const section = isSection(params.section) ? params.section : null
 
   // 3 列グリッドの固定カード幅: content padding(base*2) + 列間 gap(sm*2) を差し引いて 3 等分。
@@ -118,6 +150,51 @@ export default function ListSectionScreen() {
         } else if (section === 'easy') {
           const wants = userId != null ? await fetchMyWantedCards(userId) : []
           result = await fetchEasyCards(userId ?? undefined, wants, blocked, LIMIT)
+        } else if (section === 'search-offer') {
+          // 譲を探す結果: チップ (w/c/i) または text fallback (q) で searchCards。
+          const q = params.q ?? ''
+          result =
+            q !== ''
+              ? await searchCards({ query: q, excludeOwnerIds: blocked, limit: LIMIT })
+              : await searchCards({
+                  workIds: toIds(params.w),
+                  characterIds: toIds(params.c),
+                  itemTypeIds: toIds(params.i),
+                  excludeOwnerIds: blocked,
+                  limit: LIMIT,
+                })
+        } else if (section === 'search-want') {
+          // 求を探す結果 (向きB): 入力チップ → myOffers → 相手 want_* 照合。dedupByOwner:false。
+          const data = await searchDirectMatch({
+            myOffers: {
+              works: toIds(params.w),
+              characters: toIds(params.c),
+              itemTypes: toIds(params.i),
+            },
+            myWants: { works: [], characters: [], itemTypes: [] },
+            dedupByOwner: false,
+            excludeOwnerIds: blocked,
+            limit: LIMIT,
+          })
+          result = data.map((r) => r.offering_card)
+        } else if (section === 'search-match') {
+          // マッチ結果 (双方向): ★スワップ整合 mw_*=myWants / mo_*=myOffers。dedupByOwner:false。
+          const data = await searchDirectMatch({
+            myWants: {
+              works: toIds(params.mw_w),
+              characters: toIds(params.mw_c),
+              itemTypes: toIds(params.mw_i),
+            },
+            myOffers: {
+              works: toIds(params.mo_w),
+              characters: toIds(params.mo_c),
+              itemTypes: toIds(params.mo_i),
+            },
+            dedupByOwner: false,
+            excludeOwnerIds: blocked,
+            limit: LIMIT,
+          })
+          result = data.map((r) => r.offering_card)
         }
       }
       setCards(result)
@@ -127,7 +204,20 @@ export default function ListSectionScreen() {
     } finally {
       setLoading(false)
     }
-  }, [section, userId])
+  }, [
+    section,
+    userId,
+    params.w,
+    params.c,
+    params.i,
+    params.q,
+    params.mw_w,
+    params.mw_c,
+    params.mw_i,
+    params.mo_w,
+    params.mo_c,
+    params.mo_i,
+  ])
 
   useFocusEffect(
     useCallback(() => {
@@ -194,15 +284,17 @@ export default function ListSectionScreen() {
             <Ionicons name="search" size={16} color={colors.textTertiary} />
             <Text style={styles.searchPlaceholder}>検索</Text>
           </Pressable>
-          {/* 絞込検索 (右下) */}
-          <View style={styles.filterRow}>
-            <Pressable style={styles.filterButton} onPress={() => setShowFilter(true)}>
-              <Ionicons name="options-outline" size={15} color={colors.primary} />
-              <Text style={styles.filterButtonText}>
-                絞込検索{filterCount > 0 ? ` (${filterCount})` : ''}
-              </Text>
-            </Pressable>
-          </View>
+          {/* 絞込検索 (右下)。search 系は検索で既に絞済のため非表示 (二重絞り回避) */}
+          {!section.startsWith('search-') && (
+            <View style={styles.filterRow}>
+              <Pressable style={styles.filterButton} onPress={() => setShowFilter(true)}>
+                <Ionicons name="options-outline" size={15} color={colors.primary} />
+                <Text style={styles.filterButtonText}>
+                  絞込検索{filterCount > 0 ? ` (${filterCount})` : ''}
+                </Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       )}
 

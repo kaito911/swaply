@@ -600,6 +600,24 @@ function TextSearchPane({
         placeholder="グループ・作品・メンバー/キャラ・アイテム名で検索"
       />
 
+      {searched && results.length > 0 && (
+        <SeeAllLink
+          onPress={() =>
+            router.push({
+              pathname: '/list/[section]',
+              params: hasChips
+                ? {
+                    section: 'search-offer',
+                    w: selectedWorkIds.join(','),
+                    c: selectedCharIds.join(','),
+                    i: selectedItemTypeIds.join(','),
+                  }
+                : { section: 'search-offer', q: trimmedInput },
+            } as never)
+          }
+        />
+      )}
+
       <ResultArea
         loading={loading}
         searched={searched}
@@ -807,6 +825,22 @@ function WantedSearchPane({
         placeholder="グループ・作品・メンバー/キャラ・アイテム名で検索"
       />
 
+      {searched && results.length > 0 && (
+        <SeeAllLink
+          onPress={() =>
+            router.push({
+              pathname: '/list/[section]',
+              params: {
+                section: 'search-want',
+                w: selectedWorkIds.join(','),
+                c: selectedCharIds.join(','),
+                i: selectedItemTypeIds.join(','),
+              },
+            } as never)
+          }
+        />
+      )}
+
       <ResultArea
         loading={loading}
         searched={searched}
@@ -959,6 +993,26 @@ function DirectMatchPane({
         </ScrollView>
       </KeyboardAwareScrollProvider>
 
+      {searched && results.length > 0 && (
+        <SeeAllLink
+          onPress={() =>
+            router.push({
+              pathname: '/list/[section]',
+              params: {
+                section: 'search-match',
+                // ★スワップ整合: mw_*=offer(上バー)→遷移先 myWants、mo_*=want(下バー)→myOffers。
+                mw_w: offerWorkIds.join(','),
+                mw_c: offerCharIds.join(','),
+                mw_i: offerItemIds.join(','),
+                mo_w: wantWorkIds.join(','),
+                mo_c: wantCharIds.join(','),
+                mo_i: wantItemIds.join(','),
+              },
+            } as never)
+          }
+        />
+      )}
+
       <ResultArea
         loading={loading}
         searched={searched}
@@ -974,6 +1028,16 @@ function DirectMatchPane({
   )
 }
 
+// 「すべて表示」小リンク (検索3タブ共通・ホームの sub リンク見た目踏襲)。
+//   結果あり時のみ表示し、押すと list/[section] の 3 列グリッドへ条件を渡して遷移。
+function SeeAllLink({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable style={styles.seeAllRow} onPress={onPress} hitSlop={8}>
+      <Text style={styles.seeAllText}>すべて表示 ›</Text>
+    </Pressable>
+  )
+}
+
 // ─────────────────────────────────────────
 // styles
 // ─────────────────────────────────────────
@@ -982,6 +1046,18 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+
+  // 「すべて表示」小リンク (subAction 見た目: sm / medium / primary、右寄せ)
+  seeAllRow: {
+    alignSelf: 'flex-end',
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.sm,
+  },
+  seeAllText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.medium,
+    color: colors.primary,
   },
 
   // ★ 外側モードバー (Pioneer #001 提案、3 モード切替)

@@ -61,14 +61,20 @@ export type CharactersSectionValue = HybridMasterIds
 export type ItemsSectionValue = HybridMasterIds
 
 // ─────────────────────────────────────────
-// WantSection
+// WantSection (現在未使用 = dead。★意図的に温存・削除禁止)
 // ─────────────────────────────────────────
 
 /**
- * 【legacy / bulk 用】求として選択した wanted_cards.id の配列。
- * bulk.tsx が WantSection (wanted_cards 選択 + card_wanted_links) で使用。
- * ★single-page (PR-1a) は master 構造化の WantMasterValue に移行済のため本型は使わない。
- *   bulk (PR-1b) が master 構造化へ移る際に整理する。
+ * 求として選択した wanted_cards.id の配列（旧 WantSection のリスト選択方式の値型）。
+ *
+ * ★現在未使用 (dead)：道2で single-page (PR-1a) / bulk (PR-1b-1) とも
+ *   WantMasterSection（求の master 構造化・自由入力＋候補方式）へ移行済み。
+ *   どの画面からも参照されていない。
+ *
+ * ★それでも【意図的に温存】する（削除禁止）：将来「リスト選択方式」へ戻す候補。
+ *   商品マスタが十分成熟した時／事務所提携で公式画像を流用できるようになった時に、
+ *   WantSection（本型を使う旧UI）へ切り替え直すための資産。
+ *   「未参照だから消してよい」と誤判断しないこと。関連: components/listing/section/WantSection.tsx。
  */
 export type WantSectionValue = string[]
 

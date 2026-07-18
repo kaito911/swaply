@@ -1,5 +1,15 @@
 // components/listing/section/WantSection.tsx
 //
+// ★★ 現在未使用 (dead code)。ただし【意図的に温存・削除禁止】★★
+//   求リストから選択する方式の旧 UI。道2で single-page (PR-1a) / bulk (PR-1b-1) とも
+//   WantMasterSection（求の master 構造化・自由入力＋候補方式）へ移行済みで、
+//   現在どの画面からも import/描画されていない。
+//   それでも消さない理由: 将来「リスト選択方式」へ戻す候補として保持する事業資産。
+//   商品マスタが十分成熟した時／事務所提携で公式画像を流用できるようになった時に、
+//   本コンポーネントへ切り替え直す想定。「未参照だから消してよい」と誤判断しないこと。
+//   関連: components/listing/section/types.ts の WantSectionValue、WantMasterSection.tsx。
+//
+// ── 以下は移行前 (Phase A) の設計メモ (履歴として保持) ──
 // Phase A: 出品 1 ページ化 section 抽出。★最大再利用対象
 // 元: app/listing/new/want.tsx (wanted_cards multi-select + 簡易追加モーダル)。
 //

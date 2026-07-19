@@ -583,6 +583,8 @@ export default function ListingNewBulkScreen() {
             複数のグッズが写った写真を1枚選び、{'\n'}
             出品したいグッズを写真上でタップします。
           </Text>
+          {/* 非公式サービス免責 (常時1行・控えめ・著作権 Day1) */}
+          <Text style={styles.disclaimer}>公式グッズのみ対象・非公式サービスです</Text>
           <View style={styles.pickCtaWrap}>
             <PrimaryCTA label="写真を選ぶ" onPress={handlePickImage} size="lg" />
           </View>
@@ -1327,6 +1329,12 @@ const styles = StyleSheet.create({
   pickCtaWrap: {
     alignSelf: 'stretch',
     marginTop: spacing.md,
+  },
+  // 非公式サービス免責キャプション (控えめ・視認可・中央寄せ)
+  disclaimer: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    textAlign: 'center',
   },
   // ヒント
   hintRow: {

@@ -533,6 +533,9 @@ export default function ListingNewSinglePageScreen() {
         keyboardDismissMode="interactive"
         automaticallyAdjustKeyboardInsets
       >
+          {/* 非公式サービス免責 (常時1行・控えめ・著作権 Day1) */}
+          <Text style={styles.disclaimer}>公式グッズのみ対象・非公式サービスです</Text>
+
           {/* ① 写真 */}
           <SectionHeader
             index={1}
@@ -721,6 +724,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     paddingTop: spacing.md,
     paddingBottom: spacing['2xl'],
+  },
+  // 非公式サービス免責キャプション (控えめ・視認可)
+  disclaimer: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    marginBottom: spacing.md,
   },
   sectionDivider: {
     height: 1,

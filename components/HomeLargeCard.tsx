@@ -109,11 +109,11 @@ function HomeLargeTitle({ card }: { card: Card }) {
   const want = formatStructuredWant(card).text ?? legacyWant
   return (
     <View style={styles.body}>
-      <Text style={styles.line} numberOfLines={4}>
+      <Text style={styles.line} numberOfLines={2}>
         {give}
       </Text>
       {want != null && (
-        <Text style={styles.line} numberOfLines={4}>
+        <Text style={styles.line} numberOfLines={2}>
           {want}
         </Text>
       )}

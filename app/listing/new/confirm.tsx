@@ -130,7 +130,7 @@ function buildSetName(e: EnrichedListing): string {
     parts.push(`(${typeNames.join('・')})`)
   }
 
-  return parts.join(' - ')
+  return parts.join(' / ')
 }
 
 function toInsertRow(

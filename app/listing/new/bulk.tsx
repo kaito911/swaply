@@ -189,7 +189,7 @@ function buildPointName(
   if (typeNames.length > 0) {
     parts.push(`(${typeNames.join('・')})`)
   }
-  return parts.length > 0 ? parts.join(' - ') : '無題の出品'
+  return parts.length > 0 ? parts.join(' / ') : '無題の出品'
 }
 
 async function pickFromCamera(): Promise<PickedImage | null> {

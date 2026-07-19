@@ -404,7 +404,7 @@ export function formatStructuredWant(
     parts.push('同シリーズ')
   }
 
-  const text = parts.length > 0 ? '【求】' + parts.join('・') : null
+  const text = parts.length > 0 ? '【求】' + parts.join(' / ') : null
   return { text, sameSeries }
 }
 

@@ -57,7 +57,7 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
           <Image
             source={{ uri: card.image_url }}
             style={styles.image}
-            contentFit="cover"
+            contentFit="contain"
             transition={200}
             cachePolicy="memory-disk"
           />
@@ -109,11 +109,11 @@ function HomeLargeTitle({ card }: { card: Card }) {
   const want = formatStructuredWant(card).text ?? legacyWant
   return (
     <View style={styles.body}>
-      <Text style={styles.line} numberOfLines={2}>
+      <Text style={styles.line} numberOfLines={4}>
         {give}
       </Text>
       {want != null && (
-        <Text style={styles.line} numberOfLines={2}>
+        <Text style={styles.line} numberOfLines={4}>
           {want}
         </Text>
       )}
@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
     // item5c: 幅可変に伴い固定 height:220 を廃止し aspectRatio 化 (物理写真の
     //   顔切れ回避)。4:5 の縦長で人物/グッズを収めやすくする。実機で 4:5⇔1:1 を最終判断。
     width: '100%',
-    aspectRatio: 4 / 5,
+    aspectRatio: 1,
     backgroundColor: colors.backgroundMuted,
   },
   imagePlaceholder: {
@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
   // 【譲】【求】は同サイズ (対等・現場フォーマット)。2 行併記。
   // item3: 2.5 列化で広がった幅で読みやすくするため fontSize 15→13 に縮小 (ビルドで 12 まで微調整可)。
   line: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: fontWeight.semibold,
     color: colors.textPrimary,
     lineHeight: 18,

@@ -44,7 +44,7 @@ export function FeedGridCard({
           <Image
             source={{ uri: card.image_url }}
             style={styles.image}
-            contentFit="cover"
+            contentFit="contain"
             transition={200}
             cachePolicy="memory-disk"
           />
@@ -81,11 +81,11 @@ function FeedGridTitle({ card }: { card: Card }) {
   const want = formatStructuredWant(card).text ?? legacyWant
   return (
     <View style={styles.body}>
-      <Text style={styles.line} numberOfLines={2}>
+      <Text style={styles.line} numberOfLines={4}>
         {give}
       </Text>
       {want != null && (
-        <Text style={styles.line} numberOfLines={2}>
+        <Text style={styles.line} numberOfLines={4}>
           {want}
         </Text>
       )}
@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
   },
   // 【譲】【求】は同サイズ (対等)。3列グリッド幅 (~110px) に収まるよう 12px。
   line: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: fontWeight.semibold,
     color: colors.textPrimary,
     lineHeight: 16,

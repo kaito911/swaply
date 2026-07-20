@@ -1,7 +1,6 @@
 // app/listing/[id].tsx
 import { LikeButton } from '@/components/LikeButton'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
-import { TrustBadge } from '@/components/TrustBadge'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
@@ -21,7 +20,7 @@ import {
   getItemTypeById,
   getWorkById,
 } from '@/lib/master'
-import { Card, CardWantedLinkWithWantedCard, computeTrustBadge, Profile, TrustBadgeLevel, WantedCard, WantMatchScore } from '@/lib/types'
+import { Card, CardWantedLinkWithWantedCard, Profile, WantedCard, WantMatchScore } from '@/lib/types'
 import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -303,15 +302,6 @@ export default function ListingDetailScreen() {
   // ── derive ───────────────────────────────────────────────────────────────────
 
   const owner = card.owner
-  const trustLevel: TrustBadgeLevel = owner != null
-    ? computeTrustBadge({
-        trade_count: owner.trade_count,
-        ship_rate: owner.ship_rate,
-        reply_median_hours: owner.reply_median_hours,
-        trouble_count: owner.trouble_count,
-        last_active_at: owner.last_active_at,
-      })
-    : 'green'
 
   const diff = getDiffInfo(card)
   // 「譲と同シリーズのグッズを求む」判定 (want_works が自 work_id を含む)。
@@ -874,9 +864,6 @@ export default function ListingDetailScreen() {
                       ? `@${owner.handle}`
                       : owner.display_name ?? '出品者'}
                   </Text>
-                  <View style={styles.sellerBadgeRow}>
-                    <TrustBadge level={trustLevel} size="sm" />
-                  </View>
                 </View>
 
                 <Text style={styles.detailLink}>Trust詳細 ›</Text>

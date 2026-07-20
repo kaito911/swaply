@@ -25,7 +25,7 @@ import {
   fetchVenueSupplyCount,
   isVenueLoadFailure,
 } from '@/lib/supabase'
-import { computeTrustBadge, Venue, VenueSupplyPost } from '@/lib/types'
+import { Venue, VenueSupplyPost } from '@/lib/types'
 import type { MasterCharacter } from '@/lib/types'
 import {
   getCharacterSuggestionsAcrossWorks,
@@ -45,7 +45,6 @@ import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { MultiSelectAutocomplete } from '@/components/MultiSelectAutocomplete'
 import { SubmitFab } from '@/components/SubmitFab'
-import { TrustBadge } from '@/components/TrustBadge'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -927,17 +926,6 @@ export default function VenueHomeScreen() {
               //  - 投稿者 + TrustBadge + 事実 Trust チップ (取引数 / 発送率)
               //  - 残り時間
               //  - 主 CTA「Holdする」(brand 色)
-              const trustLevel =
-                post.poster != null
-                  ? computeTrustBadge({
-                      trade_count: post.poster.trade_count,
-                      ship_rate: post.poster.ship_rate,
-                      reply_median_hours: 24,
-                      trouble_count: post.poster.trouble_count,
-                      last_active_at: null,
-                    })
-                  : null
-
               // PR-4: マッチリボン (exact slug overlap、fuzzy 不使用)。
               //   hasOverlap = 自分の求 ∩ 相手の譲 (片方向)
               //   isMutual   = それに加えて 自分の譲 ∩ 相手の求 (双方向)
@@ -1041,7 +1029,6 @@ export default function VenueHomeScreen() {
                         <Text style={styles.supplyCardPoster}>
                           @{getDisplayName(post.poster)}
                         </Text>
-                        {trustLevel != null && <TrustBadge level={trustLevel} />}
                       </View>
                       {post.poster != null && (
                         <View style={styles.supplyCardTrustChips}>

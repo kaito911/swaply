@@ -22,12 +22,10 @@ import {
   type VenueHoldWithRelations,
 } from '@/lib/supabase'
 import {
-  computeTrustBadge,
   VENUE_HOLD_STATUS_LABELS,
   VenueHoldStatus,
 } from '@/lib/types'
 import { formatVenueTimeLeft, isVenueExpired } from '@/lib/venueExpiry'
-import { TrustBadge } from '@/components/TrustBadge'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
@@ -571,15 +569,6 @@ export default function VenueHoldsScreen() {
                     <Text style={styles.counterpartName}>
                       @{counterpartName(counterpart)}
                     </Text>
-                    <TrustBadge
-                      level={computeTrustBadge({
-                        trade_count: counterpart.trade_count,
-                        ship_rate: counterpart.ship_rate,
-                        reply_median_hours: 24,
-                        trouble_count: counterpart.trouble_count,
-                        last_active_at: null,
-                      })}
-                    />
                   </View>
                 )}
                 {counterpart == null && (

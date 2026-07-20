@@ -2,12 +2,10 @@
 // 提案詳細画面（届いた提案 / 送信した提案 共通）
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { TradeStats } from '@/components/TradeStats'
-import { TrustBadge } from '@/components/TrustBadge'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, radius, spacing } from '@/constants/theme'
 import { acceptOffer, declineOffer, fetchOfferById } from '@/lib/supabase'
 import {
-  computeTrustBadge,
   OFFER_STATUS_LABELS,
   type Offer,
   type Profile,
@@ -242,16 +240,6 @@ export default function OfferDetailScreen() {
               {getProfileName(counterPartProfile)}
             </Text>
             <View style={styles.trustRow}>
-              <TrustBadge
-                level={computeTrustBadge({
-                  trade_count: counterPartProfile.trade_count,
-                  ship_rate: counterPartProfile.ship_rate,
-                  reply_median_hours: counterPartProfile.reply_median_hours,
-                  trouble_count: counterPartProfile.trouble_count,
-                  last_active_at: counterPartProfile.last_active_at,
-                })}
-                size="sm"
-              />
               <TradeStats
                 tradeCount={counterPartProfile.trade_count}
                 shipRate={counterPartProfile.ship_rate}

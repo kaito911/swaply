@@ -1,7 +1,6 @@
 import { HeaderActions } from '@/components/HeaderActions'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { TradeStats } from '@/components/TradeStats'
-import { TrustBadge } from '@/components/TrustBadge'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors } from '@/constants/theme'
 import { router, useFocusEffect } from 'expo-router'
@@ -20,7 +19,6 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { acceptOffer, declineOffer, fetchMyOffers } from '@/lib/supabase'
 import {
-  computeTrustBadge,
   OFFER_STATUS_LABELS,
   TRADE_STATUS_LABELS,
   type Offer,
@@ -36,16 +34,8 @@ import { useBadge } from '@/providers/BadgeProvider'
 // ─────────────────────────────────────────
 
 function TrustSummaryRow({ profile }: { profile: Profile }) {
-  const level = computeTrustBadge({
-    trade_count: profile.trade_count,
-    ship_rate: profile.ship_rate,
-    reply_median_hours: profile.reply_median_hours,
-    trouble_count: profile.trouble_count,
-    last_active_at: profile.last_active_at,
-  })
   return (
     <View style={trustRowStyles.row}>
-      <TrustBadge level={level} size="sm" />
       <TradeStats
         tradeCount={profile.trade_count}
         shipRate={profile.ship_rate}

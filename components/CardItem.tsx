@@ -2,10 +2,9 @@
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { TradeStats } from '@/components/TradeStats'
 import { TradeTag } from '@/components/TradeTag'
-import { TrustBadge } from '@/components/TrustBadge'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, radius, spacing } from '@/constants/theme'
-import { Card, computeTrustBadge, CONDITION_LABELS } from '@/lib/types'
+import { Card, CONDITION_LABELS } from '@/lib/types'
 import { router } from 'expo-router'
 import React from 'react'
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
@@ -20,16 +19,6 @@ const IMAGE_HEIGHT = 136
 
 export function CardItem({ card, onPropose }: CardItemProps) {
   const owner = card.owner
-  const trustLevel =
-    owner != null
-      ? computeTrustBadge({
-          trade_count: owner.trade_count,
-          ship_rate: owner.ship_rate,
-          reply_median_hours: owner.reply_median_hours,
-          trouble_count: owner.trouble_count,
-          last_active_at: owner.last_active_at,
-        })
-      : 'green'
 
   const handlePropose = () => {
     if (onPropose != null) {
@@ -94,7 +83,6 @@ export function CardItem({ card, onPropose }: CardItemProps) {
         {/* 出品者 + Trustバッジ */}
         {owner != null && (
           <View style={styles.ownerRow}>
-            <TrustBadge level={trustLevel} size="sm" />
             <Text style={styles.ownerName} numberOfLines={1}>
               {owner.handle}
             </Text>

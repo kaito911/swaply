@@ -17,17 +17,14 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { CardItem } from '@/components/CardItem'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SectionHeader } from '@/components/SectionHeader'
-import { TrustBadge } from '@/components/TrustBadge'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
 import { fetchProfile, fetchUserCards } from '@/lib/supabase'
 import {
     Card,
-    computeTrustBadge,
     formatLastActive,
     formatReplyTime,
     Profile,
-    TrustBadgeLevel,
 } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 
@@ -138,14 +135,6 @@ export default function TrustProfileScreen() {
     )
   }
 
-  const trustLevel: TrustBadgeLevel = computeTrustBadge({
-    trade_count: profile.trade_count,
-    ship_rate: profile.ship_rate,
-    reply_median_hours: profile.reply_median_hours,
-    trouble_count: profile.trouble_count,
-    last_active_at: profile.last_active_at,
-  })
-
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScreenHeader title="Trustプロフィール" />
@@ -171,10 +160,6 @@ export default function TrustProfileScreen() {
           {profile.display_name != null && (
             <Text style={styles.displayName}>{profile.display_name}</Text>
           )}
-
-          <View style={styles.badgeRow}>
-            <TrustBadge level={trustLevel} size="md" />
-          </View>
 
           <Text style={styles.lastActive}>
             最終アクティブ: {formatLastActive(profile.last_active_at)}

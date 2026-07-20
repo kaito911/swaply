@@ -465,6 +465,7 @@ export default function MyPageScreen() {
             足すだけで増やせる。β1 では課金・機能未実装のため出さない。 */}
         <View style={styles.settingsSection}>
           {([
+            { label: 'Swaplyの使い方', path: '/how-to-use' },
             { label: 'プロフィール編集', path: '/profile-edit' },
             { label: '推し編集', path: '/oshi-edit' },
             { label: 'いいね', path: '/likes' },

@@ -25,6 +25,23 @@ export default function LoginScreen() {
 
   const canSubmit = email.trim().length > 0 && password.length >= 6
 
+  // 未認証(email_not_confirmed)時の確認メール再送。supabase.auth.resend(type:'signup')。
+  const handleResendConfirmation = async () => {
+    const target = email.trim()
+    if (target === '') return
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email: target })
+      if (error) throw error
+      Alert.alert(
+        '確認メールを再送しました',
+        `${target} 宛に確認メールを再送しました。メール内のリンクをタップして認証を完了してください。`,
+      )
+    } catch (err) {
+      console.error('[LoginScreen][handleResendConfirmation]', err)
+      Alert.alert('再送に失敗しました', '時間をおいて、もう一度お試しください。')
+    }
+  }
+
   const handleLogin = async () => {
     if (!canSubmit || loading) return
 
@@ -45,8 +62,28 @@ export default function LoginScreen() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : ''
+      const code =
+        typeof error === 'object' && error != null && 'code' in error
+          ? String((error as { code?: unknown }).code ?? '')
+          : ''
+      // 未認証(メール確認未完了)。code='email_not_confirmed' / message 'Email not confirmed'。
+      const emailUnconfirmed =
+        code === 'email_not_confirmed' ||
+        message.toLowerCase().includes('not confirmed')
 
-      if (message.includes('Invalid login credentials')) {
+      if (emailUnconfirmed) {
+        Alert.alert(
+          'メール認証がまだ完了していません',
+          '登録時にお送りしたメールのリンクをタップして認証を完了してください。迷惑メールフォルダもご確認ください。',
+          [
+            { text: '閉じる', style: 'cancel' },
+            {
+              text: '確認メールを再送する',
+              onPress: () => void handleResendConfirmation(),
+            },
+          ],
+        )
+      } else if (message.includes('Invalid login credentials')) {
         Alert.alert('ログインエラー', 'メールアドレスまたはパスワードが違います')
       } else {
         console.error('[LoginScreen][handleLogin]', error)

@@ -1,13 +1,11 @@
 // app/onboarding.tsx
-// 初回ログイン時のみ表示されるオンボーディング画面
-// 完了フラグを AsyncStorage に保存し、以降はスキップされる
+// 初回ログイン時のみ表示されるオンボーディング。
+// 構成: ようこそ (簡素) → 表示名 (handle) → Swaplyの約束 (promise) → ホーム。
+// 完了フラグを AsyncStorage に保存し、以降はスキップされる。
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { Ionicons } from '@expo/vector-icons'
-import { router } from 'expo-router'
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
-  Alert,
-  Pressable,
+  Animated,
   StyleSheet,
   Text,
   TextInput,
@@ -17,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { useAuthContext } from '@/providers/AuthProvider'
-import { addWantedCard, checkHandleAvailable, updateProfile } from '@/lib/supabase'
+import { checkHandleAvailable, updateProfile } from '@/lib/supabase'
 
 export const ONBOARDING_DONE_KEY = 'onboarding_done'
 
@@ -25,7 +23,7 @@ export async function resetOnboardingForDebug(): Promise<void> {
   await AsyncStorage.removeItem(ONBOARDING_DONE_KEY)
 }
 
-type Step = 'welcome' | 'handle' | 'wants'
+type Step = 'welcome' | 'handle' | 'promise'
 
 type Props = {
   onComplete: () => void
@@ -36,11 +34,10 @@ export default function OnboardingScreen({ onComplete }: Props) {
   const userId = session?.user?.id ?? null
 
   const [step, setStep] = useState<Step>('welcome')
-  const [cardName, setCardName] = useState('')
-  const [saving, setSaving] = useState(false)
   const [handle, setHandle] = useState('')
   const [handleError, setHandleError] = useState<string | null>(null)
   const [checkingHandle, setCheckingHandle] = useState(false)
+
   const handleHandleSubmit = async () => {
     const trimmed = handle.trim()
     if (trimmed.length < 3) {
@@ -58,7 +55,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
         return
       }
       await updateProfile({ userId, handle: trimmed, displayName: null })
-      setStep('wants')
+      setStep('promise')
     } catch (error) {
       console.error('[Onboarding] handleHandleSubmit', error)
       setHandleError('エラーが発生しました。もう一度お試しください。')
@@ -72,32 +69,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
     onComplete()
   }
 
-  const handleWantsSubmit = async () => {
-    const trimmed = cardName.trim()
-    if (trimmed === '' || userId == null) {
-      await handleComplete()
-      return
-    }
-
-    try {
-      setSaving(true)
-      await addWantedCard({
-        userId,
-        cardName: trimmed,
-        groupName: null,
-        memberName: null,
-        series: null,
-      })
-    } catch (error) {
-      // 登録失敗してもオンボーディングは完了させる
-      console.error('[Onboarding] addWantedCard failed', error)
-    } finally {
-      setSaving(false)
-      await handleComplete()
-    }
-  }
-
-  // ── STEP 1: ようこそ ──────────────────────
+  // ── STEP 1: ようこそ (簡素な挨拶のみ・書き込みなし) ──────────────
   if (step === 'welcome') {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -107,35 +79,16 @@ export default function OnboardingScreen({ onComplete }: Props) {
               <Text style={styles.logoMarkText}>S</Text>
             </View>
             <Text style={styles.logoText}>Swaply</Text>
-            <Text style={styles.tagline}>交換を、もっとスムーズに。</Text>
+            <Text style={styles.welcomeGreeting}>ようこそ、Swaplyへ。</Text>
           </View>
 
-          <View style={styles.featureList}>
-            <FeatureRow
-              icon="shield-checkmark-outline"
-              text="事実ベースのTrustで相手を判断できる"
-            />
-            <FeatureRow
-              icon="swap-horizontal-outline"
-              text="住所は交換成立後にだけ共有される設計"
-            />
-            <FeatureRow
-              icon="trending-up-outline"
-              text="成立しやすい交換候補を自動で表示"
-            />
-          </View>
-
-          <PrimaryCTA
-            label="はじめる"
-            onPress={() => setStep('handle')}
-            size="lg"
-          />
+          <PrimaryCTA label="はじめる" onPress={() => setStep('handle')} size="lg" />
         </View>
       </SafeAreaView>
     )
   }
 
-  // ── STEP 2: 表示名入力 ──────────────
+  // ── STEP 2: 表示名入力 (profiles.handle・必須) ──────────────
   if (step === 'handle') {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -160,9 +113,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
             autoFocus
           />
 
-          {handleError != null && (
-            <Text style={styles.errorText}>{handleError}</Text>
-          )}
+          {handleError != null && <Text style={styles.errorText}>{handleError}</Text>}
 
           <PrimaryCTA
             label="次へ"
@@ -171,56 +122,73 @@ export default function OnboardingScreen({ onComplete }: Props) {
             disabled={handle.trim().length < 3}
             size="lg"
           />
+
+          {/* 名前入力の邪魔をしない位置に、使い方の在り処を一行案内 */}
+          <Text style={styles.guideHint}>
+            使い方や機能は、マイページの「Swaplyの使い方」でいつでも確認できます。
+          </Text>
         </View>
       </SafeAreaView>
     )
   }
 
-  // ── STEP 3: ほしいカード登録 ──────────────
-  return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <View style={styles.container}>
-        <View style={styles.wantsHeader}>
-          <Text style={styles.wantsTitle}>ほしいカードはありますか？</Text>
-          <Text style={styles.wantsSub}>
-            登録すると成立しやすい交換候補に優先表示されます。あとから追加もできます。
-          </Text>
-        </View>
-
-        <TextInput
-          style={styles.wantsInput}
-          placeholder="例：ジュンギュ トレカ"
-          value={cardName}
-          onChangeText={setCardName}
-          autoCorrect={false}
-          autoFocus
-        />
-
-        <PrimaryCTA
-          label={cardName.trim() !== '' ? '登録してはじめる' : 'スキップ'}
-          onPress={handleWantsSubmit}
-          loading={saving}
-          size="lg"
-        />
-
-        <Pressable
-          style={styles.skipButton}
-          onPress={handleComplete}
-          disabled={saving}
-        >
-          <Text style={styles.skipText}>スキップ</Text>
-        </Pressable>
-      </View>
-    </SafeAreaView>
-  )
+  // ── STEP 3: Swaplyの約束 (世界観のみ・案内やリンクは入れない) ──────────────
+  return <PromiseStep onStart={handleComplete} />
 }
 
-function FeatureRow({ icon, text }: { icon: string; text: string }) {
+// 約束ページ: 文面ブロックを上から順に薄字→濃字でフェードインさせる。
+const PROMISE_BLOCKS: string[] = [
+  'はじめる前に、ひとつだけ。',
+  '推し活グッズを、手数料0円で交換できる。\nそれが、Swaplyのいちばんの約束です。',
+  'そしてSwaplyは、まだまだ進化の途中。\n匿名配送など、推し活に大切な機能も、\nこれから搭載を目指していきます。',
+  '完璧じゃないけど、\n皆さんと一緒に、もっと良くしていく。\nそんなアプリです。',
+  'これから、よろしくお願いします。',
+]
+
+function PromiseStep({ onStart }: { onStart: () => void }) {
+  const [starting, setStarting] = useState(false)
+  // 各ブロック + CTA 用の opacity。0(薄=透明) → 1(濃=不透明) へ順次フェード。
+  const opacities = useRef(
+    [...PROMISE_BLOCKS, 'cta'].map(() => new Animated.Value(0)),
+  ).current
+
+  useEffect(() => {
+    const animations = opacities.map((v) =>
+      Animated.timing(v, { toValue: 1, duration: 600, useNativeDriver: true }),
+    )
+    Animated.stagger(260, animations).start()
+  }, [opacities])
+
+  const handlePress = () => {
+    if (starting) return
+    setStarting(true)
+    void onStart()
+  }
+
   return (
-    <View style={styles.featureRow}>
-      <Ionicons name={icon as never} size={20} color={colors.primary} />
-      <Text style={styles.featureText}>{text}</Text>
-    </View>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <View style={styles.promiseContainer}>
+        <View style={styles.promiseTextArea}>
+          {PROMISE_BLOCKS.map((block, i) => (
+            <Animated.Text
+              key={i}
+              style={[styles.promiseText, { opacity: opacities[i] }]}
+            >
+              {block}
+            </Animated.Text>
+          ))}
+        </View>
+
+        <Animated.View style={{ opacity: opacities[opacities.length - 1] }}>
+          <PrimaryCTA
+            label="Swaplyを始める"
+            onPress={handlePress}
+            loading={starting}
+            size="lg"
+          />
+        </Animated.View>
+      </View>
+    </SafeAreaView>
   )
 }
 
@@ -260,29 +228,10 @@ const styles = StyleSheet.create({
     color: colors.primary,
     letterSpacing: -1,
   },
-  tagline: {
-    fontSize: fontSize.base,
+  welcomeGreeting: {
+    fontSize: fontSize.lg,
     color: colors.textSecondary,
-  },
-  featureList: {
-    gap: spacing.md,
-    marginBottom: spacing['3xl'],
-  },
-  featureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.backgroundCard,
-    borderRadius: radius.xl,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  featureText: {
-    flex: 1,
-    fontSize: fontSize.sm,
-    color: colors.textPrimary,
-    fontWeight: '500',
+    marginTop: spacing.xs,
   },
   wantsHeader: {
     marginBottom: spacing.xl,
@@ -310,15 +259,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundCard,
     marginBottom: spacing.base,
   },
-  skipButton: {
-    marginTop: spacing.md,
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-  },
-  skipText: {
-    fontSize: fontSize.sm,
-    color: colors.textTertiary,
-  },
   wantsInputError: {
     borderColor: '#EF4444',
   },
@@ -327,5 +267,32 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     marginTop: -8,
     marginBottom: 8,
+  },
+  guideHint: {
+    marginTop: spacing.lg,
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  // ── 約束ページ ──
+  promiseContainer: {
+    flex: 1,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing['2xl'],
+    paddingBottom: spacing.xl,
+    justifyContent: 'center',
+  },
+  promiseTextArea: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: spacing.xl,
+  },
+  promiseText: {
+    fontSize: fontSize.lg,
+    lineHeight: 30,
+    color: colors.textPrimary,
+    textAlign: 'center',
+    fontWeight: fontWeight.medium,
   },
 })

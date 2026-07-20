@@ -145,7 +145,7 @@ const PROMISE_BLOCKS: string[] = [
   'これから、よろしくお願いします。',
 ]
 
-function PromiseStep({ onStart }: { onStart: () => void }) {
+export function PromiseStep({ onStart }: { onStart: () => void }) {
   const [starting, setStarting] = useState(false)
   // 各ブロック + CTA 用の opacity。0(薄=透明) → 1(濃=不透明) へ順次フェード。
   const opacities = useRef(

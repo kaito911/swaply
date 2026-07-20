@@ -30,7 +30,6 @@ import {
 } from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { SUPPORT_MAILTO, LEGAL_MAILTO } from '@/constants/contact'
-import { BetaBadge } from '@/components/BetaBadge'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useMemo, useState } from 'react'
@@ -331,8 +330,6 @@ export default function MyPageScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── β版表示 (Apple 審査向け期待値補正) ── */}
-        <BetaBadge />
 
         {/* ── ヒーロー (アイデンティティ層) ──
             M3 でトラブル色サインをここに追加予定。M2 時点はアバター+名前+バッジのみ。 */}
@@ -466,6 +463,7 @@ export default function MyPageScreen() {
         <View style={styles.settingsSection}>
           {([
             { label: 'Swaplyの使い方', path: '/how-to-use' },
+            { label: 'Swaplyの約束', path: '/promise-preview' },
             { label: 'プロフィール編集', path: '/profile-edit' },
             { label: '推し編集', path: '/oshi-edit' },
             { label: 'いいね', path: '/likes' },

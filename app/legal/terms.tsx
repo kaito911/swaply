@@ -23,15 +23,15 @@ export default function TermsScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={true}
       >
-        <Text style={styles.headerTitle}>Swaply 利用規約 (初期β版)</Text>
+        <Text style={styles.headerTitle}>Swaply 利用規約</Text>
         <Text style={styles.headerMeta}>
-          バージョン: v1 (初期β){'\n'}
+          バージョン: v1{'\n'}
           最終更新日: 2026-06-04
         </Text>
 
         <View style={styles.notice}>
           <Text style={styles.noticeText}>
-            本規約は、Swaply 初期β 公開リリース時点での適用条項を記載しています。
+            本規約は、Swaply 公開リリース時点での適用条項を記載しています。
             売買機能・有料プラン・匿名配送等は本リリースでは提供しておらず、
             導入時に別途お知らせします。
           </Text>
@@ -102,7 +102,7 @@ export default function TermsScreen() {
             当社に故意又は過失がある場合を除き、当社は一切責任を負いません。
           </P>
           <P>
-            5. 13 歳未満の方、または日本国外に居住される方は、初期β 期間中はご利用いただけません
+            5. 13 歳未満の方、または日本国外に居住される方は、現在はご利用いただけません
             (Phase 2 以降で再評価予定)。
           </P>
         </Section>
@@ -110,7 +110,7 @@ export default function TermsScreen() {
         <Section title="第 5 条 (サービス内容)">
           <P>
             1. 本サービスは、ユーザー間で アニメ・推し活グッズの交換 を行うためのプラットフォームを
-            提供します (初期β では交換のみ、売買機能は Phase 2 以降での導入を検討予定)。
+            提供します (現在は交換のみ、売買機能は Phase 2 以降での導入を検討予定)。
           </P>
           <P>
             2. 当社は、ユーザー間の取引の当事者ではなく、取引の保証は行いません。
@@ -376,7 +376,7 @@ export default function TermsScreen() {
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            本規約は初期β リリース時点のものです。{'\n'}
+            本規約は公開リリース時点のものです。{'\n'}
             将来、機能追加・法人化等に伴い改定する場合があります。
           </Text>
         </View>

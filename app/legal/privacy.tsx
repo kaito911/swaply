@@ -17,15 +17,15 @@ export default function PrivacyScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={true}
       >
-        <Text style={styles.headerTitle}>Swaply プライバシーポリシー (初期β版)</Text>
+        <Text style={styles.headerTitle}>Swaply プライバシーポリシー</Text>
         <Text style={styles.headerMeta}>
-          バージョン: v1 (初期β){'\n'}
+          バージョン: v1{'\n'}
           最終更新日: 2026-06-04
         </Text>
 
         <View style={styles.notice}>
           <Text style={styles.noticeText}>
-            本ポリシーは、Swaply 初期β 公開リリース時点での取得・利用情報を記載しています。
+            本ポリシーは、Swaply 公開リリース時点での取得・利用情報を記載しています。
             機能追加・法人化等に伴い改定する場合があります。
           </Text>
         </View>
@@ -51,7 +51,7 @@ export default function PrivacyScreen() {
           <P>・提案メッセージ</P>
           <P>・取引履歴 (発送状況、受取確認、キャンセル理由等)</P>
           <P>
-            ・配送情報 (氏名・郵便番号・住所): 初期β では郵送交換が成立した時点で取引相手に
+            ・配送情報 (氏名・郵便番号・住所): 本サービスでは郵送交換が成立した時点で取引相手に
             開示されます
           </P>
 
@@ -175,7 +175,7 @@ export default function PrivacyScreen() {
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            本ポリシーは初期β リリース時点のものです。{'\n'}
+            本ポリシーは公開リリース時点のものです。{'\n'}
             将来、機能追加・法人化等に伴い改定する場合があります。
           </Text>
         </View>

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { colors } from '@/constants/theme'
 import { PushNotificationResponseHandler } from '@/components/PushNotificationResponseHandler'
+import { PushTokenSync } from '@/components/PushTokenSync'
 import { AuthProvider, useAuthContext } from '@/providers/AuthProvider'
 import { BadgeProvider } from '@/providers/BadgeProvider'
 import { MasterCacheProvider } from '@/providers/MasterCacheProvider'
@@ -258,6 +259,9 @@ export default function RootLayout() {
                 UI は返さず、cold start / foreground / background tap を listen する。
                 auth/onboarding gate の外でマウントすることで cold start を取り逃さない。 */}
             <PushNotificationResponseHandler />
+            {/* 通知トークンのサイレント再同期 (granted 時のみ・OSダイアログを出さない)。
+                再インストール/ローテーション/後から許可 でのトークン不達を防ぐ。 */}
+            <PushTokenSync />
             <RootNavigator />
           </ToastProvider>
         </MasterCacheProvider>

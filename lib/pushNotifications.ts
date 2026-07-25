@@ -20,12 +20,17 @@
 // 本 PR では呼出側 (許可フロー UI / オンボーディング / マイページ設定) には接続しない。
 // PR2 で接続予定。
 
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
 import Constants from 'expo-constants'
 import { Platform } from 'react-native'
 
 import { supabase } from './supabase'
+
+// 最後に push_tokens へ upsert した token を端末に記録するキー。
+// 起動/復帰の度にリモート upsert が走らないよう、token 変化時だけ書き込む (要件3)。
+const LAST_SYNCED_PUSH_TOKEN_KEY = 'swaply_last_synced_push_token_v1'
 
 type Platform_ = 'ios' | 'android'
 
@@ -116,6 +121,25 @@ export async function registerForPushNotificationsAsync(
   }
 
   // (e) Supabase push_tokens upsert
+  const ok = await upsertPushToken(userId, token, platform)
+  if (!ok) return null
+
+  // 最後に同期した (userId, token) 組を記録 (syncPushTokenIfGranted の差分判定用)
+  try {
+    await AsyncStorage.setItem(LAST_SYNCED_PUSH_TOKEN_KEY, `${userId}:${token}`)
+  } catch (err) {
+    if (__DEV__) console.warn('[pushNotifications] setItem last-synced failed', err)
+  }
+
+  return token
+}
+
+// push_tokens upsert の共通ロジック。成功=true / 失敗=false。
+async function upsertPushToken(
+  userId: string,
+  token: string,
+  platform: Platform_
+): Promise<boolean> {
   try {
     const { error } = await supabase.from('push_tokens').upsert(
       {
@@ -128,14 +152,116 @@ export async function registerForPushNotificationsAsync(
     )
     if (error != null) {
       console.warn('[pushNotifications] upsert push_tokens failed', error)
-      return null
+      return false
     }
+    return true
   } catch (err) {
     console.warn('[pushNotifications] upsert push_tokens exception', err)
-    return null
+    return false
+  }
+}
+
+/**
+ * ★起動時/フォアグラウンド復帰時のトークン同期 (サイレント)。
+ *
+ * 通知権限が既に granted の場合のみ、Expo Push Token を取得して push_tokens へ upsert する。
+ * ★未許可の場合は何もしない (OS ダイアログを出さない = pre-prompt の初回体験を壊さない・要件1)。
+ * ★前回同期した token と同じなら upsert をスキップ (毎起動のリモート呼び出しを避ける・要件3)。
+ *
+ * これにより「再インストール / iOS のトークンローテーション / 後から設定で許可」でも、
+ * 起動時にトークンが更新され、サイレント通知不達を防ぐ。
+ *
+ * 失敗時は throw せず、__DEV__ でのみログを出す (要件5)。
+ */
+export async function syncPushTokenIfGranted(userId: string): Promise<void> {
+  if (Platform.OS === 'web' || !Device.isDevice) return
+  const platform = getCurrentPlatform()
+  if (platform == null) return
+
+  // (1) 権限が granted か「確認のみ」。requestPermissionsAsync は絶対に呼ばない。
+  try {
+    const { status } = await Notifications.getPermissionsAsync()
+    if (status !== 'granted') return
+  } catch (err) {
+    if (__DEV__) console.warn('[pushNotifications] getPermissions (sync) failed', err)
+    return
   }
 
-  return token
+  // (2) projectId
+  const projectId = getEasProjectId()
+  if (projectId == null) {
+    if (__DEV__) console.warn('[pushNotifications] projectId not found (sync)')
+    return
+  }
+
+  // (3) token 取得
+  let token: string
+  try {
+    const res = await Notifications.getExpoPushTokenAsync({ projectId })
+    token = res.data
+  } catch (err) {
+    if (__DEV__) console.warn('[pushNotifications] getExpoPushTokenAsync (sync) failed', err)
+    return
+  }
+
+  // (4) 前回同期の (userId, token) 組と同じなら skip (差分時のみ upsert・要件3)。
+  //   ★キーに userId を含めるのが重要: 同一端末で A→ログアウト→B とログインし直した時、
+  //     token は同じでも userId が変わるので upsert が走り、B の行が作られる (③の複数アカウント)。
+  const syncedMarker = `${userId}:${token}`
+  try {
+    const last = await AsyncStorage.getItem(LAST_SYNCED_PUSH_TOKEN_KEY)
+    if (last === syncedMarker) return
+  } catch (err) {
+    if (__DEV__) console.warn('[pushNotifications] getItem last-synced failed', err)
+    // 読めない場合は安全側で upsert に進む (二重でも upsert は冪等)
+  }
+
+  // (5) upsert + 記録
+  const ok = await upsertPushToken(userId, token, platform)
+  if (!ok) {
+    if (__DEV__) console.warn('[pushNotifications] sync upsert failed for user', userId)
+    return
+  }
+  try {
+    await AsyncStorage.setItem(LAST_SYNCED_PUSH_TOKEN_KEY, syncedMarker)
+  } catch (err) {
+    if (__DEV__) console.warn('[pushNotifications] setItem last-synced (sync) failed', err)
+  }
+  if (__DEV__) console.log('[pushNotifications] push token synced for user', userId)
+}
+
+/**
+ * ★Expo のトークン変更リスナー登録 (要件4: 採用)。
+ *
+ * addPushTokenListener は OS がトークンをローテーションした瞬間に発火する。
+ * 起動時 sync だけだと「起動中にローテーションした」ケースを取りこぼすため併用する。
+ * granted 前提のイベントだが、念のため upsert 前に権限は確認しない
+ * (発火時点で既に token が発行されている = 許可済み)。
+ *
+ * 戻り値: subscription (呼出側で remove する)。
+ */
+export function addPushTokenRotationListener(
+  userId: string
+): Notifications.Subscription {
+  return Notifications.addPushTokenListener((tokenData) => {
+    const token = tokenData.data
+    if (typeof token !== 'string' || token === '') return
+    const platform = getCurrentPlatform()
+    if (platform == null) return
+    void (async () => {
+      const ok = await upsertPushToken(userId, token, platform)
+      if (ok) {
+        try {
+          await AsyncStorage.setItem(LAST_SYNCED_PUSH_TOKEN_KEY, `${userId}:${token}`)
+        } catch (err) {
+          if (__DEV__) console.warn('[pushNotifications] rotation setItem failed', err)
+        }
+        if (__DEV__) console.log('[pushNotifications] push token rotated & synced')
+      } else if (__DEV__) {
+        console.warn('[pushNotifications] rotation upsert failed')
+      }
+    })()
+  })
 }
 
 /**

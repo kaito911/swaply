@@ -75,6 +75,9 @@ export default function HowToUseScreen() {
           <P>② 相手が承認すると交換成立</P>
           <P>③ お互いに発送する（郵送の場合、住所は交換成立後に相手へ共有されます）</P>
           <P>④ 受け取ったら「受取確認」→ 取引完了</P>
+          <P style={styles.note}>
+            ※送料は、送る側が負担します（元払い）。着払い・代金引換は利用できません。
+          </P>
         </Section>
 
         <Section title="会場モードとは">

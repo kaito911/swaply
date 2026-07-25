@@ -756,9 +756,12 @@ async function handleOfferUpdate(
     body = '交換が成立しました。取引の画面を確認しましょう'
     notifType = 'offer_accepted'
   } else if (newStatus === 'declined') {
-    // ★修正F: 子 offer (parent_offer_id = この offer.id) が存在すればカウンター → 通知しない。
-    //   counterOffer は「子INSERT → 親decline」順に変更 (Phase 3) するため、
-    //   この decline webhook 到達時点で子は既に存在する。
+    // カウンター提案は未実装（offer/counter.tsx は到達不能な残骸）。
+    // この判定は常に0件となり、declined は常に純粋辞退として通知される。
+    // カウンターUIを将来実装する場合にのみ意味を持つ。
+    // ─────────────────────────────────────────
+    // ★修正F(残置): 子 offer (parent_offer_id = この offer.id) が存在すればカウンター扱いで
+    //   通知しない。現状カウンターUIが無いため子は生成されず、常に純粋辞退として下へ進む。
     const { data: childRows, error: childErr } = await adminClient()
       .from('offers')
       .select('id')

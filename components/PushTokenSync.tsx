@@ -37,7 +37,10 @@ export function PushTokenSync() {
     if (userId == null) return
 
     // 起動時 / userId 確定時に 1 回同期。
-    void syncPushTokenIfGranted(userId)
+    // ★force:true — marker を無視して必ず upsert し、DB 行の存在を保証する。
+    //   サーバ側で token 行が削除された (DeviceNotRegistered 自動削除等) 場合でも、
+    //   コールドスタートで自己修復させる (Option B)。低頻度なのでコスト微小。
+    void syncPushTokenIfGranted(userId, { force: true })
 
     // トークンローテーションのリスナー登録。
     const rotationSub: Subscription = addPushTokenRotationListener(userId)

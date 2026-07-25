@@ -186,7 +186,10 @@ async function upsertPushToken(
  *
  * 失敗時は throw せず、__DEV__ でのみログを出す (要件5)。
  */
-export async function syncPushTokenIfGranted(userId: string): Promise<void> {
+export async function syncPushTokenIfGranted(
+  userId: string,
+  options?: { force?: boolean }
+): Promise<void> {
   if (Platform.OS === 'web' || !Device.isDevice) return
   const platform = getCurrentPlatform()
   if (platform == null) return
@@ -220,13 +223,21 @@ export async function syncPushTokenIfGranted(userId: string): Promise<void> {
   // (4) 前回同期の (userId, token) 組と同じなら skip (差分時のみ upsert・要件3)。
   //   ★キーに userId を含めるのが重要: 同一端末で A→ログアウト→B とログインし直した時、
   //     token は同じでも userId が変わるので upsert が走り、B の行が作られる (③の複数アカウント)。
+  //   ★force=true の時は skip しない (Option B): marker は「DB 行が存在する」ことの
+  //     ローカル代用に過ぎず、DeviceNotRegistered 等でサーバ側から token 行が削除されると
+  //     marker だけが残り、token 文字列が同じなら永久に再登録されない欠陥がある。
+  //     コールドスタート時 (呼出側で force:true) は marker を無視し必ず upsert して
+  //     DB 行の存在を保証する (upsert は冪等・コールドスタートは低頻度でコスト微小)。
+  //     フォアグラウンド復帰は force なしで marker により無駄な write を抑制する。
   const syncedMarker = `${userId}:${token}`
-  try {
-    const last = await AsyncStorage.getItem(LAST_SYNCED_PUSH_TOKEN_KEY)
-    if (last === syncedMarker) return
-  } catch (err) {
-    if (__DEV__) console.warn('[pushNotifications] getItem last-synced failed', err)
-    // 読めない場合は安全側で upsert に進む (二重でも upsert は冪等)
+  if (options?.force !== true) {
+    try {
+      const last = await AsyncStorage.getItem(LAST_SYNCED_PUSH_TOKEN_KEY)
+      if (last === syncedMarker) return
+    } catch (err) {
+      if (__DEV__) console.warn('[pushNotifications] getItem last-synced failed', err)
+      // 読めない場合は安全側で upsert に進む (二重でも upsert は冪等)
+    }
   }
 
   // (5) upsert + 記録

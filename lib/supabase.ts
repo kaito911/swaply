@@ -28,6 +28,9 @@ import {
   VenueTradeMessage,
   VenueTradeRead,
   VenueTradeUnreadCountRow,
+  TradeMessage,
+  SendTradeMessageResult,
+  TradeUnreadCountRow,
   WantedCard,
   WantMatchScore,
 } from './types'
@@ -3478,6 +3481,96 @@ export async function fetchVenueTradeUnreadCounts(): Promise<Map<string, number>
 
   const result = new Map<string, number>()
   for (const row of (data ?? []) as VenueTradeUnreadCountRow[]) {
+    if (row.trade_id != null) {
+      result.set(row.trade_id, Number(row.unread_count) || 0)
+    }
+  }
+  return result
+}
+
+// ─────────────────────────────────────────
+// 取引 DM (trade_messages / trade_reads) — PR-DM
+//   会場 DM と同型だが列名 sender_user_id / RPC は trade 版。
+//   全 RPC は auth.uid() 前提で p_user_id を送らない (RLS/participant はサーバ側)。
+// ─────────────────────────────────────────
+
+/** 取引スレッドのメッセージ全件を時系列で取得 (RLS で participant 以外 0 行)。 */
+export async function fetchTradeMessages(tradeId: string): Promise<TradeMessage[]> {
+  const { data, error } = await supabase
+    .from('trade_messages')
+    .select('id, trade_id, sender_user_id, kind, body, system_event, created_at')
+    .eq('trade_id', tradeId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    console.error('[fetchTradeMessages]', error)
+    throw error
+  }
+  return (data ?? []) as TradeMessage[]
+}
+
+/**
+ * 取引 DM のユーザ送信。RPC send_trade_message(p_trade_id, p_body)。
+ * ★戻り値は json { message, cod_warning }。cod_warning=true のとき送信は通しつつ
+ *   呼び出し側が「元払いのみ」警告ポップアップを出す。
+ * raise exception: AUTH_REQUIRED / BODY_EMPTY / BODY_TOO_LONG / TRADE_NOT_FOUND /
+ *   NOT_PARTICIPANT / SEND_WINDOW_CLOSED / MESSAGE_BLOCKED:<category>
+ * ※禁止ワード検知はサーバ側 detect_blocked_category が唯一の源。JS 側で再実装しない。
+ */
+export async function sendTradeMessage(
+  tradeId: string,
+  body: string
+): Promise<SendTradeMessageResult> {
+  const { data, error } = await supabase.rpc('send_trade_message', {
+    p_trade_id: tradeId,
+    p_body: body,
+  })
+
+  if (error) throw error
+  if (data == null) {
+    throw new Error('NO_MESSAGE_RETURNED')
+  }
+
+  const row = data as { message?: unknown; cod_warning?: unknown }
+  if (row.message == null) {
+    throw new Error('NO_MESSAGE_RETURNED')
+  }
+  return {
+    message: row.message as TradeMessage,
+    cod_warning: row.cod_warning === true,
+  }
+}
+
+/** 取引 DM の既読位置 (last_read_at) を now() で upsert。RPC mark_trade_thread_read(p_trade_id)。 */
+export async function markTradeThreadRead(tradeId: string): Promise<void> {
+  const { error } = await supabase.rpc('mark_trade_thread_read', {
+    p_trade_id: tradeId,
+  })
+  if (error) throw error
+}
+
+/** 指定取引の未読メッセージ数 (自分宛・自分が送っていない user メッセージ)。 */
+export async function fetchTradeUnreadCount(tradeId: string): Promise<number> {
+  const { data, error } = await supabase.rpc('get_trade_unread_count', {
+    p_trade_id: tradeId,
+  })
+  if (error) {
+    console.error('[fetchTradeUnreadCount]', error)
+    throw error
+  }
+  if (typeof data !== 'number') return 0
+  return data
+}
+
+/** per-trade 未読数を一括取得 (N+1 回避)。戻り値は Map<trade_id, unread_count>。 */
+export async function fetchTradeUnreadCounts(): Promise<Map<string, number>> {
+  const { data, error } = await supabase.rpc('get_trade_unread_counts')
+  if (error) {
+    console.error('[fetchTradeUnreadCounts]', error)
+    throw error
+  }
+  const result = new Map<string, number>()
+  for (const row of (data ?? []) as TradeUnreadCountRow[]) {
     if (row.trade_id != null) {
       result.set(row.trade_id, Number(row.unread_count) || 0)
     }

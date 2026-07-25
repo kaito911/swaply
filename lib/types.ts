@@ -527,6 +527,39 @@ export interface VenueTradeUnreadCountRow {
   unread_count: number
 }
 
+// ─────────────────────────────────────────
+// trade_messages / trade_reads (PR-DM: 通常取引専用 DM)
+//   会場 DM(venue_trade_messages) と同型だが列名が sender_user_id (venue は sender_id)。
+//   送受信は send_trade_message / mark_trade_thread_read / get_trade_unread_count(s) RPC。
+// ─────────────────────────────────────────
+
+export type TradeMessageKind = 'user' | 'system'
+
+export interface TradeMessage {
+  id: string
+  trade_id: string
+  // kind='system' のとき null (CHECK: tm_user_has_sender / tm_system_no_sender)。
+  sender_user_id: string | null
+  kind: TradeMessageKind
+  body: string
+  // kind='system' のときのみ非 NULL。
+  system_event: string | null
+  created_at: string
+}
+
+// send_trade_message RPC の戻り値 (json)。cod_warning=true のとき、送信は通しつつ
+// クライアントが「元払いのみ」の警告ポップアップを出す (禁止ワード階層 cod)。
+export interface SendTradeMessageResult {
+  message: TradeMessage
+  cod_warning: boolean
+}
+
+// get_trade_unread_counts RPC が返す per-trade 未読数 1 行。
+export interface TradeUnreadCountRow {
+  trade_id: string
+  unread_count: number
+}
+
 /**
  * 求カード (want) との一致度スコア。
  * - strong: 単独出品で完全一致 (v2) / 全 3 軸完全一致 (v1)

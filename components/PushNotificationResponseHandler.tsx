@@ -49,6 +49,14 @@ const UUID_RE =
 // '/venue/trade/<id>' を切り出すパターン。クエリ / フラグメントは含めない。
 const VENUE_TRADE_RE = /^\/venue\/trade\/([^/?#]+)$/
 
+// PR-DM: 通常取引の deep-link。
+//   '/offer/<id>'            … 提案詳細 (offer_created/accepted/declined/counter)
+//   '/trade/<offerId>'       … 取引詳細 (trade_cancelled/shipment_shipped)
+//   '/trade/<offerId>/dm'    … 取引DM (trade_message)
+const OFFER_RE = /^\/offer\/([^/?#]+)$/
+const TRADE_DETAIL_RE = /^\/trade\/([^/?#]+)$/
+const TRADE_DM_RE = /^\/trade\/([^/?#]+)\/dm$/
+
 // 通知 payload `data.route` から、許可された route のみを返す。
 // 不正 / 不明 / 外部 URL / UUID 形式不正は null。
 function resolveSafeRoute(data: unknown): string | null {
@@ -57,9 +65,19 @@ function resolveSafeRoute(data: unknown): string | null {
   if (typeof route !== 'string' || route === '') return null
 
   if (route === '/venue-tab') return route
+  if (route === '/trades') return route
 
-  const m = route.match(VENUE_TRADE_RE)
-  if (m != null && UUID_RE.test(m[1])) return route
+  const venueTrade = route.match(VENUE_TRADE_RE)
+  if (venueTrade != null && UUID_RE.test(venueTrade[1])) return route
+
+  const offer = route.match(OFFER_RE)
+  if (offer != null && UUID_RE.test(offer[1])) return route
+
+  const tradeDm = route.match(TRADE_DM_RE)
+  if (tradeDm != null && UUID_RE.test(tradeDm[1])) return route
+
+  const tradeDetail = route.match(TRADE_DETAIL_RE)
+  if (tradeDetail != null && UUID_RE.test(tradeDetail[1])) return route
 
   return null
 }

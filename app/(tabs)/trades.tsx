@@ -140,6 +140,19 @@ export default function ProposeScreen() {
     )
   }, [offers, userId])
 
+  // 受信 pending を「対象商品 (target_card_id) ごと」に件数集計。
+  //   承認時に v3 が同一商品の競合 pending を自動 declined にするため、
+  //   「他に N 件の提案がある」注記と承認 Alert の警告に使う (最小案・DB変更なし)。
+  const receivedCountByCard = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const o of receivedOffers) {
+      const cid = o.target_card?.id
+      if (cid == null) continue
+      m.set(cid, (m.get(cid) ?? 0) + 1)
+    }
+    return m
+  }, [receivedOffers])
+
   // 取引中タブ: trade が動いているもの、または accepted 直後で trade 未生成のもの
   const inProgressOffers = useMemo(() => {
     return offers.filter((offer) => {
@@ -165,10 +178,16 @@ export default function ProposeScreen() {
   }, [activeTab, proposalSubTab, receivedOffers, sentOffers, inProgressOffers])
 
   const handleAccept = useCallback(
-    (offerId: string) => {
+    // otherCount = 同じ商品に来ている「この提案以外」の受信 pending 件数。
+    //   >0 のとき、承認で自動辞退される旨を Alert 本文で予告する (驚き防止・最小案)。
+    (offerId: string, otherCount = 0) => {
+      const body =
+        otherCount > 0
+          ? `承認すると、同じ商品への他の ${otherCount} 件の提案は自動的に辞退されます。`
+          : '承認すると取引が開始され、進行中タブで発送と受取確認を管理できます。'
       Alert.alert(
-        '提案を承認しますか？',
-        '承認すると取引が開始され、進行中タブで発送と受取確認を管理できます。',
+        'この提案を承認しますか？',
+        body,
         [
           { text: 'キャンセル', style: 'cancel' },
           {
@@ -519,6 +538,20 @@ export default function ProposeScreen() {
                 </View>
               ) : isPendingReceived ? (
                 <View style={{ gap: 8 }}>
+                  {/* 同じ商品への他の受信 pending 件数 (この提案を除く)。>0 で注記。 */}
+                  {(() => {
+                    const cid = offer.target_card?.id
+                    const others =
+                      cid != null ? (receivedCountByCard.get(cid) ?? 1) - 1 : 0
+                    if (others <= 0) return null
+                    return (
+                      <View style={styles.competingNote}>
+                        <Text style={styles.competingNoteText}>
+                          この商品には他に {others} 件の提案があります
+                        </Text>
+                      </View>
+                    )
+                  })()}
                   <View style={styles.buttonRow}>
                     <Pressable
                       style={[
@@ -539,7 +572,12 @@ export default function ProposeScreen() {
                         isActing && styles.disabledButton,
                       ]}
                       disabled={isActing}
-                      onPress={() => handleAccept(offer.id)}
+                      onPress={() => {
+                        const cid = offer.target_card?.id
+                        const others =
+                          cid != null ? (receivedCountByCard.get(cid) ?? 1) - 1 : 0
+                        handleAccept(offer.id, Math.max(0, others))
+                      }}
                     >
                       <Text style={styles.primaryButtonText}>
                         {isActing ? '処理中...' : '承認'}
@@ -782,8 +820,9 @@ function getInProgressBadgeLabel(
   if (tradeStatus === 'in_transit') return '配送中'
   if (tradeStatus === 'partially_received') return '一部到着済'
   if (tradeStatus === 'disputed') return '確認が必要です'
-  if (tradeStatus) return TRADE_STATUS_LABELS[tradeStatus]
-  return OFFER_STATUS_LABELS[offerStatus]
+  // 修正G: 未知の status でも生値/undefined を出さない。ラベル辞書に無ければ安全な既定文言。
+  if (tradeStatus) return TRADE_STATUS_LABELS[tradeStatus] ?? '進行中'
+  return OFFER_STATUS_LABELS[offerStatus] ?? '進行中'
 }
 
 function getFooterNote(
@@ -1244,6 +1283,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: '#71717A',
+  },
+  // 同一商品に複数提案がある時の注記 (承認で他が自動辞退される予告)
+  competingNote: {
+    backgroundColor: colors.backgroundMuted,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  competingNoteText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textSecondary,
   },
   counterButton: {
     height: 44,

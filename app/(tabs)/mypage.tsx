@@ -289,7 +289,10 @@ export default function MyPageScreen() {
             tradeStatus === 'completed' ? '完了' :
             tradeStatus === 'cancelled' ? 'キャンセル' :
             offer.status === 'accepted' ? '進行中' :
-            offer.status === 'declined' ? '辞退' : offer.status
+            offer.status === 'declined' ? '辞退' :
+            offer.status === 'pending' ? '返答待ち' :
+            // 修正G: 未知の status でも生の英単語を出さない
+            '—'
 
           const statusColor =
             statusLabel === '完了' ? colors.success :

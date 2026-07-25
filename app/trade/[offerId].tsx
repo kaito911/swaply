@@ -10,6 +10,7 @@ import {
     type ShippingMethod,
 } from '@/lib/supabase'
 import { useAuthContext } from '@/providers/AuthProvider'
+import { useBadge } from '@/providers/BadgeProvider'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
@@ -349,6 +350,8 @@ function ShipmentBox({
 export default function TradeDetailScreen() {
   const { offerId } = useLocalSearchParams<{ offerId: string }>()
   const { session } = useAuthContext()
+  // PR-DM b-3 ④: この取引の DM 未読数 (Context の Map から読むだけ・個別 fetch しない)。
+  const { tradeUnreadCounts } = useBadge()
 
   const currentUserId = session?.user?.id ?? null
 
@@ -715,12 +718,25 @@ export default function TradeDetailScreen() {
             {getDisplayName(counterpartProfile)} との取引
           </Text>
 
-          {/* PR-DM b-2: 取引DMへの導線。/dm/<offerId> を開く (通知の飛び先は /trade のまま)。 */}
+          {/* PR-DM b-2: 取引DMへの導線。/dm/<offerId> を開く (通知の飛び先は /trade のまま)。
+              b-3 ④: この取引の DM 未読数を Context の Map から読んでバッジ表示。 */}
           <Pressable
             style={styles.dmButton}
             onPress={() => router.push(`/dm/${offerId}` as never)}
           >
             <Text style={styles.dmButtonText}>メッセージ</Text>
+            {(() => {
+              const dmUnread =
+                trade?.id != null ? tradeUnreadCounts.get(trade.id) ?? 0 : 0
+              if (dmUnread <= 0) return null
+              return (
+                <View style={styles.dmButtonBadge}>
+                  <Text style={styles.dmButtonBadgeText}>
+                    {dmUnread > 99 ? '99+' : String(dmUnread)}
+                  </Text>
+                </View>
+              )
+            })()}
           </Pressable>
 
           {uiState === 'waiting_my_ship' && deadlineText !== '' && (
@@ -1193,19 +1209,36 @@ const styles = StyleSheet.create({
   dmButton: {
     marginTop: 10,
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 16,
     height: 36,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#1F2A52',
     backgroundColor: '#FFFFFF',
-    alignItems: 'center',
     justifyContent: 'center',
   },
   dmButtonText: {
     fontSize: 14,
     fontWeight: '700',
     color: '#1F2A52',
+  },
+  // b-3 ④: メッセージボタン上の DM 未読赤丸バッジ。
+  dmButtonBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dmButtonBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   deadlineText: {
     fontSize: 13,

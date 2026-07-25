@@ -75,7 +75,7 @@ type SimpleProfileLike = {
 
 export default function ProposeScreen() {
   const { session } = useAuthContext()
-  const { refreshBadge } = useBadge()
+  const { refreshBadge, tradeUnreadCounts } = useBadge()
 
   const [activeTab, setActiveTab] = useState<OfferTabKey>('proposal')
   const [proposalSubTab, setProposalSubTab] = useState<ProposalSubTabKey>('received')
@@ -119,7 +119,10 @@ export default function ProposeScreen() {
   useFocusEffect(
     useCallback(() => {
       void loadOffers()
-    }, [loadOffers])
+      // PR-DM b-3: フォーカス時に未読 Map も再取得 (③行バッジの鮮度)。
+      //   既存 Context の refreshBadge を呼ぶだけ (新規 fetcher/リスナーは足さない)。
+      void refreshBadge()
+    }, [loadOffers, refreshBadge])
   )
 
   // 提案サブタブ「届いた提案」: 自分が受信した pending
@@ -390,6 +393,13 @@ export default function ProposeScreen() {
           const badgeKey = tradeStatus ?? offer.status
           const badgeLabel = getInProgressBadgeLabel(tradeStatus, offer.status)
 
+          // PR-DM b-3 ③: この取引 (offer.trade.id = trade_id) の DM 未読数。
+          //   Context の Map から読むだけ (この画面で個別 fetch しない)。
+          //   trade が無い提案行は id=null → 0 で非表示。
+          const rowTradeId = offer.trade?.id ?? null
+          const rowUnread =
+            rowTradeId != null ? tradeUnreadCounts.get(rowTradeId) ?? 0 : 0
+
           return (
             <Pressable
               key={offer.id}
@@ -422,6 +432,15 @@ export default function ProposeScreen() {
                   </Text>
                   <Text style={styles.cardDate}>{formatDate(offer.created_at)}</Text>
                 </View>
+
+                {/* PR-DM b-3 ③: DM 未読バッジ (status バッジの手前・赤丸)。 */}
+                {rowUnread > 0 && (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>
+                      {rowUnread > 99 ? '99+' : String(rowUnread)}
+                    </Text>
+                  </View>
+                )}
 
                 <View
                   style={[
@@ -1108,6 +1127,22 @@ const styles = StyleSheet.create({
   statusBadgeText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  // PR-DM b-3 ③: DM 未読赤丸バッジ (BottomTabBar / HeaderActions と視覚を揃える)。
+  unreadBadge: {
+    alignSelf: 'flex-start',
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   statusPendingBadge: {
     backgroundColor: colors.tagInfoBg,

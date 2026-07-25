@@ -61,8 +61,12 @@ const TABS: VisibleTab[] = [
 
 export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const { bottom: insetBottom } = useSafeAreaInsets()
-  const { pendingOfferCount, receivedHoldCount, venueTradeUnreadCount } =
-    useBadge()
+  const {
+    pendingOfferCount,
+    receivedHoldCount,
+    venueTradeUnreadCount,
+    tradeUnreadTotal,
+  } = useBadge()
   const currentRouteName = state.routes[state.index]?.name ?? ''
   // 会場タブ在席時だけタブバーを暗地(会場背景と同値 VENUE_DARK)になじませる。他タブは白のまま。
   //   スナップ切替 (案1)。iOS26 glass 無縁 (自前 View)。
@@ -97,11 +101,12 @@ export function CustomTabBar({ state, navigation }: BottomTabBarProps) {
     }
 
     // PR2: trades タブは pending offer。
+    // PR-DM b-3: trades タブに通常取引 DM 未読の合計も合算 (「取引タブに何か来た」を一括表示)。
     // PR5: venue タブは受信 Hold + venue_trade DM 未読の合算。二重バッジにはしない。
     // submit (action タブ) はバッジなし → 0。
     const badgeCount =
       tab.name === 'trades'
-        ? pendingOfferCount
+        ? pendingOfferCount + tradeUnreadTotal
         : tab.name === 'venue-tab'
         ? receivedHoldCount + venueTradeUnreadCount
         : 0

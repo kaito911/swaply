@@ -342,33 +342,24 @@ function easyScore(card: Card, myWants: WantedCard[]): number {
 
   let score = 0
 
-  // トラブルがある出品者は後方へ（完全除外ではなく減点。β初期はデータが荒いため）
-  if (owner.trouble_count > 0) score -= 50
+  // ★Trust 統計 (trouble_count / ship_rate / reply_median_hours / trade_count) は
+  //   easyScore から除去した (タスクC)。理由:
+  //   (1) これらの列を更新する経路が本番に存在せず seed 固定の死んだ値であり
+  //       (trade_count=0 かつ ship_rate=100 が多数=計算されていない証拠)、順位を
+  //       最大 ±70 動かして「成立しやすさ」と無関係な並びを作っていた。
+  //   (2) 方針 #22「β1 は指標反映なし」に違反 (特に trouble_count は trade_reports
+  //       由来の申告データを閾値設計をバイパスして生反映していた)。
+  //   順位は下記の求一致度 (scoreWantMatchV2) のみで決まる。
+  //
+  // ★last_active_at 分岐 (<24h/<72h/<168h) も除去した (タスクC 追補)。理由:
+  //   last_active_at も更新経路が本番に無く seed 固定 (全員 NULL または 2026-05-31、
+  //   直近7日以内に動いた人は0/14)。全員が 168h 超で分岐が1度も発火しない死にコード
+  //   だったため、除去しても順位は変わらない。
+  //   結果: easyScore は求一致度のみ。求リスト登録者は一致度で順位化、未登録者は
+  //   全カード同点 → 安定ソートで created_at desc (新着順) に縮退する。
+  //   「成立しやすい交換 = 求の一致度」となり、レーン名と実装が一致する。
 
-  // 発送遵守率（最重要: 実際に物が届くかの指標）
-  if (owner.ship_rate >= 95) score += 30
-  else if (owner.ship_rate >= 90) score += 15
-
-  // 返信速度（アクティブ度の代理指標）
-  if (owner.reply_median_hours <= 12) score += 20
-  else if (owner.reply_median_hours <= 24) score += 10
-  else if (owner.reply_median_hours <= 72) score += 5
-
-  // 成立件数（初心者も排除しない: 0件でもスコア減点なし）
-  if (owner.trade_count >= 50) score += 20
-  else if (owner.trade_count >= 10) score += 15
-  else if (owner.trade_count >= 3) score += 10
-
-  // 直近アクティブ（最近ログインしている出品者は返答可能性が高い）
-  if (owner.last_active_at != null) {
-    const diffHours =
-      (Date.now() - new Date(owner.last_active_at).getTime()) / 3_600_000
-    if (diffHours < 24) score += 25
-    else if (diffHours < 72) score += 15
-    else if (diffHours < 168) score += 5
-  }
-
-  // ★ Step 3 commit 3: scoreWantMatchV2 (any-overlap + overlap 数重み付け)
+  // 求一致度 (scoreWantMatchV2: any-overlap + overlap 数重み付け)
   // characters[] 空 → wantParserMatcher v1 fallback (legacy K-POP 用、本ファイル import 不要、v2 内で委譲)
   const bestMatch = myWants.reduce<WantMatchScore>((best, want) => {
     const s = scoreWantMatchV2(card, want)

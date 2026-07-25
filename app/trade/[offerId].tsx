@@ -715,6 +715,14 @@ export default function TradeDetailScreen() {
             {getDisplayName(counterpartProfile)} との取引
           </Text>
 
+          {/* PR-DM b-2: 取引DMへの導線。/dm/<offerId> を開く (通知の飛び先は /trade のまま)。 */}
+          <Pressable
+            style={styles.dmButton}
+            onPress={() => router.push(`/dm/${offerId}` as never)}
+          >
+            <Text style={styles.dmButtonText}>メッセージ</Text>
+          </Pressable>
+
           {uiState === 'waiting_my_ship' && deadlineText !== '' && (
             <Text style={[styles.deadlineText, isDeadlinePast && styles.deadlineTextExpired]}>
               {deadlineText}
@@ -1180,6 +1188,24 @@ const styles = StyleSheet.create({
   counterpartLabel: {
     fontSize: 14,
     color: '#71717A',
+  },
+  // PR-DM b-2: 取引DM導線ボタン (控えめな outlined pill・主アクションと競合させない)。
+  dmButton: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 16,
+    height: 36,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1F2A52',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dmButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1F2A52',
   },
   deadlineText: {
     fontSize: 13,

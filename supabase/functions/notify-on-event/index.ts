@@ -38,13 +38,13 @@
 //            (申請取り下げと拒否は両方とも NOT NULL→NULL の遷移だが、申請者本人の取り下げ
 //             を通知するのは騒がしいので、拒否時のみ通知する。申請者と取り下げ者の id を
 //             比較できれば理想だが、Webhook record だけからは取り下げ者が分からない。
---             代替として『応答 RPC は申請者以外しか呼べない』というガード性質を利用し、
---             new_record.cancel_requested_by が NULL かつ old.cancel_requested_by が
---             受信者以外を含む = 申請者以外による NULL 化 = 拒否扱いとして通知する。
---             ただし取り下げと拒否を Edge 側で正確に分離するのは難しいため、本 PR では
---             status='cancelled' でない NOT NULL→NULL 遷移を「拒否」と一律扱う。
---             取り下げ通知が混じる場合があるが、申請者自身に「拒否通知」が誤って届くと UX が
---             悪いので、recipient = 元 cancel_requested_by に限定して通知する。)
+//             代替として『応答 RPC は申請者以外しか呼べない』というガード性質を利用し、
+//             new_record.cancel_requested_by が NULL かつ old.cancel_requested_by が
+//             受信者以外を含む = 申請者以外による NULL 化 = 拒否扱いとして通知する。
+//             ただし取り下げと拒否を Edge 側で正確に分離するのは難しいため、本 PR では
+//             status='cancelled' でない NOT NULL→NULL 遷移を「拒否」と一律扱う。
+//             取り下げ通知が混じる場合があるが、申請者自身に「拒否通知」が誤って届くと UX が
+//             悪いので、recipient = 元 cancel_requested_by に限定して通知する。)
 //            通知先: old_record.cancel_requested_by (= 元の申請者)
 //            title: 'キャンセルが拒否されました'
 //            body : '相手がキャンセルを拒否しました。取引は継続中です。'
@@ -129,6 +129,45 @@ type VenueTradeRecord = {
   cancel_requested_by?: string | null
 }
 
+// PR-DM: trade_messages の record (INSERT で参照する列のみ)
+type TradeMessageRecord = {
+  id?: string
+  trade_id?: string
+  sender_user_id?: string | null
+  kind?: string
+}
+
+// PR-DM: offers の record / old_record (INSERT / UPDATE で参照する列のみ)。
+//   受け手は offers に列が無く target_card_id → cards.owner_user_id で解決する。
+type OfferRecord = {
+  id?: string
+  proposer_user_id?: string
+  target_card_id?: string
+  status?: string
+  parent_offer_id?: string | null
+}
+
+// PR-DM: trades の record / old_record (UPDATE で参照する列のみ)。
+//   offer_id: /trade/[offerId] を開くための deep-link 用 (修正C)。
+//   cancelled_by: キャンセル実行者。実行者を通知先から除外する (修正A、K が列追加+RPC変更を実行)。
+type TradeRecord = {
+  id?: string
+  offer_id?: string
+  proposer_user_id?: string
+  receiver_user_id?: string
+  status?: string
+  cancelled_by?: string | null
+}
+
+// PR-DM: shipments の record / old_record (UPDATE で参照する列のみ)。
+//   shipments.user_id = 発送者。通知先は「発送者でない側」の trade participant。
+type ShipmentRecord = {
+  id?: string
+  trade_id?: string
+  user_id?: string
+  status?: string
+}
+
 // send-push に渡す payload 形
 type SendPushPayload = {
   user_id: string
@@ -181,11 +220,15 @@ Deno.serve(async (req) => {
   const eventType = typeof payload.type === 'string' ? payload.type : null
   const table = typeof payload.table === 'string' ? payload.table : null
 
-  // PR-5: venue_trades UPDATE もキャンセル申請モデルで使うため、INSERT に加えて
-  // 'venue_trades' の UPDATE のみ通す。それ以外の UPDATE/DELETE は 200 skip。
+  // INSERT は全 table 通す。UPDATE は venue_trades / offers / trades / shipments のみ通す
+  // (PR-5 キャンセル申請 + PR-DM 提案承認/辞退・取引キャンセル・発送)。他 UPDATE/DELETE は 200 skip。
   const isHandledEvent =
     eventType === 'INSERT' ||
-    (eventType === 'UPDATE' && table === 'venue_trades')
+    (eventType === 'UPDATE' &&
+      (table === 'venue_trades' ||
+        table === 'offers' ||
+        table === 'trades' ||
+        table === 'shipments'))
   if (!isHandledEvent) {
     return jsonResponse(200, { ok: true, skipped: 'NOT_HANDLED_EVENT' })
   }
@@ -201,6 +244,29 @@ Deno.serve(async (req) => {
   }
   if (eventType === 'UPDATE' && table === 'venue_trades') {
     return await handleVenueTradeUpdate(payload.record, payload.old_record)
+  }
+  // PR-DM: 会場 Hold 承認 = venue_trades INSERT (前監査 S1 の成立通知欠落を解消)
+  if (eventType === 'INSERT' && table === 'venue_trades') {
+    return await handleVenueTradeInsert(payload.record)
+  }
+  // PR-DM: 取引 DM
+  if (eventType === 'INSERT' && table === 'trade_messages') {
+    return await handleTradeMessageInsert(payload.record)
+  }
+  // PR-DM: 提案作成 (新規 / カウンター) と 承認 / 辞退
+  if (eventType === 'INSERT' && table === 'offers') {
+    return await handleOfferInsert(payload.record)
+  }
+  if (eventType === 'UPDATE' && table === 'offers') {
+    return await handleOfferUpdate(payload.record, payload.old_record)
+  }
+  // PR-DM: 取引キャンセル (一方的確定 = 通知が唯一の痕跡)
+  if (eventType === 'UPDATE' && table === 'trades') {
+    return await handleTradeUpdate(payload.record, payload.old_record)
+  }
+  // PR-DM: 発送
+  if (eventType === 'UPDATE' && table === 'shipments') {
+    return await handleShipmentUpdate(payload.record, payload.old_record)
   }
 
   // 不明 table は skip (Webhook retry させない)
@@ -486,6 +552,431 @@ async function handleVenueTradeUpdate(
 
   // その他の UPDATE (確定 / status='cancelled' への遷移 等) は skip。
   return jsonResponse(200, { ok: true, skipped: 'NO_CANCEL_TRANSITION' })
+}
+
+// service_role クライアント (RLS bypass、participant 取得等に使用) を都度生成する共通 helper。
+function adminClient() {
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  })
+}
+
+// ─────────────────────────────────────────
+// (D) trade_messages INSERT ハンドラ (取引 DM)
+//   通知先: trades の participants のうち sender 以外
+//   skip: kind !== 'user' / sender/trade_id 不在 / sender が participant でない
+//   body: 固定文 (本文プレビュー無し、会場 DM に揃える)
+//   route: '/trade/dm/<trade_id>' (アプリ側 Phase 3 で新設する DM 画面)
+// ─────────────────────────────────────────
+async function handleTradeMessageInsert(recordRaw: unknown): Promise<Response> {
+  if (recordRaw == null || typeof recordRaw !== 'object') {
+    return jsonResponse(200, { ok: true, skipped: 'NO_RECORD' })
+  }
+  const record = recordRaw as TradeMessageRecord
+  const kind = typeof record.kind === 'string' ? record.kind : null
+  const senderId =
+    typeof record.sender_user_id === 'string' ? record.sender_user_id : null
+  const tradeId = typeof record.trade_id === 'string' ? record.trade_id : null
+
+  if (kind !== 'user') {
+    return jsonResponse(200, { ok: true, skipped: 'KIND_NOT_USER' })
+  }
+  if (senderId == null || senderId === '') {
+    return jsonResponse(200, { ok: true, skipped: 'MISSING_SENDER_ID' })
+  }
+  if (tradeId == null || tradeId === '') {
+    return jsonResponse(200, { ok: true, skipped: 'MISSING_TRADE_ID' })
+  }
+
+  const { data: tradeRow, error } = await adminClient()
+    .from('trades')
+    .select('proposer_user_id, receiver_user_id, offer_id')
+    .eq('id', tradeId)
+    .maybeSingle()
+  if (error != null) {
+    console.error('[notify-on-event] trades select failed', error)
+    return jsonResponse(500, { error: 'LOOKUP_FAILED' })
+  }
+  if (tradeRow == null) {
+    console.error('[notify-on-event] trade not found', tradeId)
+    return jsonResponse(500, { error: 'TRADE_NOT_FOUND' })
+  }
+  const proposerId =
+    typeof tradeRow.proposer_user_id === 'string' ? tradeRow.proposer_user_id : null
+  const receiverId =
+    typeof tradeRow.receiver_user_id === 'string' ? tradeRow.receiver_user_id : null
+  const offerId =
+    typeof tradeRow.offer_id === 'string' ? tradeRow.offer_id : null
+  if (proposerId == null || receiverId == null) {
+    return jsonResponse(500, { error: 'TRADE_PARTICIPANTS_MISSING' })
+  }
+
+  let recipientId: string | null = null
+  if (senderId === proposerId) recipientId = receiverId
+  else if (senderId === receiverId) recipientId = proposerId
+  else {
+    console.error('[notify-on-event] sender not participant of trade', {
+      trade_id: tradeId,
+      sender: senderId,
+    })
+    return jsonResponse(200, { ok: true, skipped: 'SENDER_NOT_PARTICIPANT' })
+  }
+  if (recipientId === senderId) {
+    return jsonResponse(200, { ok: true, skipped: 'SELF_NOTIFY' })
+  }
+
+  // route は Phase 3 の DM 画面ルート確定後に合わせる。DM 画面が offer_id ベースなら
+  // /trade/<offer_id>、trade_id ベースなら別途調整。両 id を data に載せて Phase 3 側で選べるようにする。
+  const sendPushPayload: SendPushPayload = {
+    user_id: recipientId,
+    title: 'メッセージが届きました',
+    body: '取引の相手からメッセージが届きました',
+    data: {
+      type: 'trade_message',
+      route: offerId != null ? `/trade/${offerId}` : '/trades',
+      trade_id: tradeId,
+      offer_id: offerId ?? '',
+    },
+  }
+  return await invokeSendPush(sendPushPayload, 'trade_messages')
+}
+
+// ─────────────────────────────────────────
+// (E) offers INSERT ハンドラ (提案作成: 新規 / カウンター)
+//   通知先: 受け手 = target_card_id → cards.owner_user_id (offers に receiver 列なし)
+//   文面出し分け (案A 確定):
+//     parent_offer_id NULL   → '交換の提案が届きました'
+//     parent_offer_id 非NULL → '提案に返答がありました' (カウンター提案)
+//   route: '/offer/<offer_id>' (提案詳細)
+// ─────────────────────────────────────────
+async function handleOfferInsert(recordRaw: unknown): Promise<Response> {
+  if (recordRaw == null || typeof recordRaw !== 'object') {
+    return jsonResponse(200, { ok: true, skipped: 'NO_RECORD' })
+  }
+  const record = recordRaw as OfferRecord
+  const offerId = typeof record.id === 'string' ? record.id : null
+  const proposerId =
+    typeof record.proposer_user_id === 'string' ? record.proposer_user_id : null
+  const targetCardId =
+    typeof record.target_card_id === 'string' ? record.target_card_id : null
+  const isCounter =
+    typeof record.parent_offer_id === 'string' && record.parent_offer_id !== ''
+  const status = typeof record.status === 'string' ? record.status : null
+
+  // 提案作成時の status は 'pending'。counter で元 offer を declined にする UPDATE は
+  // handleOfferUpdate 側で扱う。INSERT では pending 以外は skip (防御的)。
+  if (status != null && status !== 'pending') {
+    return jsonResponse(200, { ok: true, skipped: 'STATUS_NOT_PENDING' })
+  }
+  if (offerId == null || proposerId == null || targetCardId == null) {
+    return jsonResponse(200, { ok: true, skipped: 'MISSING_FIELDS' })
+  }
+
+  // 受け手 = target_card の owner
+  const { data: cardRow, error } = await adminClient()
+    .from('cards')
+    .select('owner_user_id')
+    .eq('id', targetCardId)
+    .maybeSingle()
+  if (error != null) {
+    console.error('[notify-on-event] cards select failed', error)
+    return jsonResponse(500, { error: 'LOOKUP_FAILED' })
+  }
+  if (cardRow == null) {
+    console.error('[notify-on-event] target card not found', targetCardId)
+    return jsonResponse(500, { error: 'CARD_NOT_FOUND' })
+  }
+  const receiverId =
+    typeof cardRow.owner_user_id === 'string' ? cardRow.owner_user_id : null
+  if (receiverId == null) {
+    return jsonResponse(500, { error: 'CARD_OWNER_MISSING' })
+  }
+  if (receiverId === proposerId) {
+    // 自分の出品への自己提案は createOffer が弾くが二重防御。
+    return jsonResponse(200, { ok: true, skipped: 'SELF_NOTIFY' })
+  }
+
+  const sendPushPayload: SendPushPayload = {
+    user_id: receiverId,
+    title: isCounter ? '提案に返答がありました' : '交換の提案が届きました',
+    body: isCounter
+      ? '相手からカウンター提案が届きました'
+      : '相手から交換の提案が届きました',
+    data: {
+      type: isCounter ? 'offer_counter' : 'offer_created',
+      route: `/offer/${offerId}`,
+      offer_id: offerId,
+    },
+  }
+  return await invokeSendPush(sendPushPayload, 'offers:insert')
+}
+
+// ─────────────────────────────────────────
+// (F) offers UPDATE ハンドラ (承認 / 辞退)
+//   修正E+F: accepted / declined を提案者 (proposer_user_id) へ通知。
+//     - accepted → 「提案が承認されました」(交換成立)
+//     - declined → カウンターか純粋辞退かを子 offer の有無で判別:
+//         この offer.id を parent_offer_id に持つ子 offer が存在する → カウンター → 通知しない
+//         存在しない → 純粋辞退 → 「提案が見送られました」(辞退も『返事』であり通知すべき)
+//   ★修正F: CHECK制約に 'countered' を足さず、counterOffer の順序変更
+//     (子INSERT → 親decline) で「decline webhook 到達時に子が既に存在する」ことを保証し、
+//     子 offer の存在チェックでカウンター判別する。前回のレース懸念は順序が逆だったため。
+//   修正D: 全て old !== new の遷移ガード付き。#3/#4/#5 を同一パターン (old !== X && new === X) に統一。
+//   route: '/offer/<offer_id>'
+// ─────────────────────────────────────────
+async function handleOfferUpdate(
+  recordRaw: unknown,
+  oldRaw: unknown,
+): Promise<Response> {
+  if (recordRaw == null || typeof recordRaw !== 'object') {
+    return jsonResponse(200, { ok: true, skipped: 'NO_RECORD' })
+  }
+  const record = recordRaw as OfferRecord
+  const oldRecord = (oldRaw ?? {}) as OfferRecord
+  const offerId = typeof record.id === 'string' ? record.id : null
+  const proposerId =
+    typeof record.proposer_user_id === 'string' ? record.proposer_user_id : null
+  const newStatus = typeof record.status === 'string' ? record.status : null
+  const oldStatus = typeof oldRecord.status === 'string' ? oldRecord.status : null
+
+  if (offerId == null || proposerId == null) {
+    return jsonResponse(200, { ok: true, skipped: 'MISSING_FIELDS' })
+  }
+  // 遷移ガード共通部: status が変化していない UPDATE は全て skip。
+  //   これにより以降の各分岐は「old !== new かつ new === X」= 遷移時のみ発火となる。
+  if (newStatus === oldStatus) {
+    return jsonResponse(200, { ok: true, skipped: 'STATUS_UNCHANGED' })
+  }
+
+  let title: string
+  let body: string
+  let notifType: string
+  if (newStatus === 'accepted') {
+    title = '提案が承認されました'
+    body = '交換が成立しました。取引の画面を確認しましょう'
+    notifType = 'offer_accepted'
+  } else if (newStatus === 'declined') {
+    // ★修正F: 子 offer (parent_offer_id = この offer.id) が存在すればカウンター → 通知しない。
+    //   counterOffer は「子INSERT → 親decline」順に変更 (Phase 3) するため、
+    //   この decline webhook 到達時点で子は既に存在する。
+    const { data: childRows, error: childErr } = await adminClient()
+      .from('offers')
+      .select('id')
+      .eq('parent_offer_id', offerId)
+      .limit(1)
+    if (childErr != null) {
+      console.error('[notify-on-event] offers child lookup failed', childErr)
+      return jsonResponse(500, { error: 'LOOKUP_FAILED' })
+    }
+    if (childRows != null && childRows.length > 0) {
+      // カウンター: 親 decline は通知しない (子 INSERT が別途 '提案に返答がありました' を送る)
+      return jsonResponse(200, { ok: true, skipped: 'DECLINED_BY_COUNTER' })
+    }
+    title = '提案が見送られました'
+    body = '相手が提案を見送りました'
+    notifType = 'offer_declined'
+  } else {
+    // completed / cancelled 等は通知しない
+    return jsonResponse(200, { ok: true, skipped: 'NO_NOTIFY_STATUS' })
+  }
+
+  const sendPushPayload: SendPushPayload = {
+    user_id: proposerId,
+    title,
+    body,
+    data: {
+      type: notifType,
+      route: `/offer/${offerId}`,
+      offer_id: offerId,
+    },
+  }
+  return await invokeSendPush(sendPushPayload, `offers:${newStatus}`)
+}
+
+// ─────────────────────────────────────────
+// (G) trades UPDATE ハンドラ (取引キャンセル)
+//   status → 'cancelled' のとき、キャンセルを実行していない側の participant へ通知。
+//   ★通常取引のキャンセルは一方的確定 (相手同意不要) のため、通知が唯一の「痕跡」。
+//   修正A: record.cancelled_by (K が列追加+cancel_trade_atomic 変更で書き込む) を使い、
+//     実行者を除外して「相手」だけに送る。cancelled_by が不明 (null/未提供) の場合は
+//     安全側で両 participant に送る (痕跡を必ず残すため落とさない)。
+//   修正C: deep-link は offer_id で /trade/[offerId] を開く。record.offer_id を優先し、
+//     無ければ service_role で trades から offer_id を引く。
+// ─────────────────────────────────────────
+async function handleTradeUpdate(
+  recordRaw: unknown,
+  oldRaw: unknown,
+): Promise<Response> {
+  if (recordRaw == null || typeof recordRaw !== 'object') {
+    return jsonResponse(200, { ok: true, skipped: 'NO_RECORD' })
+  }
+  const record = recordRaw as TradeRecord
+  const oldRecord = (oldRaw ?? {}) as TradeRecord
+  const tradeId = typeof record.id === 'string' ? record.id : null
+  const newStatus = typeof record.status === 'string' ? record.status : null
+  const oldStatus = typeof oldRecord.status === 'string' ? oldRecord.status : null
+  const proposerId =
+    typeof record.proposer_user_id === 'string' ? record.proposer_user_id : null
+  const receiverId =
+    typeof record.receiver_user_id === 'string' ? record.receiver_user_id : null
+  const cancelledBy =
+    typeof record.cancelled_by === 'string' ? record.cancelled_by : null
+
+  if (tradeId == null) {
+    return jsonResponse(200, { ok: true, skipped: 'MISSING_TRADE_ID' })
+  }
+  if (newStatus !== 'cancelled' || oldStatus === 'cancelled') {
+    return jsonResponse(200, { ok: true, skipped: 'NOT_CANCEL_TRANSITION' })
+  }
+  if (proposerId == null || receiverId == null) {
+    return jsonResponse(200, { ok: true, skipped: 'PARTICIPANTS_MISSING' })
+  }
+
+  // deep-link 用 offer_id を解決 (record 優先、無ければ trades から引く)
+  let offerId = typeof record.offer_id === 'string' ? record.offer_id : null
+  if (offerId == null) {
+    const { data: tr } = await adminClient()
+      .from('trades')
+      .select('offer_id')
+      .eq('id', tradeId)
+      .maybeSingle()
+    offerId = tr != null && typeof tr.offer_id === 'string' ? tr.offer_id : null
+  }
+  const route = offerId != null ? `/trade/${offerId}` : '/trades'
+
+  // 通知先: cancelled_by が判れば実行者を除外、不明なら両者 (痕跡を落とさない)
+  let recipients: string[]
+  if (cancelledBy != null) {
+    recipients = [proposerId, receiverId].filter((u) => u !== cancelledBy)
+  } else {
+    recipients = [proposerId, receiverId]
+  }
+  recipients = recipients.filter((v, i, a) => a.indexOf(v) === i)
+
+  const results: unknown[] = []
+  for (const uid of recipients) {
+    const r = await invokeSendPush(
+      {
+        user_id: uid,
+        title: '取引がキャンセルされました',
+        body: '取引がキャンセルされました。取引の画面を確認しましょう',
+        data: { type: 'trade_cancelled', route, trade_id: tradeId },
+      },
+      'trades:cancelled',
+    )
+    // 個別失敗は retry 対象にせず集約 (1 人分の失敗で全体 retry すると重複通知になるため)。
+    results.push({ user_id: uid, status: r.status })
+  }
+  return jsonResponse(200, { ok: true, source: 'trades:cancelled', results })
+}
+
+// ─────────────────────────────────────────
+// (H) shipments UPDATE ハンドラ (発送)
+//   status → 'shipped' のとき、発送者 (shipments.user_id) でない側の participant へ通知。
+//   route: '/trade/<trade_id>'
+// ─────────────────────────────────────────
+async function handleShipmentUpdate(
+  recordRaw: unknown,
+  oldRaw: unknown,
+): Promise<Response> {
+  if (recordRaw == null || typeof recordRaw !== 'object') {
+    return jsonResponse(200, { ok: true, skipped: 'NO_RECORD' })
+  }
+  const record = recordRaw as ShipmentRecord
+  const oldRecord = (oldRaw ?? {}) as ShipmentRecord
+  const tradeId = typeof record.trade_id === 'string' ? record.trade_id : null
+  const senderId = typeof record.user_id === 'string' ? record.user_id : null
+  const newStatus = typeof record.status === 'string' ? record.status : null
+  const oldStatus = typeof oldRecord.status === 'string' ? oldRecord.status : null
+
+  if (tradeId == null || senderId == null) {
+    return jsonResponse(200, { ok: true, skipped: 'MISSING_FIELDS' })
+  }
+  if (newStatus !== 'shipped' || oldStatus === 'shipped') {
+    return jsonResponse(200, { ok: true, skipped: 'NOT_SHIPPED_TRANSITION' })
+  }
+
+  // trades から participants + offer_id (deep-link 用・修正C) を取得
+  const { data: tradeRow, error } = await adminClient()
+    .from('trades')
+    .select('proposer_user_id, receiver_user_id, offer_id')
+    .eq('id', tradeId)
+    .maybeSingle()
+  if (error != null) {
+    console.error('[notify-on-event] trades select failed', error)
+    return jsonResponse(500, { error: 'LOOKUP_FAILED' })
+  }
+  if (tradeRow == null) {
+    console.error('[notify-on-event] trade not found', tradeId)
+    return jsonResponse(500, { error: 'TRADE_NOT_FOUND' })
+  }
+  const proposerId =
+    typeof tradeRow.proposer_user_id === 'string' ? tradeRow.proposer_user_id : null
+  const receiverId =
+    typeof tradeRow.receiver_user_id === 'string' ? tradeRow.receiver_user_id : null
+  const offerId =
+    typeof tradeRow.offer_id === 'string' ? tradeRow.offer_id : null
+  if (proposerId == null || receiverId == null) {
+    return jsonResponse(500, { error: 'TRADE_PARTICIPANTS_MISSING' })
+  }
+
+  // 発送者でない側 = 受け取る側
+  let recipientId: string | null = null
+  if (senderId === proposerId) recipientId = receiverId
+  else if (senderId === receiverId) recipientId = proposerId
+  else {
+    console.error('[notify-on-event] shipper not participant of trade', {
+      trade_id: tradeId,
+      shipper: senderId,
+    })
+    return jsonResponse(200, { ok: true, skipped: 'SHIPPER_NOT_PARTICIPANT' })
+  }
+  if (recipientId === senderId) {
+    return jsonResponse(200, { ok: true, skipped: 'SELF_NOTIFY' })
+  }
+
+  const sendPushPayload: SendPushPayload = {
+    user_id: recipientId,
+    title: '相手が発送しました',
+    body: '相手が商品を発送しました。取引の画面を確認しましょう',
+    data: {
+      type: 'shipment_shipped',
+      route: offerId != null ? `/trade/${offerId}` : '/trades',
+      trade_id: tradeId,
+    },
+  }
+  return await invokeSendPush(sendPushPayload, 'shipments:shipped')
+}
+
+// ─────────────────────────────────────────
+// (I) venue_trades INSERT ハンドラ (会場 Hold 承認 = 取引成立)
+//   accept_venue_hold が venue_trades を INSERT する。前監査 S1 の成立通知欠落を解消。
+//   通知先: 申請者 (proposer_id)。承認したのは receiver 側なので proposer に届ける。
+//   route: '/venue/trade/<trade_id>'
+// ─────────────────────────────────────────
+async function handleVenueTradeInsert(recordRaw: unknown): Promise<Response> {
+  if (recordRaw == null || typeof recordRaw !== 'object') {
+    return jsonResponse(200, { ok: true, skipped: 'NO_RECORD' })
+  }
+  const record = recordRaw as VenueTradeRecord
+  const tradeId = typeof record.id === 'string' ? record.id : null
+  const proposerId =
+    typeof record.proposer_id === 'string' ? record.proposer_id : null
+  if (tradeId == null || proposerId == null) {
+    return jsonResponse(200, { ok: true, skipped: 'MISSING_FIELDS' })
+  }
+
+  const sendPushPayload: SendPushPayload = {
+    user_id: proposerId,
+    title: '交換が成立しました',
+    body: 'あなたのHoldが承認され、会場交換が成立しました',
+    data: {
+      type: 'venue_trade_created',
+      route: `/venue/trade/${tradeId}`,
+      venue_trade_id: tradeId,
+    },
+  }
+  return await invokeSendPush(sendPushPayload, 'venue_trades:insert')
 }
 
 // ─────────────────────────────────────────

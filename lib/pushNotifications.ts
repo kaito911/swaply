@@ -140,6 +140,19 @@ async function upsertPushToken(
   token: string,
   platform: Platform_
 ): Promise<boolean> {
+  // ★形式ガード (修正B): ExponentPushToken[ で始まらないものは保存しない。
+  //   addPushTokenListener が渡す native デバイストークン (APNs/FCM の生文字列) が
+  //   誤って混入すると、send-push のバッチ送信が Expo API に丸ごと拒否され通知が
+  //   全停止する。全 upsert 経路を通る共通ヘルパでまとめて弾く (最後の砦)。
+  if (!token.startsWith('ExponentPushToken[')) {
+    if (__DEV__) {
+      console.warn(
+        '[pushNotifications] rejected non-Expo push token',
+        token.slice(0, 20)
+      )
+    }
+    return false
+  }
   try {
     const { error } = await supabase.from('push_tokens').upsert(
       {
@@ -235,32 +248,20 @@ export async function syncPushTokenIfGranted(userId: string): Promise<void> {
  *
  * addPushTokenListener は OS がトークンをローテーションした瞬間に発火する。
  * 起動時 sync だけだと「起動中にローテーションした」ケースを取りこぼすため併用する。
- * granted 前提のイベントだが、念のため upsert 前に権限は確認しない
- * (発火時点で既に token が発行されている = 許可済み)。
+ *
+ * ★修正C: リスナーが渡す tokenData.data は native デバイストークン (APNs/FCM の
+ * 生文字列) であって Expo Push Token ではない。これを直接保存すると不正トークンが
+ * 混入し通知が全停止する。そこで発火をトリガーにするだけにして、実際のトークン取得は
+ * syncPushTokenIfGranted に一本化する (内部で getExpoPushTokenAsync 経由・Expo 仕様準拠)。
+ * これで取得経路が 1 本になり、差分チェック・記録・形式ガードも再利用される。
  *
  * 戻り値: subscription (呼出側で remove する)。
  */
 export function addPushTokenRotationListener(
   userId: string
 ): Notifications.Subscription {
-  return Notifications.addPushTokenListener((tokenData) => {
-    const token = tokenData.data
-    if (typeof token !== 'string' || token === '') return
-    const platform = getCurrentPlatform()
-    if (platform == null) return
-    void (async () => {
-      const ok = await upsertPushToken(userId, token, platform)
-      if (ok) {
-        try {
-          await AsyncStorage.setItem(LAST_SYNCED_PUSH_TOKEN_KEY, `${userId}:${token}`)
-        } catch (err) {
-          if (__DEV__) console.warn('[pushNotifications] rotation setItem failed', err)
-        }
-        if (__DEV__) console.log('[pushNotifications] push token rotated & synced')
-      } else if (__DEV__) {
-        console.warn('[pushNotifications] rotation upsert failed')
-      }
-    })()
+  return Notifications.addPushTokenListener(() => {
+    void syncPushTokenIfGranted(userId)
   })
 }
 

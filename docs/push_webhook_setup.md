@@ -9,6 +9,46 @@
 - 本 PR4-a で追加する `notify-on-event` Edge Function は、PR3 と **同じ** `SEND_PUSH_SECRET` を再利用する。Push 経路 (notify-on-event → send-push) の単一責務として 1 つの secret で管理する。
 - 本ドキュメントには secret 値そのものは絶対に書かない。Dashboard 入力時に手元で入れること。
 
+## ⚠️ デプロイ時の必須フラグ (通知全停止の再発防止)
+
+**`notify-on-event` と `send-push` は両方とも `--no-verify-jwt` を付けて deploy すること。必須。**
+
+```bash
+npx supabase functions deploy notify-on-event --no-verify-jwt --project-ref <project-ref>
+npx supabase functions deploy send-push      --no-verify-jwt --project-ref <project-ref>
+```
+
+理由:
+- どちらの関数も JWT を持たない呼び出しを受ける。
+  - `notify-on-event`: Supabase Database Webhook が送る Authorization 無し POST。
+  - `send-push`: `notify-on-event` からの内部呼び出し (`x-send-push-secret` のみ、Authorization ヘッダ無し)。
+- 認証は両者とも `x-send-push-secret` ヘッダで**自前**で行う。Supabase 標準の JWT 検証は無効化する。
+- `--no-verify-jwt` を落とすと JWT 検証が有効に戻り、関数本体に到達する**前に** `401 UNAUTHORIZED_NO_AUTH_HEADER` で弾かれる。
+
+**フラグ欠落時の症状 (特定が難しいので明記):**
+- `notify-on-event` の Logs: `[notify-on-event] send-push non-OK 401 {"code":"UNAUTHORIZED_NO_AUTH_HEADER","message":"Missing authorization header"}`
+- `send-push` の Logs: `booted` / `shutdown` のみで**関数本体のログ (除外ログ等) が一切出ない**。Invocations も "No results found"。
+  → 「起動はするが認証層で弾かれ本体未到達」を意味する。
+- ユーザー影響: **通知が全停止**。しかも呼出側は失敗を握り潰すためサイレント。
+
+**実際の発生履歴:** 2026-07-25、`send-push` を `--no-verify-jwt` 無しで deploy し通知全停止。原因特定に時間を要した。
+
+### config.toml での構造的固定 (フラグ忘れ防止・未導入)
+
+CLI のフラグは毎回手で付ける必要があり忘れやすい。`supabase/config.toml` に per-function 設定を置けば、`deploy` 時にフラグ無しでも `verify_jwt=false` が適用され、**フラグ忘れを構造的に防げる**:
+
+```toml
+[functions.notify-on-event]
+verify_jwt = false
+
+[functions.send-push]
+verify_jwt = false
+```
+
+- 本リポジトリは現状 `config.toml` を持たない (deploy は `login` + `link` 済みの状態で実行)。
+- 導入する場合、`config.toml` はプロジェクト全体設定のソースとなり、**列挙しない関数はデフォルト `verify_jwt=true`** になる点に注意 (例: `delete-account` はユーザー JWT を使うため `true` のままで正しい)。
+- 導入は非破壊だが影響範囲があるため、K の承認を得てから別タスクで行う (フラグ運用の継続でも実害はない)。
+
 ## 1. notify-on-event を deploy する
 
 リポジトリルートで以下を実行:

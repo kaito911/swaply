@@ -40,7 +40,14 @@
 //   1. supabase login
 //   2. supabase link --project-ref <project-ref>
 //   3. supabase secrets set SEND_PUSH_SECRET=<長いランダム文字列>
-//   4. supabase functions deploy send-push
+//   4. npx supabase functions deploy send-push --no-verify-jwt
+//
+// ★★★ --no-verify-jwt は必須。落とすと通知が全停止する ★★★
+//   send-push は notify-on-event から x-send-push-secret のみを付けて内部呼び出し
+//   される (Authorization ヘッダを持たない)。--no-verify-jwt を落とすと Supabase 標準の
+//   JWT 検証が有効に戻り、関数本体に到達する前に 401 UNAUTHORIZED_NO_AUTH_HEADER で
+//   弾かれる。認証は SEND_PUSH_SECRET で自前で行うため標準 JWT 検証は無効化する。
+//   (2026-07-25: フラグ欠落で通知全停止を実際に踏んだ。docs/push_webhook_setup.md 参照)
 //
 // 呼び出し例 (curl):
 //   curl -X POST "https://<project-ref>.functions.supabase.co/send-push" \
@@ -219,15 +226,49 @@ Deno.serve(async (req) => {
     return jsonResponse(500, { error: 'INTERNAL_ERROR' })
   }
 
-  const tokens: string[] = (tokenRows ?? [])
+  // ★不正形式トークンの除外 (修正A)。
+  //   addPushTokenListener の native トークン (APNs/FCM の生文字列) が誤って
+  //   push_tokens に混入すると、Expo Push API は配列内に 1 本でも不正な `to` が
+  //   あるとリクエスト全体を 400 で拒否する → そのユーザーの正常トークン分も含め
+  //   全通知が止まる。送信前に ExponentPushToken[ 形式でないものを除外する。
+  const rawTokens: string[] = (tokenRows ?? [])
     .map((r) => r.expo_push_token)
     .filter((t): t is string => typeof t === 'string' && t.length > 0)
 
+  const tokens: string[] = rawTokens.filter((t) =>
+    t.startsWith('ExponentPushToken['),
+  )
+
+  const excludedCount = rawTokens.length - tokens.length
+  if (excludedCount > 0) {
+    // ★本番で「除外が頻発しているのに誰も気づかない」状態を避けるため、
+    //   除外が発生したら必ず Edge Logs に残す。
+    console.warn(
+      '[send-push] excluded invalid-format tokens',
+      JSON.stringify({
+        user_id: userId,
+        excluded: excludedCount,
+        valid: tokens.length,
+        total: rawTokens.length,
+      }),
+    )
+  }
+
   if (tokens.length === 0) {
+    // 「除外によって 0 件になった」ケースは通常の 0 件と区別してログに残す
+    //   (レスポンス body でも reason を返し、呼出側/監視で判別可能にする)。
+    if (excludedCount > 0) {
+      console.warn(
+        '[send-push] no valid tokens after exclusion — all tokens were invalid-format',
+        JSON.stringify({ user_id: userId, excluded: excludedCount }),
+      )
+    }
     return jsonResponse(200, {
       ok: true,
       sent: 0,
       removed: 0,
+      excluded: excludedCount,
+      reason: excludedCount > 0 ? 'ALL_TOKENS_INVALID_FORMAT' : 'NO_TOKENS',
       user_id: userId,
     })
   }
@@ -284,13 +325,27 @@ Deno.serve(async (req) => {
 
   const tickets: ExpoPushTicket[] = expoJson.data ?? []
 
+  // ★リクエストレベルのエラー (チケットごとの data ではなく top-level errors 配列に
+  //   入るケース) も握り潰さない。全 message が弾かれた等で発生しうる。
+  if (expoJson.errors != null && expoJson.errors.length > 0) {
+    console.error(
+      '[send-push] Expo request-level errors',
+      JSON.stringify({ user_id: userId, errors: expoJson.errors }),
+    )
+  }
+
   // ─────────────────────────────────────────
   // 5. ticket を解析
   //    - tickets と messages は index 対応 (Expo の仕様)
   //    - status='error' && details.error が INVALID_TOKEN_ERRORS のものは
   //      対応 token を push_tokens から削除
+  //    - ★status='error' は削除対象でなくても必ずログに残す (サイレント失敗防止)。
+  //      Expo が HTTP 200 を返しつつチケット単位で error を返すため、
+  //      ここを見ないと「Expo に受理されたが配信されない」原因を切り分けられない。
   // ─────────────────────────────────────────
   let sent = 0
+  let errorCount = 0
+  const errorCodes: string[] = []
   const tokensToRemove = new Set<string>()
   for (let i = 0; i < tickets.length; i++) {
     const ticket = tickets[i]
@@ -299,8 +354,27 @@ Deno.serve(async (req) => {
       sent++
       continue
     }
-    const errCode = ticket.details?.error
-    if (errCode != null && INVALID_TOKEN_ERRORS.has(errCode)) {
+    // status === 'error': エラーコードに関わらず必ずログ出力する。
+    errorCount++
+    const errCode = ticket.details?.error ?? 'UNKNOWN'
+    errorCodes.push(errCode)
+    console.error(
+      '[send-push] ticket error',
+      JSON.stringify({
+        user_id: userId,
+        error: errCode,
+        message: ticket.message ?? null,
+        // 全文はログに残さない (先頭20文字のみで token を識別)。
+        token_prefix:
+          typeof token === 'string' ? token.slice(0, 20) : null,
+      }),
+    )
+    // 削除は従来どおり DeviceNotRegistered のみ (安全側方針は変更しない・:117-122)。
+    // 他のエラーコードは上のログで可視化し、削除はしない (誤削除防止)。
+    if (
+      ticket.details?.error != null &&
+      INVALID_TOKEN_ERRORS.has(ticket.details.error)
+    ) {
       // ticket.details.expoPushToken が付くケースもあるが、index 対応の方が確実。
       tokensToRemove.add(token)
     }
@@ -323,10 +397,26 @@ Deno.serve(async (req) => {
     }
   }
 
+  // ★送信サマリーを必ず 1 行残す (成功時も)。
+  //   これが無いと「送信された」ことすら Logs から確認できず、配信失敗の切り分けが
+  //   できない。ok_count が全件でも配信不達なら receipt 段階の問題 (下記注記) と分かる。
+  console.log(
+    '[send-push] summary',
+    JSON.stringify({
+      user_id: userId,
+      total: tickets.length,
+      ok_count: sent,
+      error_count: errorCount,
+      errors: errorCodes,
+      removed,
+    }),
+  )
+
   return jsonResponse(200, {
     ok: true,
     sent,
     removed,
+    excluded: excludedCount,
     user_id: userId,
     tickets,
   })

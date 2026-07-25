@@ -33,13 +33,48 @@
 //     getLastNotificationResponseAsync 経路にだけ 500ms の setTimeout を入れる。
 //     unmount 後の発火を防ぐため cancelled guard でガード。
 //
+// foreground 表示制御 (PR-DM 追加):
+//   - setNotificationHandler をモジュールスコープで 1 度だけ登録し、アプリ表示中
+//     (foreground) でも通知バナー・サウンドを出す。iOS は既定で foreground 中は
+//     バナーを出さないため、明示設定が必須。DM 受信中や取引画面閲覧中こそ通知価値が
+//     高いので全画面で表示する (画面別抑制は入れない・下記理由)。
+//
 // 本 PR でやらないこと:
-//   - setNotificationHandler (foreground 表示制御) は別 PR
 //   - pending deep link queue (未ログイン時の resume) は別 PR
 
 import * as Notifications from 'expo-notifications'
 import { router } from 'expo-router'
 import { useEffect, useRef } from 'react'
+
+// ─────────────────────────────────────────────────────────────
+// foreground 通知の表示挙動 (モジュール読み込み時に 1 度だけ登録)。
+//
+// expo-notifications 0.32.17 の NotificationBehavior:
+//   - shouldShowAlert は @deprecated → shouldShowBanner / shouldShowList に分割。
+//   - iOS では UNNotificationPresentationOptions に直接マップされる。
+//     shouldShowBanner=バナー / shouldShowList=通知センター履歴。
+//
+// 方針 (K 判断待ちのデフォルト):
+//   - shouldShowBanner: true  … foreground でもバナーを出す (本対応の主目的)。
+//   - shouldShowList:   true  … 通知センターの履歴にも残す (見逃し対策)。
+//   - shouldPlaySound:  true  … サウンドを鳴らす。
+//   - shouldSetBadge:   false … push payload に badge 値を載せていないため、
+//       true でもアプリアイコンバッジは変化しない (誤って 0 クリアする副作用も
+//       避ける)。アプリ内タブバッジは BadgeProvider が別管理。将来 payload に
+//       badge を載せる設計にする時に true 化を検討する。
+//
+// 画面別抑制を入れない理由:
+//   - 「今開いている画面と同じ相手の DM 通知はバナーを出さない」等は、handler が
+//     現在 route を知る必要があり (module ref を navigation listener で更新する等)、
+//     複雑化する。まずは全表示のシンプル実装にする。冗長さが問題になれば後続で追加。
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+})
 
 // UUID 形式 (8-4-4-4-12 hex、version 不問、case-insensitive)。
 // send-push / notify-on-event 側と同じ tolerant な定義。

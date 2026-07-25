@@ -9,10 +9,12 @@
 //
 // データは fetchMyOffers を流用 (DB 追加なし)。マイページ renderHistory の行様式を踏襲。
 import { ScreenHeader } from '@/components/ScreenHeader'
+import { UnreadBadge } from '@/components/UnreadBadge'
 import { fetchMyOffers } from '@/lib/supabase'
 import { Offer } from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuthContext } from '@/providers/AuthProvider'
+import { useBadge } from '@/providers/BadgeProvider'
 import { Ionicons } from '@expo/vector-icons'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useMemo, useState } from 'react'
@@ -22,9 +24,13 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 export default function TradeHistoryScreen() {
   const { session } = useAuthContext()
   const userId = session?.user?.id ?? null
+  // PR-DM: 取引DM未読数 (Context の Map から読むだけ・個別 fetch しない)。
+  const { tradeUnreadCounts, refreshBadge } = useBadge()
 
   const [offers, setOffers] = useState<Offer[]>([])
   const [loading, setLoading] = useState(true)
+  // ★取得失敗と「0 件」を区別する (旧: catch 無しで失敗が空表示に化けていた)。
+  const [loadFailed, setLoadFailed] = useState(false)
 
   const load = useCallback(async () => {
     if (userId == null) {
@@ -42,6 +48,10 @@ export default function TradeHistoryScreen() {
             (o.trade != null && o.trade.status != null),
         ),
       )
+      setLoadFailed(false)
+    } catch (error) {
+      console.error('[TradeHistory] load', JSON.stringify(error))
+      setLoadFailed(true)
     } finally {
       setLoading(false)
     }
@@ -50,7 +60,9 @@ export default function TradeHistoryScreen() {
   useFocusEffect(
     useCallback(() => {
       void load()
-    }, [load]),
+      // 未読 Map もフォーカス時に最新化 (trades.tsx と同じく既存 Context を呼ぶだけ)。
+      void refreshBadge()
+    }, [load, refreshBadge]),
   )
 
   const rows = useMemo(() => offers, [offers])
@@ -61,6 +73,14 @@ export default function TradeHistoryScreen() {
       {loading ? (
         <View style={styles.centerBox}>
           <ActivityIndicator color={colors.primary} size="large" />
+        </View>
+      ) : loadFailed ? (
+        // ★取得失敗: 「0 件」と区別し、固まらせず再試行 (home/wants と同手法)。
+        <View style={styles.centerBox}>
+          <Text style={styles.emptyText}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => void load()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
         </View>
       ) : rows.length === 0 ? (
         <View style={styles.centerBox}>
@@ -95,6 +115,12 @@ export default function TradeHistoryScreen() {
               statusLabel === 'キャンセル' || statusLabel === '辞退' ? colors.errorBg :
               colors.tagInfoBg
 
+            // PR-DM: この取引の DM 未読数 (Context の Map から。trade 無し行は 0)。
+            //   completed/cancelled も含め、未読があればここに出す (③の欠落を history で補完)。
+            const rowTradeId = offer.trade?.id ?? null
+            const rowUnread =
+              rowTradeId != null ? tradeUnreadCounts.get(rowTradeId) ?? 0 : 0
+
             // trade を持つ行のみ詳細 (交換カード同士) へ遷移可能。辞退等は非タップ。
             const hasTrade = offer.trade != null
             const openDetail = () =>
@@ -112,6 +138,8 @@ export default function TradeHistoryScreen() {
                   </Text>
                   <Text style={styles.handle}>@{counterHandle}</Text>
                 </View>
+                {/* PR-DM: DM 未読赤丸 (status バッジの手前・共通 UnreadBadge)。 */}
+                <UnreadBadge count={rowUnread} />
                 <View style={[styles.statusBadge, { backgroundColor: statusBg }]}>
                   <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
                 </View>
@@ -138,6 +166,23 @@ const styles = StyleSheet.create({
   },
   emptyText: { fontSize: fontSize.sm, color: colors.textSecondary },
   emptySub: { fontSize: fontSize.xs, color: colors.textTertiary, textAlign: 'center' },
+  retryButton: {
+    marginTop: spacing.sm,
+    minWidth: 96,
+    height: 40,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.backgroundCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
+  },
   content: { padding: spacing.base, paddingBottom: 120 },
   row: {
     flexDirection: 'row',

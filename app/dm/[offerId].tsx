@@ -137,6 +137,9 @@ export default function TradeDMScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  // ★取得失敗と「0 件」を区別する。エラーを 0 件として描画しない (嘘表示の防止)。
+  const [messagesError, setMessagesError] = useState(false)
+  const [retrying, setRetrying] = useState(false)
 
   const scrollRef = useRef<ScrollView | null>(null)
   const markingRef = useRef(false)
@@ -192,15 +195,27 @@ export default function TradeDMScreen() {
         setStatus(trade.status as TradeStatus)
         setCounterpart((detail?.counterpartProfile ?? null) as CounterpartProfile | null)
 
-        const msgs = await fetchTradeMessages(trade.id)
-        // 全置換 (会場版と同じ)。楽観追記した行も次回 reload で正が上書きするため二重表示しない。
-        setMessages(msgs)
+        // ★メッセージ取得は独立した try で扱い、「取得失敗」を「0 件」と混同しない。
+        try {
+          const msgs = await fetchTradeMessages(trade.id)
+          // 全置換 (会場版と同じ)。楽観追記した行も次回 reload で正が上書きするため二重表示しない。
+          setMessages(msgs)
+          setMessagesError(false)
+        } catch (msgErr) {
+          // 生 error を JSON で出力 (code/message/details/hint を読めるように)。
+          console.error(
+            '[TradeDM] fetchTradeMessages failed',
+            JSON.stringify(msgErr)
+          )
+          setMessagesError(true)
+        }
         return trade.id
       } catch (error) {
-        console.error('[TradeDM] reload', error)
+        // trade 詳細の解決自体が失敗したケース (稀)。こちらも JSON で出す。
+        console.error('[TradeDM] reload (detail) failed', JSON.stringify(error))
         Alert.alert(
           '読み込みエラー',
-          'メッセージの取得に失敗しました。画面を戻ってもう一度開いてください。'
+          '取引情報の取得に失敗しました。画面を戻ってもう一度開いてください。'
         )
         return null
       } finally {
@@ -237,6 +252,15 @@ export default function TradeDMScreen() {
     await markRead(tid)
     setRefreshing(false)
   }, [reload, markRead])
+
+  // 取得失敗表示の「再試行」。silent reload でヘッダーを保ったまま再取得する。
+  const onRetryMessages = useCallback(async () => {
+    if (retrying) return
+    setRetrying(true)
+    const tid = await reload(true)
+    await markRead(tid)
+    setRetrying(false)
+  }, [retrying, reload, markRead])
 
   const handleSend = useCallback(async () => {
     if (tradeId == null || status == null) return
@@ -393,7 +417,32 @@ export default function TradeDMScreen() {
             </Text>
           </View>
 
-          {messages.length === 0 ? (
+          {messagesError ? (
+            // ★取得失敗: 「0 件」とは別の状態。再試行導線を出す (嘘の空表示をしない)。
+            <View style={styles.messagesErrorBox}>
+              <Text style={styles.messagesErrorTitle}>
+                メッセージを読み込めませんでした
+              </Text>
+              <Text style={styles.messagesErrorSub}>
+                通信状況を確認して、もう一度お試しください。
+              </Text>
+              <Pressable
+                onPress={onRetryMessages}
+                disabled={retrying}
+                style={({ pressed }) => [
+                  styles.retryButton,
+                  retrying && styles.retryButtonDisabled,
+                  pressed && styles.retryButtonPressed,
+                ]}
+              >
+                {retrying ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={styles.retryButtonText}>再試行</Text>
+                )}
+              </Pressable>
+            </View>
+          ) : messages.length === 0 ? (
             <View style={styles.emptyMessages}>
               <Text style={styles.emptyMessagesText}>
                 まだメッセージはありません。
@@ -541,6 +590,45 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     textAlign: 'center',
     lineHeight: 20,
+  },
+
+  // ★取得失敗表示 (0 件とは別状態・再試行付き)。
+  messagesErrorBox: {
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.base,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  messagesErrorTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  messagesErrorSub: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  retryButton: {
+    marginTop: spacing.xs,
+    minWidth: 96,
+    height: 40,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.backgroundCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryButtonDisabled: { opacity: 0.5 },
+  retryButtonPressed: { opacity: 0.7 },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.primary,
   },
 
   messagesList: { gap: spacing.sm },

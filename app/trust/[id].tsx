@@ -17,76 +17,10 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { CardItem } from '@/components/CardItem'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SectionHeader } from '@/components/SectionHeader'
-import { FEATURE_FLAGS } from '@/constants/feature-flags'
-import { colors, fontSize, radius, shadow, spacing } from '@/constants/theme'
+import { colors, fontSize, spacing } from '@/constants/theme'
 import { fetchProfile, fetchUserCards } from '@/lib/supabase'
-import {
-    Card,
-    formatLastActive,
-    formatReplyTime,
-    Profile,
-} from '@/lib/types'
+import { Card, Profile } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
-
-// ─────────────────────────────────────────
-// 統計ボックス
-// ─────────────────────────────────────────
-
-interface StatBoxProps {
-  label: string
-  value: string
-  sub?: string
-  accent?: string
-}
-
-function StatBox({ label, value, sub, accent }: StatBoxProps) {
-  return (
-    <View style={statStyles.box}>
-      <Text
-        style={[
-          statStyles.value,
-          accent != null ? { color: accent } : null,
-        ]}
-      >
-        {value}
-      </Text>
-      <Text style={statStyles.label}>{label}</Text>
-      {sub != null && <Text style={statStyles.sub}>{sub}</Text>}
-    </View>
-  )
-}
-
-const statStyles = StyleSheet.create({
-  box: {
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: colors.backgroundCard,
-    borderRadius: radius.lg,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    gap: 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  value: {
-    fontSize: fontSize.xl,
-    fontWeight: '800',
-    color: colors.textPrimary,
-    letterSpacing: -0.4,
-    textAlign: 'center',
-  },
-  label: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  sub: {
-    fontSize: 10,
-    color: colors.textTertiary,
-    textAlign: 'center',
-  },
-})
 
 // ─────────────────────────────────────────
 // メイン画面
@@ -113,7 +47,7 @@ export default function TrustProfileScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScreenHeader title="Trustプロフィール" />
+        <ScreenHeader title="出品者" />
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={colors.primary} size="large" />
         </View>
@@ -124,7 +58,7 @@ export default function TrustProfileScreen() {
   if (profile == null) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScreenHeader title="Trustプロフィール" />
+        <ScreenHeader title="出品者" />
         <View style={styles.loadingWrap}>
           <Text style={styles.errorText}>プロフィールが見つかりませんでした</Text>
           <TouchableOpacity onPress={() => router.back()}>
@@ -137,7 +71,7 @@ export default function TrustProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <ScreenHeader title="Trustプロフィール" />
+      <ScreenHeader title="出品者" />
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ─ プロフィールヘッダー ─ */}
@@ -160,75 +94,8 @@ export default function TrustProfileScreen() {
           {profile.display_name != null && (
             <Text style={styles.displayName}>{profile.display_name}</Text>
           )}
-
-          <Text style={styles.lastActive}>
-            最終アクティブ: {formatLastActive(profile.last_active_at)}
-          </Text>
-        </View>
-
-        {/* ─ Trust実績（事実のみ・感情レビュー禁止）─ */}
-        <View style={styles.statsSection}>
-          <Text style={styles.statsSectionTitle}>Trust実績（事実のみ）</Text>
-
-          {/* 行1: 成立件数・発送遵守率・返信中央値 */}
-          <View style={styles.statsRow}>
-            <StatBox
-              label="成立件数"
-              value={`${profile.trade_count}件`}
-              accent={
-                profile.trade_count >= 50
-                  ? colors.trustGreen
-                  : undefined
-              }
-            />
-            <StatBox
-              label="発送遵守率"
-              value={`${profile.ship_rate}%`}
-              accent={
-                profile.ship_rate >= 95
-                  ? colors.trustGreen
-                  : profile.ship_rate < 90
-                  ? colors.error
-                  : undefined
-              }
-            />
-            <StatBox
-              label="返信中央値"
-              value={formatReplyTime(profile.reply_median_hours)}
-            />
-          </View>
-
-          {/* 行2: トラブル件数 (+ β1 後の差額エスクロー解放時に調整金平均/偏りを並べる)
-              β1: ADJUSTMENT_MONEY_ENABLED=false 中は調整金 2 StatBox を非表示 */}
-          <View style={styles.statsRow}>
-            <StatBox
-              label="トラブル件数"
-              value={`${profile.trouble_count}件`}
-              sub={profile.trouble_count === 0 ? '問題なし' : undefined}
-              accent={
-                profile.trouble_count > 0 ? colors.error : colors.trustGreen
-              }
-            />
-            {FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED && (
-              <>
-                <StatBox
-                  label="調整金 平均"
-                  value={
-                    profile.adjustment_avg != null
-                      ? `¥${profile.adjustment_avg}`
-                      : '—'
-                  }
-                  sub="過去取引より"
-                />
-                {/* 暫定: adjustment_biasはβ後半で算出予定 */}
-                <StatBox
-                  label="調整金 偏り"
-                  value={profile.adjustment_bias ?? '—'}
-                  sub="暫定: 未算出"
-                />
-              </>
-            )}
-          </View>
+          {/* Trust統計 (最終アクティブ / 成立件数 / 発送遵守率 / 返信中央値 /
+              トラブル件数) は全て seed 固定の死んだ値のため β1 で削除 (タスクB')。 */}
         </View>
 
         {/* ─ 出品中カード ─ */}
@@ -357,31 +224,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: spacing.xs,
   },
-  lastActive: {
-    fontSize: fontSize.sm,
-    color: colors.textTertiary,
-    marginTop: spacing.xs,
-  },
-
-  // ── Trust実績
-  statsSection: {
-    paddingHorizontal: spacing.base,
-    gap: spacing.sm,
-    marginBottom: spacing.xl,
-  },
-  statsSectionTitle: {
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: spacing.xs,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-
   // ── 出品カード
   cardsSection: {
     marginBottom: spacing.xl,

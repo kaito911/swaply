@@ -1,7 +1,6 @@
 // app/offer/[offerId].tsx
 // 提案詳細画面（届いた提案 / 送信した提案 共通）
 import { ScreenHeader } from '@/components/ScreenHeader'
-import { TradeStats } from '@/components/TradeStats'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, radius, spacing } from '@/constants/theme'
 import { acceptOffer, declineOffer, fetchOfferById } from '@/lib/supabase'
@@ -239,14 +238,7 @@ export default function OfferDetailScreen() {
             <Text style={styles.proposerName}>
               {getProfileName(counterPartProfile)}
             </Text>
-            <View style={styles.trustRow}>
-              <TradeStats
-                tradeCount={counterPartProfile.trade_count}
-                shipRate={counterPartProfile.ship_rate}
-                replyMedianHours={counterPartProfile.reply_median_hours}
-                layout="row"
-              />
-            </View>
+            {/* Trust統計 (seed 固定の死んだ値) の表示を β1 で削除 (タスクB')。 */}
           </View>
         )}
 
@@ -460,11 +452,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textPrimary,
     marginBottom: spacing.xs,
-  },
-  trustRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   exchangeRow: {
     flexDirection: 'row',

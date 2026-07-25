@@ -1030,20 +1030,8 @@ export default function VenueHomeScreen() {
                           @{getDisplayName(post.poster)}
                         </Text>
                       </View>
-                      {post.poster != null && (
-                        <View style={styles.supplyCardTrustChips}>
-                          <View style={styles.supplyCardChip}>
-                            <Text style={styles.supplyCardChipText}>
-                              取引 {post.poster.trade_count}
-                            </Text>
-                          </View>
-                          <View style={styles.supplyCardChip}>
-                            <Text style={styles.supplyCardChipText}>
-                              発送 {post.poster.ship_rate}%
-                            </Text>
-                          </View>
-                        </View>
-                      )}
+                      {/* Trust統計チップ (取引N / 発送N%) は seed 固定の死んだ値のため
+                          β1 で削除 (タスクB')。 */}
                     </View>
                     <Text style={styles.supplyCardTimeLeft}>
                       {formatVenueTimeLeft(post.expires_at)}
@@ -1594,25 +1582,6 @@ const styles = StyleSheet.create({
   },
   supplyCardPoster: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: VENUE_COLORS.body,
-  },
-  // Trust 事実チップ (取引数 / 発送率)。星・レビューは禁止 (Swaply 原則)。
-  supplyCardTrustChips: {
-    flexDirection: 'row',
-    gap: 4,
-    flexWrap: 'wrap',
-  },
-  supplyCardChip: {
-    backgroundColor: VENUE_COLORS.background,
-    borderRadius: radius.full,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: VENUE_COLORS.border,
-  },
-  supplyCardChipText: {
-    fontSize: 11,
     fontWeight: fontWeight.semibold,
     color: VENUE_COLORS.body,
   },

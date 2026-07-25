@@ -78,29 +78,6 @@ function getCtaConfig(
   return { label: '交換を提案する', disabled: false }
 }
 
-// ④ Trust: ホーム削除分の補完として全項目を直接表示 (3.5a 機能 H 戦略)
-// β1: ADJUSTMENT_MONEY_ENABLED=false 中は差額平均 / 差額偏り を出さない。
-function getTrustRows(owner: Profile): { label: string; value: string }[] {
-  const rows: { label: string; value: string }[] = [
-    { label: '成立件数', value: `${owner.trade_count}件` },
-    { label: '発送遵守率', value: `${owner.ship_rate}%` },
-    {
-      label: '返信中央値',
-      value: owner.reply_median_hours < 999 ? `${owner.reply_median_hours}時間` : '—',
-    },
-  ]
-  if (FEATURE_FLAGS.ADJUSTMENT_MONEY_ENABLED) {
-    rows.push(
-      {
-        label: '差額平均',
-        value: owner.adjustment_avg != null ? `¥${owner.adjustment_avg}` : '—',
-      },
-      { label: '差額偏り', value: owner.adjustment_bias ?? '—' },
-    )
-  }
-  rows.push({ label: 'トラブル件数', value: `${owner.trouble_count}件` })
-  return rows
-}
 
 // ⑤ CTA: 押していい理由を1つだけ返す（want一致 → 郵送 の優先順）
 function getPushReason(
@@ -866,28 +843,10 @@ export default function ListingDetailScreen() {
                   </Text>
                 </View>
 
-                <Text style={styles.detailLink}>Trust詳細 ›</Text>
               </View>
-
-              {/* Trust 6 項目 default 表示 */}
-              <View style={styles.trustRowsWrap}>
-                {getTrustRows(owner).map((row, i, arr) => (
-                  <View
-                    key={row.label}
-                    style={[
-                      styles.trustRow,
-                      i < arr.length - 1 && styles.trustRowBorder,
-                    ]}
-                  >
-                    <Text style={styles.trustLabel}>{row.label}</Text>
-                    <Text style={styles.trustValue}>{row.value}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <Text style={styles.trustNote}>
-                ※ 感情レビューなし。確定事実のみ表示。
-              </Text>
+              {/* Trust統計 (getTrustRows 6項目 / 「※感情レビューなし」注記 / 「Trust詳細›」
+                  ラベル) は seed 固定の死んだ値のため β1 で削除 (タスクB')。
+                  導線 (seller card タップ → trust/[id]) は現状維持。画面の扱いは K 判断。 */}
             </Pressable>
           ) : (
             <View style={styles.sellerCardEmpty}>
@@ -1404,41 +1363,6 @@ const styles = StyleSheet.create({
   sellerBadgeRow: {
     flexDirection: 'row',
     marginTop: spacing.xs,
-  },
-  detailLink: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.medium,
-    color: colors.primary,
-  },
-  trustRowsWrap: {
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
-    paddingTop: spacing.sm,
-  },
-  trustRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: spacing.xs + 2,
-  },
-  trustRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  trustLabel: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-  },
-  trustValue: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-  },
-  trustNote: {
-    fontSize: 10,
-    color: colors.textSecondary,
-    marginTop: spacing.sm,
-    lineHeight: 16,
   },
   sellerUnknown: {
     fontSize: fontSize.sm,

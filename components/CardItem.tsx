@@ -1,6 +1,5 @@
 // components/CardItem.tsx
 import { PrimaryCTA } from '@/components/PrimaryCTA'
-import { TradeStats } from '@/components/TradeStats'
 import { TradeTag } from '@/components/TradeTag'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, radius, spacing } from '@/constants/theme'
@@ -89,15 +88,7 @@ export function CardItem({ card, onPropose }: CardItemProps) {
           </View>
         )}
 
-        {/* Trust実績: 成立件数・発送率・返信速度 */}
-        {owner != null && (
-          <TradeStats
-            tradeCount={owner.trade_count}
-            shipRate={owner.ship_rate}
-            replyMedianHours={owner.reply_median_hours}
-            layout="row"
-          />
-        )}
+        {/* Trust実績 (TradeStats・seed 固定の死んだ値) の表示を β1 で削除 (タスクB')。 */}
 
         {/* 交換条件タグ */}
         <View style={styles.tagsRow}>

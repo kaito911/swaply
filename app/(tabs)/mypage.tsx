@@ -20,14 +20,7 @@ import {
   isOperator,
   supabase,
 } from '@/lib/supabase'
-import {
-  Card,
-  computeTroubleStage,
-  formatLastActive,
-  Offer,
-  Profile,
-  TroubleStage,
-} from '@/lib/types'
+import { Card, Offer, Profile } from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { SUPPORT_MAILTO, LEGAL_MAILTO } from '@/constants/contact'
 import { Ionicons } from '@expo/vector-icons'
@@ -51,24 +44,6 @@ import { useBadge } from '@/providers/BadgeProvider'
 // 各セクションのプレビュー表示上限 (超過分は「すべて見る」で専用画面へ)。
 // 出品中は専用一覧画面が未整備のため上限を設けず全件横スクロール表示 (β1 は件数少)。
 const HISTORY_PREVIEW_LIMIT = 5
-
-// トラブル色サイン (文言なし)。実績バッジ (新規/お試し/安定/高信頼) の断定的ラベルは
-// 烙印・序列化になるためマイページからは撤去し、無文言の色サインに置き換える。
-//   0 = 通常 (全員デフォルト、緑=健全で静かに沈む)
-//   1 = 一度トラブル (amber で surface) / 2 = 二度以上 (red で surface)
-// 色は既存の状態色トークンを流用 (新規トークン不要)。
-const TROUBLE_SIGN_COLOR: Record<TroubleStage, string> = {
-  0: colors.success,
-  1: colors.warning,
-  2: colors.error,
-}
-// 色のみだと非表示情報になるため、a11y (画面読み上げ) 用の中立ラベルのみ添える。
-// 視覚上は文言を出さない方針を維持しつつ、色覚・読み上げ利用者に状態を伝える。
-const TROUBLE_SIGN_A11Y: Record<TroubleStage, string> = {
-  0: '取引状態: 良好',
-  1: '取引状態: 注意',
-  2: '取引状態: 要確認',
-}
 
 // ─────────────────────────────────────────
 // screen
@@ -166,56 +141,13 @@ export default function MyPageScreen() {
   const displayName = profile?.display_name ?? null
   const avatarChar = ((handle || displayName || 'U').slice(0, 1)).toUpperCase()
   const avatarUrl = profile?.avatar_url ?? null
-  // トラブル色サイン用の暫定ステージ (0/1/2)。実績ランク文言は表示しない。
-  const troubleStage: TroubleStage = profile != null ? computeTroubleStage(profile) : 0
-  const tc = profile?.trade_count ?? 0
-  const sr = profile?.ship_rate ?? 100
-  const rh = profile?.reply_median_hours ?? 24
-  const lastActiveText = formatLastActive(profile?.last_active_at ?? null)
-  // 実績が1つでもあれば「信頼の記録」を数値表示。全くなければ「これから育つ場所」として提示。
-  const hasTradeRecord = tc > 0 || partnerCount > 0
+  // 交換人数 (partnerCount) のみ live (fetchDistinctPartnerCount=実データ)。
+  // 他の Trust 列 (trade_count / ship_rate / reply_median_hours / last_active_at) は
+  // seed 固定の死列のため表示から除外した (タスクB')。トラブル色サイン (troubleStage) も
+  // trouble_count が死列で常に stage0、かつ将来の申告データ生反映は #22 閾値設計を
+  // バイパスするため削除した。
 
   const historyPreview = historyOffers.slice(0, HISTORY_PREVIEW_LIMIT)
-
-  // ─────────────────────────────────────────
-  // 信頼の記録 (5指標均等 or 空状態)
-  // ─────────────────────────────────────────
-  const renderTrustRecord = () => {
-    if (!hasTradeRecord) {
-      return (
-        <View style={styles.trustEmpty}>
-          <Text style={styles.trustEmptyTitle}>
-            交換を重ねると、ここに信頼の記録が刻まれていきます
-          </Text>
-          <Text style={styles.trustEmptySub}>
-            数字を後から盛ることはできない — だから信頼になる
-          </Text>
-        </View>
-      )
-    }
-    const metrics = [
-      { label: '交換', value: `${partnerCount}人` },
-      { label: '取引', value: `${tc}回` },
-      { label: '発送率', value: `${sr}%` },
-      { label: '返信', value: rh < 999 ? `${rh}h` : '—' },
-      { label: '直近', value: lastActiveText },
-    ] as const
-    return (
-      <View style={styles.trustGrid}>
-        {metrics.map((m, i, arr) => (
-          <View
-            key={m.label}
-            style={[styles.trustCell, i < arr.length - 1 && styles.trustCellBorder]}
-          >
-            <Text style={styles.trustValue} numberOfLines={1} adjustsFontSizeToFit>
-              {m.value}
-            </Text>
-            <Text style={styles.trustLabel}>{m.label}</Text>
-          </View>
-        ))}
-      </View>
-    )
-  }
 
   // ─────────────────────────────────────────
   // 出品中 (画像タイル横スクロール)
@@ -346,13 +278,6 @@ export default function MyPageScreen() {
                   <Text style={styles.avatarText}>{avatarChar}</Text>
                 )}
               </View>
-              {/* トラブル色サイン (文言なし)。通常=緑(健全)で静かに沈み、問題時に amber/red で surface。
-                  β1 は computeTroubleStage の暫定導出 (Phase 1.5 で trouble_stage 状態機械に置換)。 */}
-              <View
-                style={[styles.troubleDot, { backgroundColor: TROUBLE_SIGN_COLOR[troubleStage] }]}
-                accessible
-                accessibilityLabel={TROUBLE_SIGN_A11Y[troubleStage]}
-              />
             </View>
             <View style={styles.heroMeta}>
               <Text style={styles.heroHandle}>{handle ?? displayName ?? 'ユーザー'}</Text>
@@ -380,13 +305,15 @@ export default function MyPageScreen() {
           </View>
         </View>
 
-        {/* ── 信頼の記録 (5指標均等 / 空状態) ── */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>信頼の記録</Text>
+        {/* ── 交換人数 (#22⑦「X人と交換」一文のみ・見出しなし・0人なら非表示) ── */}
+        {partnerCount > 0 && (
+          <View style={styles.sectionBlock}>
+            <View style={styles.partnerRow}>
+              <Text style={styles.partnerValue}>{partnerCount}</Text>
+              <Text style={styles.partnerUnit}>人と交換</Text>
+            </View>
           </View>
-          {renderTrustRecord()}
-        </View>
+        )}
 
         {/* ── 出品中 ── */}
         <View style={styles.sectionBlock}>
@@ -593,17 +520,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  // トラブル色サイン: アバター右下の status dot。白リングで縁を切り、どの写真上でも視認可能。
-  troubleDot: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 2.5,
-    borderColor: colors.backgroundCard,
-  },
   avatarImage: {
     width: 64,
     height: 64,
@@ -669,56 +585,26 @@ const styles = StyleSheet.create({
     marginVertical: spacing.lg,
   },
 
-  // ── 信頼の記録 ──
-  trustGrid: {
+  // ── 信頼の記録 (交換人数のみ・「X人と交換」一文) ──
+  partnerRow: {
     flexDirection: 'row',
+    alignItems: 'baseline',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.lg,
-    overflow: 'hidden',
-  },
-  trustCell: {
-    flex: 1,
-    alignItems: 'center',
     paddingVertical: spacing.md,
-    paddingHorizontal: 2,
+    paddingHorizontal: spacing.base,
+    gap: 4,
   },
-  trustCellBorder: {
-    borderRightWidth: 1,
-    borderRightColor: colors.borderLight,
-  },
-  trustValue: {
-    fontSize: fontSize.base,
+  partnerValue: {
+    fontSize: fontSize.lg,
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
   },
-  trustLabel: {
-    fontSize: 10,
-    color: colors.textTertiary,
-    marginTop: 3,
-  },
-  trustEmpty: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  trustEmptyTitle: {
+  partnerUnit: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
     color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
   },
-  trustEmptySub: {
-    fontSize: fontSize.xs,
-    color: colors.textTertiary,
-    textAlign: 'center',
-  },
-
   // ── 横スクロールカード (出品中) ──
   hScrollContent: {
     gap: spacing.sm,

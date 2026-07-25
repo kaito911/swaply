@@ -1,6 +1,6 @@
 import { HeaderActions } from '@/components/HeaderActions'
 import { ScreenHeader } from '@/components/ScreenHeader'
-import { TradeStats } from '@/components/TradeStats'
+import { UnreadBadge } from '@/components/UnreadBadge'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors } from '@/constants/theme'
 import { router, useFocusEffect } from 'expo-router'
@@ -23,7 +23,6 @@ import {
   TRADE_STATUS_LABELS,
   type Offer,
   type OfferStatus,
-  type Profile,
   type TradeStatus,
 } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
@@ -32,28 +31,6 @@ import { useBadge } from '@/providers/BadgeProvider'
 // ─────────────────────────────────────────
 // Trust サマリー行（受信/送信カード共通）
 // ─────────────────────────────────────────
-
-function TrustSummaryRow({ profile }: { profile: Profile }) {
-  return (
-    <View style={trustRowStyles.row}>
-      <TradeStats
-        tradeCount={profile.trade_count}
-        shipRate={profile.ship_rate}
-        replyMedianHours={profile.reply_median_hours}
-        layout="row"
-      />
-    </View>
-  )
-}
-
-const trustRowStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 14,
-  },
-})
 
 // ─────────────────────────────────────────
 
@@ -433,14 +410,8 @@ export default function ProposeScreen() {
                   <Text style={styles.cardDate}>{formatDate(offer.created_at)}</Text>
                 </View>
 
-                {/* PR-DM b-3 ③: DM 未読バッジ (status バッジの手前・赤丸)。 */}
-                {rowUnread > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadBadgeText}>
-                      {rowUnread > 99 ? '99+' : String(rowUnread)}
-                    </Text>
-                  </View>
-                )}
+                {/* PR-DM b-3 ③: DM 未読バッジ (status バッジの手前・赤丸)。共通 UnreadBadge。 */}
+                <UnreadBadge count={rowUnread} />
 
                 <View
                   style={[
@@ -470,14 +441,7 @@ export default function ProposeScreen() {
                 </Text>
               </View>
 
-              {/* Trust サマリー（承認/辞退判断の前に事実ベースで表示） */}
-              {(() => {
-                const counterProfile: Profile | null | undefined = isReceived
-                  ? offer.proposer
-                  : offer.target_card?.owner
-                if (counterProfile == null) return null
-                return <TrustSummaryRow profile={counterProfile} />
-              })()}
+              {/* Trust統計 (TradeStats・seed 固定の死んだ値) の表示を β1 で削除 (タスクB')。 */}
 
               {/* 画像 URL 選定: 自分が受信側 (target_card 所有者) なら、
                   「出すグッズ」= target_card.image_url、「受け取るグッズ」= items 側の image。
@@ -1127,22 +1091,6 @@ const styles = StyleSheet.create({
   statusBadgeText: {
     fontSize: 12,
     fontWeight: '700',
-  },
-  // PR-DM b-3 ③: DM 未読赤丸バッジ (BottomTabBar / HeaderActions と視覚を揃える)。
-  unreadBadge: {
-    alignSelf: 'flex-start',
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    backgroundColor: '#EF4444',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  unreadBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#FFFFFF',
   },
   statusPendingBadge: {
     backgroundColor: colors.tagInfoBg,

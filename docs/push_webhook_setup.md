@@ -468,3 +468,89 @@ PR4-b (運用反映) はこれで close。残るは PR4-c (app 側 tap listener)
 - PR3: `supabase/functions/send-push/index.ts`
 - PR4-a: `supabase/functions/notify-on-event/index.ts` (本ファイルの対象)
 - 後続: app 側 deep-link listener、dev build、実機受信確認、(オプション) notifications テーブル / dedupe
+
+---
+
+# PR-DM: 取引通知の拡張と Webhook レジストリ (2026-07-25)
+
+取引フロー (DM / 提案 / キャンセル / 発送 / 会場成立) の通知6種を `notify-on-event` に追加。
+Database Webhook は GUI でなく **Postgres トリガー (SQL)** で管理する方針を確定した。
+本セクションは「決定を repo に残す」ための記録 (secret 実値は一切書かない)。
+
+## Database Webhook はトリガーで管理する (GUI でなく SQL)
+
+Supabase の Database Webhook は `supabase_functions.http_request()` を呼ぶ Postgres
+トリガーとして実装される。GUI での手入力より SQL の方が確実・再現可能・レビュー可能。
+
+トリガー構造 (secret は placeholder):
+
+```
+AFTER <EVENT> ON <table> FOR EACH ROW
+EXECUTE FUNCTION supabase_functions.http_request(
+  'https://tayrdjuizpyrxohduspe.functions.supabase.co/notify-on-event',
+  'POST',
+  '{"Content-type":"application/json","x-send-push-secret":"<SECRET>"}',
+  '{}',
+  '5000')
+```
+
+- 命名規則: `notify_on_<対象>_<event>`
+- ★ヘッダキーは `Content-type` (t は小文字)。既存3件がこの表記なので統一する。
+- ★`<SECRET>` は `SEND_PUSH_SECRET` の値。SQL に直書きするため **実行は K のみ**。
+  docs には実値を書かない。`pg_get_triggerdef` で取得すると secret が平文で出るため、
+  取得 SQL を人に渡す/画面共有する際は要注意。
+
+## Webhook レジストリ (現在 9 件)
+
+| Table                | Event  | Trigger name                          | 用途 |
+|----------------------|--------|---------------------------------------|------|
+| offers               | INSERT | notify_on_offers_insert               | 提案作成 (新規/カウンター文面出し分け) |
+| offers               | UPDATE | notify_on_offers_update               | 承認/辞退 (辞退はカウンター判別) |
+| shipments            | UPDATE | notify_on_shipments_update            | 発送 (shipped 遷移のみ) |
+| trade_messages       | INSERT | notify_on_trade_message_insert        | 取引 DM |
+| trades               | UPDATE | notify_on_trades_update               | 取引キャンセル (実行者除外) |
+| venue_holds          | INSERT | notify_on_venue_hold_insert           | 会場 Hold 申請 |
+| venue_trade_messages | INSERT | notify_on_venue_trade_message_insert  | 会場 DM |
+| venue_trades         | INSERT | notify_on_venue_trades_insert         | 会場 Hold 承認 → 成立 (前監査 S1 の欠落解消) |
+| venue_trades         | UPDATE | notify_on_venue_trades_update         | 会場キャンセル申請/拒否 |
+
+## SEND_PUSH_SECRET ローテーション手順 (K のみ実施・実値は docs に書かない)
+
+1. 新値を生成 (例: `openssl rand -hex 32`)
+2. `npx supabase secrets set SEND_PUSH_SECRET=<新値>`
+3. `http_request` を呼ぶ全トリガー (現在 9 件) を新値で drop→create し直す
+   (各トリガー定義のヘッダ JSON 内 secret を新値に置換)
+4. 検証: 旧値を含むトリガーが 0 件であること
+   ```sql
+   -- ★このSQLは trigger_def に secret 実値を露出させる。実行は K のみ。
+   -- 「直前の値の先頭16文字」を <PREV_SECRET_PREFIX16> に入れる (旧値全体を残さない)。
+   SELECT count(*) FROM pg_trigger t
+   WHERE NOT t.tgisinternal
+     AND pg_get_triggerdef(t.oid, true) ILIKE '%<PREV_SECRET_PREFIX16>%';
+   -- → 0 なら旧値を含むトリガーは残っていない = 完了
+   ```
+
+### ★ダウンタイムに関する注意 (重要)
+
+**ローテーション中は通知が停止する期間が発生する。**
+
+- 手順2 (`secrets set`) を実行した瞬間から Edge Function の env は新値になる。
+- 一方、手順3 でトリガーを書き換え終わるまで、**既存トリガーは旧値のヘッダを送り続ける**。
+- その間、Edge Function は `providedSecret !== SEND_PUSH_SECRET` で **401 で弾く** →
+  **通知が一切飛ばない**。
+- ログには 401 が並ぶだけで、「正常だが skip」や「トリガー未発火」と区別しにくい。
+- → **この期間、通知は完全停止する。** ユーザーがいる時間帯の実施は影響を考慮すること。
+
+**順序でダウンタイムの位置が変わる:**
+- `secrets set` 先行 (今回採用): env が先に新値 → トリガー書き換え完了までの間ダウン。
+  書き換え完了と同時に復旧。移行中の全イベントが 401 で落ちる (retry で救われる可能性あり)。
+- トリガー書き換え先行: env がまだ旧値の間に新値トリガーが飛ぶと 401。こちらも同様にダウン。
+- いずれにせよ「env と全トリガーが同じ値になるまで」はダウンする。**手順2→3 を最短で連続実行**し、
+  完了後に手順4 で 0 件を検証してから通知系の疎通を1件確認するのが安全。
+
+## 関連 (PR-DM)
+
+- Edge: `supabase/functions/notify-on-event/index.ts` (新規6ハンドラ)
+- 疎通確認手順: 本 PR-DM の実機テスト (テストアカウント2つ)
+- 未実施 (Phase 3 / OTA): 取引 DM 画面、`counterOffer` の順序変更 (子 INSERT→親 decline)、
+  status 表示の default 堅牢化、deep-link ハンドラ拡張

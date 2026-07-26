@@ -1,4 +1,5 @@
 // app/trade/[offerId].tsx
+import { UserActionsMenu } from '@/components/UserActionsMenu'
 import { colors } from '@/constants/theme'
 import {
     cancelTrade,
@@ -699,9 +700,16 @@ export default function TradeDetailScreen() {
           uiState === 'disputed' ? styles.headerCardDisputed :
           undefined,
         ]}>
-          <Pressable style={styles.headerBackButton} onPress={() => router.back()}>
-            <Text style={styles.headerBackButtonText}>← 戻る</Text>
-          </Pressable>
+          {/* 上段: 戻る (左) + 通報/ブロックメニュー (右)。DM と同一の共通 UserActionsMenu。 */}
+          <View style={styles.headerTopRow}>
+            <Pressable style={styles.headerBackButton} onPress={() => router.back()}>
+              <Text style={styles.headerBackButtonText}>← 戻る</Text>
+            </Pressable>
+            <UserActionsMenu
+              userId={typeof counterpartProfile.id === 'string' ? counterpartProfile.id : null}
+              userLabel={getDisplayName(counterpartProfile)}
+            />
+          </View>
 
           <Text style={[
             styles.uiStateHeadline,
@@ -1174,6 +1182,12 @@ const styles = StyleSheet.create({
   headerCardDisputed: {
     backgroundColor: '#FEF2F2',
     borderColor: '#FECACA',
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   headerBackButton: {
     alignSelf: 'flex-start',

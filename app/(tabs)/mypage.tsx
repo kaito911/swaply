@@ -20,7 +20,8 @@ import {
   isOperator,
   supabase,
 } from '@/lib/supabase'
-import { Card, formatLastActive, Offer, Profile, UserTrust } from '@/lib/types'
+import { Card, Offer, Profile, trustDisplayStrings, UserTrust } from '@/lib/types'
+import { TroubleDot } from '@/components/TroubleDot'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { SUPPORT_MAILTO, LEGAL_MAILTO } from '@/constants/contact'
 import { Ionicons } from '@expo/vector-icons'
@@ -44,26 +45,6 @@ import { useBadge } from '@/providers/BadgeProvider'
 // 各セクションのプレビュー表示上限 (超過分は「すべて見る」で専用画面へ)。
 // 出品中は専用一覧画面が未整備のため上限を設けず全件横スクロール表示 (β1 は件数少)。
 const HISTORY_PREVIEW_LIMIT = 5
-
-// トラブル色サイン。入力は get_user_trust().trouble_stage (段階・回復・チャラは全て DB 側)。
-//   0=通常 / 1=一度トラブル / 2=二度以上。★数字は絶対に出さない・色のみ。
-//   0 (通常) は「無」= ドットを出さない (常時緑は情報にならず、問題時のみ surface させる)。
-const TROUBLE_SIGN_COLOR: Record<number, string> = {
-  1: colors.warning,
-  2: colors.error,
-}
-const TROUBLE_SIGN_A11Y: Record<number, string> = {
-  1: '取引状態: 注意',
-  2: '取引状態: 要確認',
-}
-
-// ship_median_hours の表示整形。null は呼出側で行ごと非表示にするため、ここには渡さない。
-//   <1 → 「1時間以内」/ <24 → 「N時間」/ それ以上 → 「N日」。
-function formatShipHours(hours: number): string {
-  if (hours < 1) return '1時間以内'
-  if (hours < 24) return `${Math.round(hours)}時間`
-  return `${Math.floor(hours / 24)}日`
-}
 
 // ─────────────────────────────────────────
 // screen
@@ -163,20 +144,8 @@ export default function MyPageScreen() {
   const avatarUrl = profile?.avatar_url ?? null
 
   // ── Trust 数値 (get_user_trust 由来・都度算出) ──
-  // 0/null の項目は行ごと出さない (0を突きつけない)。率(%)は一切出さない。
-  // 一文形式・見出しなし。全項目が空なら trustLines は空配列 → セクションごと非表示。
-  const trustLines: string[] = []
-  if (trust != null) {
-    if (trust.partner_count > 0) trustLines.push(`${trust.partner_count}人と交換`)
-    if (trust.trade_count > 0) trustLines.push(`${trust.trade_count}回取引`)
-    // ship_median_hours が null (発送実績なし) の行は出さない。<1 は「1時間以内」。
-    if (trust.ship_median_hours != null) {
-      trustLines.push(`発送まで ${formatShipHours(trust.ship_median_hours)}`)
-    }
-    if (trust.last_active_at != null) {
-      trustLines.push(`最終ログイン ${formatLastActive(trust.last_active_at)}`)
-    }
-  }
+  // ★0/null でも枠は必ず出し、値は「—」(trustDisplayStrings が整形)。率(%)は出さない。
+  const tv = trustDisplayStrings(trust)
   // トラブル色サイン: DB 算出の trouble_stage をそのまま使う (クライアント判定なし)。
   const troubleStage = trust?.trouble_stage ?? 0
 
@@ -310,17 +279,8 @@ export default function MyPageScreen() {
                 ) : (
                   <Text style={styles.avatarText}>{avatarChar}</Text>
                 )}
-                {/* トラブル色サイン (数字なし・色のみ)。0 (通常) は非表示、問題時のみ surface。 */}
-                {troubleStage >= 1 && (
-                  <View
-                    style={[
-                      styles.troubleDot,
-                      { backgroundColor: TROUBLE_SIGN_COLOR[troubleStage] },
-                    ]}
-                    accessible
-                    accessibilityLabel={TROUBLE_SIGN_A11Y[troubleStage]}
-                  />
-                )}
+                {/* トラブル色サイン (数字なし・色のみ・0は非表示)。共通 TroubleDot。 */}
+                <TroubleDot stage={troubleStage} />
               </View>
             </View>
             <View style={styles.heroMeta}>
@@ -349,16 +309,30 @@ export default function MyPageScreen() {
           </View>
         </View>
 
-        {/* ── 自分の Trust 数値 (一文形式・見出しなし・0/nullは行ごと非表示・率は出さない) ── */}
-        {trustLines.length > 0 && (
-          <View style={styles.sectionBlock}>
-            <View style={styles.trustCard}>
-              {trustLines.map((line) => (
-                <Text key={line} style={styles.trustLine}>{line}</Text>
-              ))}
-            </View>
+        {/* ── Trust (横並び4枠グリッド・0/nullは「—」・率は出さない・常に全枠表示) ── */}
+        <View style={styles.sectionBlock}>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>Trust</Text>
           </View>
-        )}
+          <View style={styles.trustGrid}>
+            {[
+              { value: tv.partner, label: '交換' },
+              { value: tv.trade, label: '取引' },
+              { value: tv.ship, label: '発送まで' },
+              { value: tv.last, label: '直近' },
+            ].map((cell, i, arr) => (
+              <View
+                key={cell.label}
+                style={[styles.trustCell, i < arr.length - 1 && styles.trustCellBorder]}
+              >
+                <Text style={styles.trustCellValue} numberOfLines={1} adjustsFontSizeToFit>
+                  {cell.value}
+                </Text>
+                <Text style={styles.trustCellLabel}>{cell.label}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
 
         {/* ── 出品中 ── */}
         <View style={styles.sectionBlock}>
@@ -631,29 +605,33 @@ const styles = StyleSheet.create({
   },
 
   // ── 自分の Trust 数値 (一文形式・複数行を1枠に) ──
-  trustCard: {
+  // ── Trust (横並び4枠グリッド) ──
+  trustGrid: {
+    flexDirection: 'row',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.lg,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.base,
-    gap: 6,
+    overflow: 'hidden',
   },
-  trustLine: {
+  trustCell: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: 2,
+  },
+  trustCellBorder: {
+    borderRightWidth: 1,
+    borderRightColor: colors.borderLight,
+  },
+  trustCellValue: {
     fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
+    fontWeight: fontWeight.bold,
     color: colors.textPrimary,
   },
-  // トラブル色サイン: アバター右下の status dot。白リングで縁を切り視認性確保。
-  troubleDot: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 2.5,
-    borderColor: colors.backgroundCard,
+  trustCellLabel: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    marginTop: 3,
   },
   // ── 横スクロールカード (出品中) ──
   hScrollContent: {

@@ -566,13 +566,18 @@ export interface TradeUnreadCountRow {
 //   ・partner_count     : 交換した相手の distinct 人数 (completed)
 //   ・trade_count       : completed 件数 (通常 + 会場)
 //   ・ship_median_hours : 成立→発送登録の中央値 (時間)。発送実績なしは null
-//   ・last_active_at     : 最終アクティブ (touch_last_active が更新)。null あり
+//   ・last_active_days   : 最終アクティブからの日数 (JST 日付差)。0=今日/1=昨日/…。null あり。
+//                         ★表示はこれを使う (他人向けでも粒度が日単位=粘着リスクなし)。
+//   ・last_active_at     : 生の timestamptz。★自分を見たときのみ入り、他人は必ず null
+//                         (生時刻を他人に流さないため)。★表示には使わない (残すが未使用)。
 //   ・trouble_stage      : 0=通常 / 1=一度 / 2=二度以上 (段階・回復・チャラは全て DB 側で計算)
 export interface UserTrust {
   user_id: string
   partner_count: number
   trade_count: number
   ship_median_hours: number | null
+  last_active_days: number | null
+  // ★表示には使わない (last_active_days に統一)。自分を見たときのみ非 null。
   last_active_at: string | null
   trouble_stage: number
 }
@@ -716,19 +721,41 @@ export const TRUST_BADGE_LABELS: Record<TrustBadgeLevel, string> = {
   gold_blue: '高信頼',
 }
 
-export function formatLastActive(dateStr: string | null): string {
-  if (!dateStr) return '不明'
+// ship_median_hours の表示整形。<1 → 「1時間以内」/ <24 → 「N時間」/ それ以上 → 「N日」。
+export function formatShipHours(hours: number): string {
+  if (hours < 1) return '1時間以内'
+  if (hours < 24) return `${Math.round(hours)}時間`
+  return `${Math.floor(hours / 24)}日`
+}
 
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const hours = Math.floor(diff / 3600000)
+// 直近ログインを last_active_days (JST 日付差) から整形。★last_active_at は使わない。
+//   null → 「—」/ <=0 → 「今日」(負値ガード) / 1 → 「昨日」/ 2〜29 → 「N日前」/
+//   >=30 → 「1か月以上前」(粒度を粗くし、古い値を細かく晒さない)。
+function formatLastActiveDays(days: number | null): string {
+  if (days == null) return '—'
+  if (days <= 0) return '今日'
+  if (days === 1) return '昨日'
+  if (days >= 30) return '1か月以上前'
+  return `${days}日前`
+}
 
-  if (hours < 1) return 'たった今'
-  if (hours < 24) return `${hours}時間前`
-
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}日前`
-
-  return `${Math.floor(days / 7)}週間前`
+// get_user_trust の4項目を表示文字列に整形 (マイページ/出品詳細/trust で共用)。
+// ★0 または null は「—」。率(%)は扱わない。直近は last_active_days に統一。
+export function trustDisplayStrings(t: UserTrust | null): {
+  partner: string
+  trade: string
+  ship: string
+  last: string
+} {
+  return {
+    partner: t != null && t.partner_count > 0 ? `${t.partner_count}人` : '—',
+    trade: t != null && t.trade_count > 0 ? `${t.trade_count}回` : '—',
+    ship:
+      t != null && t.ship_median_hours != null
+        ? formatShipHours(t.ship_median_hours)
+        : '—',
+    last: formatLastActiveDays(t?.last_active_days ?? null),
+  }
 }
 
 // ─────────────────────────────────────────

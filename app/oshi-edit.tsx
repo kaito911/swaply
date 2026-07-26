@@ -56,6 +56,9 @@ export default function OshiEditScreen() {
 
   const [items, setItems] = useState<UserOshi[]>([])
   const [loading, setLoading] = useState(true)
+  // A1: 読み込み失敗フラグ。fetchUserOshi が throw しても「まだ推しが登録されていません」の
+  //   嘘空表示にせず error+再試行を出す (fetchUserOshi も throw 化済)。
+  const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
   const [showForm, setShowForm] = useState(false)
 
@@ -78,18 +81,27 @@ export default function OshiEditScreen() {
     setShowForm(false)
   }
 
+  const load = useCallback(() => {
+    if (authLoading) return
+    if (userId == null) { // userId null のとき setLoading(false) を呼ぶ
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setLoadFailed(false)
+    fetchUserOshi(userId)
+      .then(setItems)
+      .catch((e) => {
+        console.error('[OshiEditScreen][load]', e)
+        setLoadFailed(true)
+      })
+      .finally(() => setLoading(false))
+  }, [userId, authLoading])
+
   useFocusEffect(
     useCallback(() => {
-      if (authLoading) return
-      if (userId == null) { // ★ updated: userId null のとき setLoading(false) を呼ぶ
-        setLoading(false)
-        return
-      }
-      setLoading(true)
-      fetchUserOshi(userId)
-        .then(setItems)
-        .finally(() => setLoading(false))
-    }, [userId, authLoading])
+      load()
+    }, [load])
   )
 
   const handleAdd = async () => {
@@ -143,6 +155,27 @@ export default function OshiEditScreen() {
     return (
       <SafeAreaView style={styles.loadingWrap} edges={['top']}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </SafeAreaView>
+    )
+  }
+
+  if (loadFailed) {
+    // ★取得失敗: 「まだ推しが登録されていません」(0件) と区別し、固まらせず再試行。
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.customHeader}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backButton}>
+            <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
+          </Pressable>
+          <Text style={styles.headerTitle}>推し編集</Text>
+          <View style={styles.headerRight} />
+        </View>
+        <View style={styles.errorBox}>
+          <Text style={styles.retryText}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => load()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
+        </View>
       </SafeAreaView>
     )
   }
@@ -296,6 +329,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F7F7FB',
+  },
+  // A1: 読み込み失敗時の再試行UI (home/wants と同一トークン)。
+  errorBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  retryText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.base,
+  },
+  retryButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
   // ★ added: カスタムヘッダー
   customHeader: {

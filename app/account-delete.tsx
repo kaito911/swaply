@@ -14,14 +14,14 @@
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
-import { colors, fontWeight, radius, spacing } from '@/constants/theme'
+import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
   deleteMyAccount,
   fetchActiveTradeCount,
   supabase,
 } from '@/lib/supabase'
 import { router } from 'expo-router'
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -39,22 +39,27 @@ const CONFIRM_KEYWORD = '削除'
 export default function AccountDeleteScreen() {
   const [activeTradeCount, setActiveTradeCount] = useState<number | null>(null)
   const [loadingTradeCount, setLoadingTradeCount] = useState(true)
+  // A1: 取得失敗フラグ。fetchActiveTradeCount(内部 auth.getUser)が throw/reject しても
+  //   永久スピナー(=退会不能・進行不能)にせず error+再試行を出す。
+  const [loadFailed, setLoadFailed] = useState(false)
   const [confirmText, setConfirmText] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   // マウント時に進行中取引数を取得
-  useEffect(() => {
-    let cancelled = false
-    void fetchActiveTradeCount().then((count) => {
-      if (!cancelled) {
-        setActiveTradeCount(count)
-        setLoadingTradeCount(false)
-      }
-    })
-    return () => {
-      cancelled = true
-    }
+  const load = useCallback(() => {
+    setLoadingTradeCount(true)
+    setLoadFailed(false)
+    fetchActiveTradeCount().then((count) => {
+      setActiveTradeCount(count)
+    }).catch((e) => {
+      console.error('[account-delete][load]', e)
+      setLoadFailed(true)
+    }).finally(() => setLoadingTradeCount(false))
   }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   const canSubmit =
     activeTradeCount === 0 &&
@@ -137,6 +142,21 @@ export default function AccountDeleteScreen() {
         <ScreenHeader title="アカウント削除" />
         <View style={styles.centerWrap}>
           <ActivityIndicator color={colors.primary} size="large" />
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  if (loadFailed) {
+    // ★取得失敗: 永久スピナー(退会不能)にせず再試行を出す (home/wants と同手法)。
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScreenHeader title="アカウント削除" />
+        <View style={styles.centerWrap}>
+          <Text style={styles.retryText}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => load()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     )
@@ -262,6 +282,25 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // A1: 読み込み失敗時の再試行UI (home/wants と同一トークン)。
+  retryText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.base,
+  },
+  retryButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
   // 削除不可 (進行中取引あり) box
   blockBox: {

@@ -67,6 +67,10 @@ export default function ShelfScreen() {
       ]).then(([shelfData, oshiData]) => {
         setItems(shelfData)
         setOshiItems(oshiData)
+      }).catch((e) => {
+        // shelf は β1 到達不能 (dead route)。fetchUserOshi の throw化(STEP3)で未catch caller が
+        // 残らないよう最小の防御 catch のみ (full error UI は復活時に別途)。
+        console.error('[shelf][load]', e)
       }).finally(() => setLoading(false))
     }, [userId, authLoading])
   )

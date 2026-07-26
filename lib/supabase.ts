@@ -230,7 +230,9 @@ function isNetworkErrorObject(error: unknown): boolean {
 // legacy 非依存で組めるようにする。DB スキーマ変更なし (nested SELECT のみ)。
 const CARD_WANT_LINKS_SELECT =
   'card_wanted_links(wanted_card:wanted_cards(card_name, group_name, member_name, series))'
-const CARD_FEED_SELECT = `*, owner:profiles(*), ${CARD_WANT_LINKS_SELECT}`
+// ★owner profile は id/handle/display_name のみ (owner の消費は handle/display_name 表示 +
+//   listing/[id] の owner.id のみ。avatar_url/mode/trust列/住所列は未使用=egress/PII 削減で除外)。
+const CARD_FEED_SELECT = `*, owner:profiles(id, handle, display_name), ${CARD_WANT_LINKS_SELECT}`
 
 export async function fetchNewCards(
   limit = 20,
@@ -501,7 +503,7 @@ export async function fetchProfile(userId: string): Promise<Profile | null> {
 
   if (error) {
     console.error('[fetchProfile]', error)
-    return null
+    throw error // 案C/STEP2: 握らず throw (呼出側 try/catch で loadFailed)
   }
 
   return data as Profile
@@ -524,7 +526,7 @@ export async function fetchUserCards(
 
   if (error) {
     console.error('[fetchUserCards]', error)
-    return []
+    throw error // 案C/STEP2: 握らず throw (呼出側 try/catch で loadFailed)
   }
 
   return (data ?? []) as Card[]
@@ -583,7 +585,7 @@ export async function fetchMyLikedCards(
 ): Promise<LikedCardWithCard[]> {
   const { data, error } = await supabase
     .from('liked_cards')
-    .select('*, card:cards(*, owner:profiles(*))')
+    .select('*, card:cards(*, owner:profiles(id, handle, display_name))')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
 
@@ -627,7 +629,7 @@ export async function fetchMyWantedCards(userId: string): Promise<WantedCard[]> 
 
   if (error) {
     console.error('[fetchMyWantedCards]', error)
-    return []
+    throw error // 案C/STEP2: 握らず throw (呼出側 try/catch で loadFailed)
   }
 
   return (data ?? []) as WantedCard[]
@@ -707,7 +709,7 @@ export async function searchWantedCards(params: {
 
   let query = supabase
     .from('wanted_cards')
-    .select('*, owner:profiles!wanted_cards_user_id_fkey(*)')
+    .select('*, owner:profiles!wanted_cards_user_id_fkey(id, handle, display_name)')
     .ilike('card_name', `%${q}%`)
     .eq('status', 'active')
     .order('created_at', { ascending: false })
@@ -793,7 +795,7 @@ export async function searchDirectMatch(params: {
 
   let query = supabase
     .from('cards')
-    .select(`*, owner:profiles!cards_owner_user_id_fkey(*), ${CARD_WANT_LINKS_SELECT}`)
+    .select(`*, owner:profiles!cards_owner_user_id_fkey(id, handle, display_name), ${CARD_WANT_LINKS_SELECT}`)
     .eq('status', 'active')
     .eq('is_public', true) // 顔2: 公開出品のみ (商品棚除外)
 
@@ -1219,10 +1221,10 @@ export async function fetchMyOffers(userId: string): Promise<Offer[]> {
         id,
         status
       ),
-      proposer:profiles!offers_proposer_user_id_fkey(*),
+      proposer:profiles!offers_proposer_user_id_fkey(id, handle, display_name),
       target_card:cards!offers_target_card_id_fkey(
         *,
-        owner:profiles(*)
+        owner:profiles(id, handle, display_name)
       ),
       items:offer_items(
         *,
@@ -1257,10 +1259,10 @@ export async function fetchOfferById(offerId: string): Promise<Offer | null> {
         id,
         status
       ),
-      proposer:profiles!offers_proposer_user_id_fkey(*),
+      proposer:profiles!offers_proposer_user_id_fkey(id, handle, display_name),
       target_card:cards!offers_target_card_id_fkey(
         *,
-        owner:profiles(*)
+        owner:profiles(id, handle, display_name)
       ),
       items:offer_items(
         *,
@@ -2516,7 +2518,7 @@ export async function fetchUserOshi(userId: string): Promise<UserOshi[]> {
 
   if (error) {
     console.error('[fetchUserOshi]', error)
-    return []
+    throw error // 案C/STEP3: 握らず throw (呼出側 try/catch で loadFailed)。caller: home✓/oshi-edit✓/shelf(dead・防御catch)
   }
 
   return (data ?? []) as UserOshi[]

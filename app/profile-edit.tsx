@@ -7,7 +7,7 @@ import { router } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
 import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
 import { readAsStringAsync } from 'expo-file-system/legacy'
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -51,6 +51,9 @@ export default function ProfileEditScreen() {
   const userId = session?.user?.id ?? null
 
   const [loading, setLoading] = useState(true)
+  // A1: 既存プロフィール読込の失敗フラグ。fetchProfile が throw しても永久スピナーにせず
+  //   error+再試行を出す (STEP2 で fetchProfile が throw 化されるための前提 catch)。
+  const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const [handle, setHandle] = useState('')
@@ -61,22 +64,29 @@ export default function ProfileEditScreen() {
   const [existingAvatarUrl, setExistingAvatarUrl] = useState<string | null>(null)
   const [localAvatarUri, setLocalAvatarUri] = useState<string | null>(null)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (authLoading) return
     if (userId == null) {
       setLoading(false)
       return
     }
-
+    setLoading(true)
+    setLoadFailed(false)
     fetchProfile(userId).then((profile) => {
       if (profile != null) {
         setHandle(profile.handle ?? '')
         setOriginalHandle(profile.handle ?? '')
         setExistingAvatarUrl(profile.avatar_url ?? null)
       }
-      setLoading(false)
-    })
+    }).catch((e) => {
+      console.error('[ProfileEdit][load]', e)
+      setLoadFailed(true)
+    }).finally(() => setLoading(false))
   }, [userId, authLoading])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   const validateHandle = (value: string): string | null => {
     if (value.trim().length < 3) return '3文字以上で入力してください'
@@ -157,6 +167,18 @@ export default function ProfileEditScreen() {
     return (
       <SafeAreaView style={styles.loadingWrap} edges={['top']}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </SafeAreaView>
+    )
+  }
+
+  if (loadFailed) {
+    // ★取得失敗: 空フォームで上書き事故を招かず、再読込を促す (home/wants と同手法)。
+    return (
+      <SafeAreaView style={styles.loadingWrap} edges={['top']}>
+        <Text style={styles.retryText}>読み込みに失敗しました</Text>
+        <Pressable style={styles.retryButton} onPress={() => load()}>
+          <Text style={styles.retryButtonText}>再試行</Text>
+        </Pressable>
       </SafeAreaView>
     )
   }
@@ -250,6 +272,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F7F7FB',
+  },
+  // A1: 読み込み失敗時の再試行UI (home/wants と同一トークン)。
+  retryText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.base,
+  },
+  retryButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
   content: {
     padding: 20,

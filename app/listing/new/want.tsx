@@ -78,9 +78,17 @@ export default function ListingNewWantScreen() {
       return
     }
     setLoading(true)
-    const data = await fetchMyWantedCards(userId)
-    setWants(data)
-    setLoading(false)
+    // A1: この画面は到達不能な旧wizard死蔵コードだが、fetchMyWantedCards の throw化(STEP2)で
+    //   未catch caller が残らないよう最小の try/catch/finally を入れる (無限スピナー防止)。
+    try {
+      const data = await fetchMyWantedCards(userId)
+      setWants(data)
+    } catch (e) {
+      console.error('[listing/new/want][load]', e)
+      setWants([])
+    } finally {
+      setLoading(false)
+    }
   }, [userId])
 
   useEffect(() => {

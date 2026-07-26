@@ -1,7 +1,6 @@
 // app/trust/[id].tsx
-import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
     ActivityIndicator,
     FlatList,
@@ -37,9 +36,14 @@ export default function TrustProfileScreen() {
   const [cards, setCards] = useState<Card[]>([])
   const [trust, setTrust] = useState<UserTrust | null>(null)
   const [loading, setLoading] = useState(true)
+  // A1: 読み込み失敗フラグ。fetchProfile/fetchUserCards が throw しても嘘の空表示にせず
+  //   error+再試行を出す (STEP2 で両関数が throw 化されるための前提 catch)。
+  const [loadFailed, setLoadFailed] = useState(false)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (id == null) return
+    setLoading(true)
+    setLoadFailed(false)
     Promise.all([
       fetchProfile(id),
       fetchUserCards(id),
@@ -49,9 +53,15 @@ export default function TrustProfileScreen() {
       setProfile(p)
       setCards(c)
       setTrust(t)
-      setLoading(false)
-    })
+    }).catch((e) => {
+      console.error('[TrustProfile][load]', e)
+      setLoadFailed(true)
+    }).finally(() => setLoading(false))
   }, [id])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   if (loading) {
     return (
@@ -59,6 +69,21 @@ export default function TrustProfileScreen() {
         <ScreenHeader title="Trustプロフィール" />
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={colors.primary} size="large" />
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  if (loadFailed) {
+    // ★取得失敗: 「見つかりませんでした」(not-found) と区別し、固まらせず再試行 (home/wants と同手法)。
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScreenHeader title="Trustプロフィール" />
+        <View style={styles.loadingWrap}>
+          <Text style={styles.retryText}>読み込みに失敗しました</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => load()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     )
@@ -197,6 +222,24 @@ const styles = StyleSheet.create({
     fontSize: fontSize.base,
     color: colors.primary,
     fontWeight: '600',
+  },
+  // A1: 読み込み失敗時の再試行UI (home/wants と同一トークン)。
+  retryText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+  },
+  retryButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
   scroll: {
     flex: 1,

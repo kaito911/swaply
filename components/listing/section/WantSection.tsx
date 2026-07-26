@@ -56,6 +56,10 @@ export type WantSectionProps = {
 export function WantSection({ value, onChange, userId }: WantSectionProps) {
   const [wants, setWants] = useState<WantedCard[]>([])
   const [loading, setLoading] = useState(true)
+  // A1: 求リスト読込の失敗フラグ。★セクション内エラー表示に留める (画面全体を落とさない)。
+  //   追加ボタンは残すので、求リストが読めなくても手動追加で出品を続行できる。
+  //   (STEP2 で fetchMyWantedCards が throw 化されるための前提 catch)。
+  const [loadFailed, setLoadFailed] = useState(false)
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [formCardName, setFormCardName] = useState('')
@@ -70,9 +74,16 @@ export function WantSection({ value, onChange, userId }: WantSectionProps) {
       return
     }
     setLoading(true)
-    const data = await fetchMyWantedCards(userId)
-    setWants(data)
-    setLoading(false)
+    setLoadFailed(false)
+    try {
+      const data = await fetchMyWantedCards(userId)
+      setWants(data)
+    } catch (e) {
+      console.error('[WantSection][load]', e)
+      setLoadFailed(true)
+    } finally {
+      setLoading(false)
+    }
   }, [userId])
 
   useEffect(() => {
@@ -143,7 +154,16 @@ export function WantSection({ value, onChange, userId }: WantSectionProps) {
         <Text style={styles.addButtonText}>求商品を追加</Text>
       </Pressable>
 
-      {wants.length === 0 ? (
+      {loadFailed ? (
+        // ★取得失敗: 「まだ求リストがありません」(0件) と区別し、再試行を出す。
+        //   追加ボタンは上に残っているので、この状態でも手動追加で出品を続行できる。
+        <View style={styles.emptyBox}>
+          <Text style={styles.retryText}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => void load()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
+        </View>
+      ) : wants.length === 0 ? (
         <View style={styles.emptyBox}>
           <Ionicons name="list-outline" size={36} color={colors.border} />
           <Text style={styles.emptyTitle}>まだ求リストがありません</Text>
@@ -311,6 +331,25 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
     paddingHorizontal: spacing.lg,
+  },
+  // A1: セクション内の読み込み失敗+再試行 (home/wants と同一トークン)。
+  retryText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  retryButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
   list: {
     gap: spacing.sm,

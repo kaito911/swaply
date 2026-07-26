@@ -21,15 +21,19 @@
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
+  addUserBlock,
+  fetchMyBlockedUserIds,
   fetchTradeDetailByOffer,
   fetchTradeMessages,
   markTradeThreadRead,
+  removeUserBlock,
   sendTradeMessage,
 } from '@/lib/supabase'
 import { TradeMessage } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { useBadge } from '@/providers/BadgeProvider'
-import { useFocusEffect, useLocalSearchParams } from 'expo-router'
+import { Ionicons } from '@expo/vector-icons'
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -79,6 +83,7 @@ function readOnlyMessage(status: TradeStatus): string {
 }
 
 type CounterpartProfile = {
+  id?: string | null // 通報 (targetId) / ブロック (addUserBlock) に必要。RPC が返す。
   display_name?: string | null
   handle?: string | null
   avatar_url?: string | null
@@ -140,6 +145,9 @@ export default function TradeDMScreen() {
   // ★取得失敗と「0 件」を区別する。エラーを 0 件として描画しない (嘘表示の防止)。
   const [messagesError, setMessagesError] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  // 自分がブロックしているユーザー id 一覧 (状態判定用)。★DM の使用可否には影響させない
+  // (ブロックは既存 DM に遡及しない・確定仕様)。メニューの文言トグルにのみ使う。
+  const [blockedIds, setBlockedIds] = useState<string[]>([])
 
   const scrollRef = useRef<ScrollView | null>(null)
   const markingRef = useRef(false)
@@ -225,16 +233,27 @@ export default function TradeDMScreen() {
     [offerIdStr, userId]
   )
 
+  // ブロック一覧を取得 (メニューの通報/ブロック文言トグル用)。失敗時は空配列。
+  const refreshBlocked = useCallback(async () => {
+    try {
+      setBlockedIds(await fetchMyBlockedUserIds())
+    } catch (error) {
+      console.warn('[TradeDM] fetchMyBlockedUserIds', error)
+    }
+  }, [])
+
   // 初回 mount
   useEffect(() => {
     reload().then((tid) => markRead(tid))
-  }, [reload, markRead])
+    void refreshBlocked()
+  }, [reload, markRead, refreshBlocked])
 
   // 画面復帰
   useFocusEffect(
     useCallback(() => {
       reload().then((tid) => markRead(tid))
-    }, [reload, markRead])
+      void refreshBlocked()
+    }, [reload, markRead, refreshBlocked])
   )
 
   // メッセージ更新時に最下部へスクロール
@@ -261,6 +280,93 @@ export default function TradeDMScreen() {
     await markRead(tid)
     setRetrying(false)
   }, [retrying, reload, markRead])
+
+  // ── 通報 / ブロック (ヘッダー右「…」メニュー) ──
+  // 相手ユーザーを通報する (既存の /report をユーザー通報で流用)。メッセージ単体通報は非対応。
+  const handleReport = useCallback(() => {
+    const cid = counterpart?.id
+    if (cid == null || cid === '') {
+      Alert.alert('通報できません', '相手の情報を取得できませんでした。画面を開き直してください。')
+      return
+    }
+    router.push({
+      pathname: '/report',
+      params: {
+        targetType: 'user',
+        targetId: cid,
+        targetLabel: counterpartLabel(counterpart),
+      },
+    } as never)
+  }, [counterpart])
+
+  // ブロック / 解除。★DM の使用可否には一切影響させない (遡及しない・確定仕様)。
+  const handleBlockToggle = useCallback(() => {
+    const cid = counterpart?.id
+    if (cid == null || cid === '') {
+      Alert.alert('ブロックできません', '相手の情報を取得できませんでした。画面を開き直してください。')
+      return
+    }
+    const blocked = blockedIds.includes(cid)
+    if (blocked) {
+      Alert.alert(
+        'ブロックを解除しますか？',
+        '解除すると、このユーザーと再び新しい交換のやり取りができるようになります。',
+        [
+          { text: 'キャンセル', style: 'cancel' },
+          {
+            text: '解除する',
+            onPress: async () => {
+              try {
+                await removeUserBlock(cid)
+                await refreshBlocked()
+              } catch (error) {
+                console.warn('[TradeDM] removeUserBlock', error)
+                Alert.alert('エラー', 'ブロックの解除に失敗しました。')
+              }
+            },
+          },
+        ]
+      )
+    } else {
+      Alert.alert(
+        'このユーザーをブロックしますか？',
+        'ブロックすると、このユーザーとの新しい交換のやり取りが始まらなくなります。\n\n※ この取引のメッセージは、これまでどおり続けられます。',
+        [
+          { text: 'キャンセル', style: 'cancel' },
+          {
+            text: 'ブロックする',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await addUserBlock(cid)
+                await refreshBlocked()
+              } catch (error) {
+                console.warn('[TradeDM] addUserBlock', error)
+                Alert.alert('エラー', 'ブロックに失敗しました。')
+              }
+            },
+          },
+        ]
+      )
+    }
+  }, [counterpart, blockedIds, refreshBlocked])
+
+  // ヘッダー右「…」タップ → 通報 / ブロック(解除) の Alert メニュー。
+  const handleOpenMenu = useCallback(() => {
+    const cid = counterpart?.id ?? null
+    const blocked = cid != null && blockedIds.includes(cid)
+    Alert.alert(counterpartLabel(counterpart), undefined, [
+      { text: 'このユーザーを通報する', onPress: handleReport },
+      {
+        text: blocked
+          ? 'このユーザーのブロックを解除する'
+          : 'このユーザーをブロックする',
+        style: blocked ? 'default' : 'destructive',
+        onPress: handleBlockToggle,
+      },
+      { text: 'キャンセル', style: 'cancel' },
+    ])
+  }, [counterpart, blockedIds, handleReport, handleBlockToggle])
 
   const handleSend = useCallback(async () => {
     if (tradeId == null || status == null) return
@@ -393,7 +499,19 @@ export default function TradeDMScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title={counterpartLabel(counterpart)} />
+      <ScreenHeader
+        title={counterpartLabel(counterpart)}
+        rightActions={
+          <Pressable
+            onPress={handleOpenMenu}
+            hitSlop={8}
+            accessibilityLabel="通報・ブロック"
+            style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}
+          >
+            <Ionicons name="ellipsis-horizontal" size={22} color={colors.textPrimary} />
+          </Pressable>
+        }
+      />
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -544,6 +662,16 @@ export default function TradeDMScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
+  menuButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+  },
+  menuButtonPressed: {
+    backgroundColor: colors.backgroundMuted,
+  },
   centerBox: {
     flex: 1,
     alignItems: 'center',

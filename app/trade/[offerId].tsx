@@ -1013,8 +1013,9 @@ export default function TradeDetailScreen() {
           </Text>
         </View>
 
-        {/* 申告導線 (常設): 完了取引で問題があれば運営に申告できる (任意・非公開・収集のみ)。 */}
-        {uiState === 'completed' && (
+        {/* 申告導線 (常設): 完了/キャンセル取引で問題があれば運営に申告できる
+            (任意・非公開・収集のみ)。DB は completed 7日 / cancelled 14日 で受付。 */}
+        {(uiState === 'completed' || uiState === 'cancelled') && (
           <Pressable
             style={styles.reportLink}
             onPress={() =>

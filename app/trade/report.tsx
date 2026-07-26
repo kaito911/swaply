@@ -71,7 +71,7 @@ function messageForError(raw: string): string {
     case 'ALREADY_REPORTED':
       return 'この取引にはすでに申告済みです。'
     case 'TRADE_NOT_ELIGIBLE':
-      return '申告できる期間（取引完了後7日以内）を過ぎているか、まだ取引が完了していません。'
+      return '申告できる期間を過ぎています（取引完了後は7日以内、キャンセル後は14日以内）。'
     case 'NOT_TRADE_PARTICIPANT':
       return 'この取引の当事者ではありません。'
     case 'TRADE_NOT_FOUND':

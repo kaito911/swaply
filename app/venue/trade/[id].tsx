@@ -733,8 +733,9 @@ export default function VenueTradeDMScreen() {
                 ? 'この取引は完了済みです。メッセージは閲覧のみ可能です。'
                 : 'この取引はキャンセル済みです。メッセージは閲覧のみ可能です。'}
             </Text>
-            {/* 申告導線 (常設): 完了取引で問題があれば運営に申告できる (任意・非公開・収集のみ)。 */}
-            {trade.status === 'completed' && (
+            {/* 申告導線 (常設): 完了/キャンセル取引で問題があれば運営に申告できる
+                (任意・非公開・収集のみ)。DB は completed 7日 / cancelled 14日 で受付。 */}
+            {(trade.status === 'completed' || trade.status === 'cancelled') && (
               <Pressable
                 style={styles.reportLink}
                 onPress={() =>

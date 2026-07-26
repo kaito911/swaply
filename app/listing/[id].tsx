@@ -1,6 +1,8 @@
 // app/listing/[id].tsx
 import { LikeButton } from '@/components/LikeButton'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
+import { TroubleDot } from '@/components/TroubleDot'
+import { TrustFactPanel } from '@/components/TrustFactPanel'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
@@ -11,6 +13,7 @@ import {
   fetchMyBlockedUserIds,
   fetchMyLikedCardIds,
   fetchMyWantedCards,
+  fetchUserTrust,
   removeLike,
   removeUserBlock,
   supabase,
@@ -20,7 +23,7 @@ import {
   getItemTypeById,
   getWorkById,
 } from '@/lib/master'
-import { Card, CardWantedLinkWithWantedCard, Profile, WantedCard, WantMatchScore } from '@/lib/types'
+import { Card, CardWantedLinkWithWantedCard, Profile, UserTrust, WantedCard, WantMatchScore } from '@/lib/types'
 import { scoreWantMatchV2 } from '@/lib/matcher' // ★ Step 3 commit 3: v1 → v2 切替
 import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -158,6 +161,8 @@ export default function ListingDetailScreen() {
   // Phase 0 PR-C: 出品者のブロック状態 (画面 mount 時に取得、トグル時に optimistic 更新)
   const [isBlocked, setIsBlocked] = useState(false)
   const [blockToggling, setBlockToggling] = useState(false)
+  // 出品者の Trust (get_user_trust・都度算出)。profiles の死列は使わない。
+  const [ownerTrust, setOwnerTrust] = useState<UserTrust | null>(null)
 
   const load = useCallback(async () => {
     if (!listingId) {
@@ -228,6 +233,26 @@ export default function ListingDetailScreen() {
       setImageSide('front')
     }
   }, [card?.image_back_url])
+
+  // 出品者の Trust を取得 (get_user_trust・失敗時は null=全項目「—」表示)。
+  useEffect(() => {
+    const ownerId = card?.owner_user_id
+    if (ownerId == null) {
+      setOwnerTrust(null)
+      return
+    }
+    let cancelled = false
+    fetchUserTrust(ownerId)
+      .then((t) => {
+        if (!cancelled) setOwnerTrust(t)
+      })
+      .catch(() => {
+        if (!cancelled) setOwnerTrust(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [card?.owner_user_id])
 
   const onRefresh = useCallback(() => {
     setRefreshing(true)
@@ -833,6 +858,8 @@ export default function ListingDetailScreen() {
                       .slice(0, 1)
                       .toUpperCase()}
                   </Text>
+                  {/* トラブル色サイン (数字なし・色のみ・0は非表示)。共通 TroubleDot。 */}
+                  <TroubleDot stage={ownerTrust?.trouble_stage ?? 0} />
                 </View>
 
                 <View style={styles.sellerMeta}>
@@ -843,10 +870,11 @@ export default function ListingDetailScreen() {
                   </Text>
                 </View>
 
+                <Text style={styles.detailLink}>Trust詳細 ›</Text>
               </View>
-              {/* Trust統計 (getTrustRows 6項目 / 「※感情レビューなし」注記 / 「Trust詳細›」
-                  ラベル) は seed 固定の死んだ値のため β1 で削除 (タスクB')。
-                  導線 (seller card タップ → trust/[id]) は現状維持。画面の扱いは K 判断。 */}
+              {/* Trust 4項目 (交換人数/取引回数/発送まで/直近ログイン)。値は get_user_trust。
+                  トラブル件数・発送遵守率(率)は出さない (色サインで表現・率禁止)。 */}
+              <TrustFactPanel trust={ownerTrust} />
             </Pressable>
           ) : (
             <View style={styles.sellerCardEmpty}>
@@ -1359,6 +1387,11 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
+  },
+  detailLink: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.medium,
+    color: colors.primary,
   },
   sellerBadgeRow: {
     flexDirection: 'row',

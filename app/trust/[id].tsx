@@ -17,9 +17,11 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { CardItem } from '@/components/CardItem'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { SectionHeader } from '@/components/SectionHeader'
+import { TroubleDot } from '@/components/TroubleDot'
+import { TrustFactPanel } from '@/components/TrustFactPanel'
 import { colors, fontSize, spacing } from '@/constants/theme'
-import { fetchProfile, fetchUserCards } from '@/lib/supabase'
-import { Card, Profile } from '@/lib/types'
+import { fetchProfile, fetchUserCards, fetchUserTrust } from '@/lib/supabase'
+import { Card, Profile, UserTrust } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 
 // ─────────────────────────────────────────
@@ -33,13 +35,20 @@ export default function TrustProfileScreen() {
   const isOwnProfile = session?.user?.id != null && session.user.id === id
   const [profile, setProfile] = useState<Profile | null>(null)
   const [cards, setCards] = useState<Card[]>([])
+  const [trust, setTrust] = useState<UserTrust | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (id == null) return
-    Promise.all([fetchProfile(id), fetchUserCards(id)]).then(([p, c]) => {
+    Promise.all([
+      fetchProfile(id),
+      fetchUserCards(id),
+      // Trust (get_user_trust)。失敗しても画面を止めず null=全項目「—」表示。
+      fetchUserTrust(id).catch(() => null),
+    ]).then(([p, c, t]) => {
       setProfile(p)
       setCards(c)
+      setTrust(t)
       setLoading(false)
     })
   }, [id])
@@ -47,7 +56,7 @@ export default function TrustProfileScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScreenHeader title="出品者" />
+        <ScreenHeader title="Trustプロフィール" />
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={colors.primary} size="large" />
         </View>
@@ -58,7 +67,7 @@ export default function TrustProfileScreen() {
   if (profile == null) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScreenHeader title="出品者" />
+        <ScreenHeader title="Trustプロフィール" />
         <View style={styles.loadingWrap}>
           <Text style={styles.errorText}>プロフィールが見つかりませんでした</Text>
           <TouchableOpacity onPress={() => router.back()}>
@@ -71,31 +80,39 @@ export default function TrustProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <ScreenHeader title="出品者" />
+      <ScreenHeader title="Trustプロフィール" />
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ─ プロフィールヘッダー ─ */}
         <View style={styles.profileHeader}>
-          {profile.avatar_url != null ? (
-            <Image
-              source={{ uri: profile.avatar_url }}
-              style={styles.avatar}
-            />
-          ) : (
-            <View style={[styles.avatar, styles.avatarPlaceholder]}>
-              <Text style={styles.avatarInitial}>
-                {(profile.handle || profile.display_name || '?')[0].toUpperCase()}
-              </Text>
-            </View>
-          )}
+          <View style={styles.avatarWrap}>
+            {profile.avatar_url != null ? (
+              <Image
+                source={{ uri: profile.avatar_url }}
+                style={styles.avatar}
+              />
+            ) : (
+              <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                <Text style={styles.avatarInitial}>
+                  {(profile.handle || profile.display_name || '?')[0].toUpperCase()}
+                </Text>
+              </View>
+            )}
+            {/* トラブル色サイン (数字なし・色のみ・0は非表示)。共通 TroubleDot。 */}
+            <TroubleDot stage={trust?.trouble_stage ?? 0} />
+          </View>
 
           <Text style={styles.username}>{profile.handle}</Text>
 
           {profile.display_name != null && (
             <Text style={styles.displayName}>{profile.display_name}</Text>
           )}
-          {/* Trust統計 (最終アクティブ / 成立件数 / 発送遵守率 / 返信中央値 /
-              トラブル件数) は全て seed 固定の死んだ値のため β1 で削除 (タスクB')。 */}
+        </View>
+
+        {/* ─ Trust 4項目 (交換人数/取引回数/発送まで/直近ログイン)。値は get_user_trust。
+            トラブル件数・発送遵守率(率)は出さない (色サインで表現・率禁止)。 ─ */}
+        <View style={styles.trustPanelWrap}>
+          <TrustFactPanel trust={trust} />
         </View>
 
         {/* ─ 出品中カード ─ */}
@@ -192,16 +209,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.base,
     gap: spacing.sm,
   },
+  // アバターと色サイン(右下 absolute)を重ねる相対コンテナ。margin はここに移設。
+  avatarWrap: {
+    width: 88,
+    height: 88,
+    marginBottom: spacing.sm,
+  },
   avatar: {
     width: 88,
     height: 88,
     borderRadius: 44,
-    marginBottom: spacing.sm,
   },
   avatarPlaceholder: {
     backgroundColor: colors.backgroundMuted,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  trustPanelWrap: {
+    paddingHorizontal: spacing.base,
+    marginBottom: spacing.xl,
   },
   avatarInitial: {
     fontSize: 36,

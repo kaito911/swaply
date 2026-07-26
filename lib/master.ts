@@ -408,6 +408,71 @@ export function formatStructuredWant(
   return { text, sameSeries }
 }
 
+// ─────────────────────────────────────────
+// 一覧カードの譲/求 3行表示用 (グループ / メンバー / グッズ種別) の per-field ビルダー。
+//   ★legacy 列 (group_name/member_name/series) と合成 name は使わない (全出品で null)。
+//   構造化 master-id 配列 (work_id/characters/item_types と want_*) を master 解決する。
+//   ★版/シリーズは Swaply 設計上構造化しない (現物写真で判別) ため出さない。
+// ─────────────────────────────────────────
+
+export interface GiveWantFields {
+  group: string // 作品/グループ (work → 表示名)。空文字あり
+  member: string // メンバー名 (複数は結合)。空文字あり
+  goods: string // グッズ種別 (複数は「・」結合)。空文字あり
+}
+
+function resolveGroup(workId: string | null | undefined): string {
+  if (workId == null || workId === '') return ''
+  return getWorkById(workId)?.display_name_ja ?? ''
+}
+
+// メンバー名の結合。★行数は増やさず1行に収める。
+//   <=2 名 → 「・」区切りで全表示 / >=3 名 → 先頭2名 + 「他N名」
+//   (氏名が途中で切れる=元の不具合を避けるため、tail 省略でなく明示的に丸める)。
+function resolveMembers(ids: string[]): string {
+  const names = ids
+    .map((id) => getCharacterById(id)?.display_name_ja ?? id)
+    .filter((s) => s !== '')
+  if (names.length <= 2) return names.join('・')
+  return `${names.slice(0, 2).join('・')} 他${names.length - 2}名`
+}
+
+function resolveGoods(ids: string[]): string {
+  return ids
+    .map((id) => getItemTypeById(id)?.display_name_ja ?? id)
+    .filter((s) => s !== '')
+    .join('・')
+}
+
+/** 譲の3行 (グループ/メンバー/グッズ種別) を master 解決で組む。 */
+export function formatStructuredGive(
+  card: Pick<Card, 'work_id' | 'characters' | 'item_types'>,
+): GiveWantFields {
+  return {
+    group: resolveGroup(card.work_id),
+    member: resolveMembers(card.characters ?? []),
+    goods: resolveGoods(card.item_types ?? []),
+  }
+}
+
+/**
+ * 求の3行を master 解決で組む。求が皆無 (works/characters/item_types すべて空) なら
+ * null を返す → 呼出側で求ブロックごと非表示 (旧テストデータのみ該当・本番は必須入力)。
+ */
+export function formatStructuredWantFields(
+  card: Pick<Card, 'want_works' | 'want_characters' | 'want_item_types'>,
+): GiveWantFields | null {
+  const works = card.want_works ?? []
+  const chars = card.want_characters ?? []
+  const types = card.want_item_types ?? []
+  if (works.length === 0 && chars.length === 0 && types.length === 0) return null
+  return {
+    group: resolveGroup(works[0]),
+    member: resolveMembers(chars),
+    goods: resolveGoods(types),
+  }
+}
+
 /**
  * SearchSuggestion を UI 表示用の type ラベル文字列に変換する。
  * character は所属 work.category を参照するため getWorkById を経由する。

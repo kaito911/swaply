@@ -4,11 +4,12 @@
 // 求 (want_description) を「求: XXX」全体同サイズ太字で大強調、商品名は補助的に小さく。
 // 写真右上に LikeButton (size=small) overlay。Trust は出品詳細画面で密度確保 (機能 H 戦略)。
 
+import { GiveWantBlock } from '@/components/GiveWantBlock'
 import { LikeButton } from '@/components/LikeButton'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
-import { Card, formatCardTitle } from '@/lib/types'
-import { formatStructuredWant } from '@/lib/master'
+import { Card } from '@/lib/types'
+import { formatStructuredGive, formatStructuredWantFields } from '@/lib/master'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import React from 'react'
@@ -102,21 +103,15 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
   )
 }
 
-// 【譲】/【求】2行併記 (同サイズ・現場フォーマット準拠、求は card_wanted_links を正)。
-// 「提案する」CTA は撤去済 (詳細遷移がカード全体と同一で独自機能なし)。
+// 譲/求を 3行×2ブロック (グループ/メンバー/グッズ種別) で表示。master 解決の
+// per-field を共通 GiveWantBlock に渡す。求が空 (旧テストデータ) はブロックごと非表示。
 function HomeLargeTitle({ card }: { card: Card }) {
-  const { give, want: legacyWant } = formatCardTitle(card)
-  const want = formatStructuredWant(card).text ?? legacyWant
+  const give = formatStructuredGive(card)
+  const want = formatStructuredWantFields(card)
   return (
     <View style={styles.body}>
-      <Text style={styles.line} numberOfLines={2}>
-        {give}
-      </Text>
-      {want != null && (
-        <Text style={styles.line} numberOfLines={2}>
-          {want}
-        </Text>
-      )}
+      <GiveWantBlock kind="give" fields={give} size="large" />
+      {want != null && <GiveWantBlock kind="want" fields={want} size="large" />}
     </View>
   )
 }
@@ -132,10 +127,10 @@ const styles = StyleSheet.create({
     marginRight: spacing.md,
   },
   imageWrap: {
-    // item5c: 幅可変に伴い固定 height:220 を廃止し aspectRatio 化 (物理写真の
-    //   顔切れ回避)。4:5 の縦長で人物/グッズを収めやすくする。実機で 4:5⇔1:1 を最終判断。
+    // 幅可変に伴い固定 height を廃止し aspectRatio 化 (contain で顔切れ回避)。
+    // ★RN の aspectRatio は width/height。確定仕様「高さ=幅×0.90」= width/height=1/0.9≈1.11。
     width: '100%',
-    aspectRatio: 1,
+    aspectRatio: 1.11,
     backgroundColor: colors.backgroundMuted,
   },
   imagePlaceholder: {
@@ -186,14 +181,5 @@ const styles = StyleSheet.create({
   },
   body: {
     padding: spacing.md,
-  },
-  // 【譲】【求】は同サイズ (対等・現場フォーマット)。2 行併記。
-  // item3: 2.5 列化で広がった幅で読みやすくするため fontSize 15→13 に縮小 (ビルドで 12 まで微調整可)。
-  line: {
-    fontSize: 12,
-    fontWeight: fontWeight.semibold,
-    color: colors.textPrimary,
-    lineHeight: 18,
-    marginTop: spacing.xs,
   },
 })

@@ -3,10 +3,11 @@
 // 「すべて見る」一覧 (app/list/[section].tsx) の 2 列グリッド用カード。
 // 写真主役・提案ボタンなし (押しても写真押してもカード全体で詳細に飛ぶ = HomeLargeCard の
 // 提案 CTA は独自機能がなく撤去した方針と同じ)。FlatList numColumns=2 のセルとして flex:1。
+import { GiveWantBlock } from '@/components/GiveWantBlock'
 import { LikeButton } from '@/components/LikeButton'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
-import { Card, formatCardTitle } from '@/lib/types'
-import { formatStructuredWant } from '@/lib/master'
+import { Card } from '@/lib/types'
+import { formatStructuredGive, formatStructuredWantFields } from '@/lib/master'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
@@ -74,21 +75,15 @@ export function FeedGridCard({
   )
 }
 
-// 【譲】/【求】2行併記 (同サイズ・現場フォーマット準拠)。
-// 求は PR-1a 以降の構造化求 (cards.want_*) を優先し、空なら legacy card_wanted_links に fallback。
+// 譲/求を 3行×2ブロック (グループ/メンバー/グッズ種別) で表示。共通 GiveWantBlock。
+// grid は幅が狭い (3列) ため size="grid" で各フォント −1。求が空はブロックごと非表示。
 function FeedGridTitle({ card }: { card: Card }) {
-  const { give, want: legacyWant } = formatCardTitle(card)
-  const want = formatStructuredWant(card).text ?? legacyWant
+  const give = formatStructuredGive(card)
+  const want = formatStructuredWantFields(card)
   return (
     <View style={styles.body}>
-      <Text style={styles.line} numberOfLines={2}>
-        {give}
-      </Text>
-      {want != null && (
-        <Text style={styles.line} numberOfLines={2}>
-          {want}
-        </Text>
-      )}
+      <GiveWantBlock kind="give" fields={give} size="grid" />
+      {want != null && <GiveWantBlock kind="want" fields={want} size="grid" />}
     </View>
   )
 }
@@ -104,8 +99,9 @@ const styles = StyleSheet.create({
   // width 未指定時の後方互換 (flex 等分)。list/[section] は width を渡すため通常未使用。
   cardFlex: { flex: 1 },
   imageWrap: {
+    // ★RN の aspectRatio は width/height。確定仕様「高さ=幅×0.90」= width/height=1/0.9≈1.11。
     width: '100%',
-    aspectRatio: 1,
+    aspectRatio: 1.11,
     backgroundColor: colors.backgroundMuted,
   },
   image: { width: '100%', height: '100%' },
@@ -136,13 +132,5 @@ const styles = StyleSheet.create({
   },
   body: {
     padding: spacing.xs + 1,
-    gap: 2,
-  },
-  // 【譲】【求】は同サイズ (対等)。3列グリッド幅 (~110px) に収まるよう 12px。
-  line: {
-    fontSize: 11,
-    fontWeight: fontWeight.semibold,
-    color: colors.textPrimary,
-    lineHeight: 16,
   },
 })

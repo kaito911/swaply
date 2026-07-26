@@ -147,6 +147,8 @@ export default function VenueHoldsScreen() {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [holds, setHolds] = useState<VenueHoldWithRelations[]>([])
   const [loading, setLoading] = useState(true)
+  // A1: 主 fetch(fetchVenueHolds) 失敗時の再試行フラグ。永久スピナー是正 (home/wants と同手法)。
+  const [loadFailed, setLoadFailed] = useState(false)
   const [actingId, setActingId] = useState<string | null>(null)
   // PR4a (B1 修正): venueTrades の in-memory state を廃止。trade は fetchVenueHolds が
   // join 取得した hold.venue_trade を直接利用する (画面再 mount 後も双方が trade に到達可)。
@@ -159,18 +161,27 @@ export default function VenueHoldsScreen() {
 
   const reload = useCallback(async () => {
     if (venueId == null || userId == null) return
+    // A1: 主 fetch を try/catch/finally で包み、失敗でも finally で必ず loading を落とす
+    //   (旧実装は fetchVenueHolds が try 外 = 失敗で永久スピナー)。
     setLoading(true)
-    const fresh = await fetchVenueHolds(venueId, userId, 'all')
-    setHolds(fresh)
-    // unread 取得は失敗しても hold 一覧の表示は止めない (warn のみ)
+    setLoadFailed(false)
     try {
-      const counts = await fetchVenueTradeUnreadCounts()
-      setUnreadByTradeId(counts)
+      const fresh = await fetchVenueHolds(venueId, userId, 'all')
+      setHolds(fresh)
+      // unread 取得は失敗しても hold 一覧の表示は止めない (warn のみ)
+      try {
+        const counts = await fetchVenueTradeUnreadCounts()
+        setUnreadByTradeId(counts)
+      } catch (error) {
+        console.warn('[VenueHolds] fetchVenueTradeUnreadCounts', error)
+        setUnreadByTradeId(new Map())
+      }
     } catch (error) {
-      console.warn('[VenueHolds] fetchVenueTradeUnreadCounts', error)
-      setUnreadByTradeId(new Map())
+      console.error('[VenueHolds] reload', error)
+      setLoadFailed(true)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }, [venueId, userId])
 
   useFocusEffect(
@@ -447,6 +458,14 @@ export default function VenueHoldsScreen() {
       {loading ? (
         <View style={styles.centerBox}>
           <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : loadFailed ? (
+        // ★取得失敗: 「提案はありません」を出さず、固まらせず再試行 (home/wants と同手法)。
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyTitle}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => void reload()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
         </View>
       ) : visible.length === 0 ? (
         <View style={styles.emptyBox}>
@@ -870,6 +889,22 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  // A1: 読み込み失敗時の再試行UI。holds はライト基調 (safe=colors.background) のため
+  //   home/wants と同一の明るいトークンで統一 (会場ダークは index/[id] のみ)。
+  retryButton: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
   holdCard: {
     backgroundColor: colors.backgroundCard,

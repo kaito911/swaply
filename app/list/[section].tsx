@@ -122,6 +122,8 @@ export default function ListSectionScreen() {
   const [cards, setCards] = useState<Card[]>([])
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
+  // A1: 読み込み失敗フラグ。catch で立て、再試行UIを出す (false-empty 是正・home/wants と同手法)。
+  const [loadFailed, setLoadFailed] = useState(false)
 
   // 絞込 (クライアント側): グループ + メンバー + 種類 の 3 軸。空なら全件。
   const [filterWorks, setFilterWorks] = useState<MasterWork[]>([])
@@ -135,6 +137,7 @@ export default function ListSectionScreen() {
       return
     }
     setLoading(true)
+    setLoadFailed(false)
     try {
       let result: Card[] = []
       if (section === 'my-listings') {
@@ -201,6 +204,10 @@ export default function ListSectionScreen() {
       if (userId != null && section !== 'my-listings') {
         setLikedIds(await fetchMyLikedCardIds(userId))
       }
+    } catch (e) {
+      // ★取得失敗を「0件」と偽らない。既存表示を消し error 表示に切替 (再試行導線)。
+      console.error('[ListSection][load]', e)
+      setLoadFailed(true)
     } finally {
       setLoading(false)
     }
@@ -308,6 +315,14 @@ export default function ListSectionScreen() {
       ) : loading ? (
         <View style={styles.centerBox}>
           <ActivityIndicator color={colors.primary} size="large" />
+        </View>
+      ) : loadFailed ? (
+        // ★取得失敗: 「まだ〜ありません」を出さず、固まらせず再試行 (home/wants と同手法)。
+        <View style={styles.centerBox}>
+          <Text style={styles.emptyText}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => void load()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
         </View>
       ) : displayCards.length === 0 ? (
         <View style={styles.centerBox}>
@@ -470,6 +485,16 @@ const styles = StyleSheet.create({
   },
   emptyText: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },
   backLink: { fontSize: fontSize.sm, color: colors.primary, fontWeight: '600' },
+  // A1: 読み込み失敗時の再試行UI (home/wants と同一トークン)。
+  retryButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
   content: { padding: spacing.base, gap: spacing.sm, paddingBottom: 120 },
   column: { gap: spacing.sm },
   // filter sheet

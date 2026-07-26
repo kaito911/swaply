@@ -58,6 +58,9 @@ export default function ProposeScreen() {
   const [proposalSubTab, setProposalSubTab] = useState<ProposalSubTabKey>('received')
   const [offers, setOffers] = useState<OfferWithTrade[]>([])
   const [loading, setLoading] = useState(true)
+  // A1: 初回読み込み失敗フラグ。Alert をやめ画面内エラー+再試行に統一 (home/wants と同手法)。
+  //   refresh 失敗では立てない (既存一覧を消さない)。
+  const [loadFailed, setLoadFailed] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [actingOfferId, setActingOfferId] = useState<string | null>(null)
   const [openingTradeOfferId, setOpeningTradeOfferId] = useState<string | null>(null)
@@ -78,13 +81,16 @@ export default function ProposeScreen() {
           setRefreshing(true)
         } else {
           setLoading(true)
+          setLoadFailed(false)
         }
 
         const data = (await fetchMyOffers(userId)) as OfferWithTrade[]
         setOffers(data)
       } catch (error) {
+        // ★Alert をやめ、取得失敗を「0件」と偽らず画面内エラー表示に切替 (再試行導線)。
+        //   refresh 失敗は既存一覧を消さない (loadFailed を立てない)。
         console.error('[ProposeScreen][loadOffers]', error)
-        Alert.alert('エラー', '取引一覧の取得に失敗しました')
+        if (!isRefresh) setLoadFailed(true)
       } finally {
         setLoading(false)
         setRefreshing(false)
@@ -289,6 +295,18 @@ export default function ProposeScreen() {
         <View style={styles.centerBox}>
           <ActivityIndicator size="small" color={colors.primary} />
           <Text style={styles.centerText}>取引一覧を読み込み中です</Text>
+        </View>
+      )
+    }
+
+    if (loadFailed) {
+      // ★取得失敗: 「申請はまだありません」を出さず、固まらせず再試行 (home/wants と同手法)。
+      return (
+        <View style={styles.centerBox}>
+          <Text style={styles.retryText}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => void loadOffers()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
         </View>
       )
     }
@@ -1031,6 +1049,26 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: '#71717A',
     textAlign: 'center',
+  },
+  // A1: 読み込み失敗時の再試行UI (home/wants と同一トーン)。
+  retryText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  retryButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
   list: {
     gap: 12,

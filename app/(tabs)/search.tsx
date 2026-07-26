@@ -488,6 +488,10 @@ function TextSearchPane({
   const [results, setResults] = useState<Card[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
+  // A1: 検索失敗フラグ + 再試行トークン。catch で立て、retryToken を effect deps に入れて
+  //   再試行タップで現在条件の検索を再実行 (0件と別状態・home/wants と同手法)。
+  const [searchFailed, setSearchFailed] = useState(false)
+  const [retryToken, setRetryToken] = useState(0)
 
   // master ready の reactive 取得 (emptyHint 出し分け用、SearchAutocomplete 内部とは独立)
   const [masterReady, setMasterReady] = useState(() => isMasterCacheReady())
@@ -535,22 +539,30 @@ function TextSearchPane({
     let cancelled = false
     const run = async () => {
       setLoading(true)
-      const cards = await searchCards({
-        workIds: selectedWorkIds,
-        characterIds: selectedCharIds,
-        itemTypeIds: selectedItemTypeIds,
-        excludeOwnerIds: blockedUserIds,
-      })
-      if (cancelled) return
-      setResults(sortByScore(cards, selectedCharIds, selectedItemTypeIds, selectedWorkIds))
-      setSearched(true)
-      setLoading(false)
+      setSearchFailed(false)
+      try {
+        const cards = await searchCards({
+          workIds: selectedWorkIds,
+          characterIds: selectedCharIds,
+          itemTypeIds: selectedItemTypeIds,
+          excludeOwnerIds: blockedUserIds,
+        })
+        if (cancelled) return
+        setResults(sortByScore(cards, selectedCharIds, selectedItemTypeIds, selectedWorkIds))
+        setSearched(true)
+      } catch (e) {
+        if (cancelled) return
+        console.error('[search][offer][chips]', e)
+        setSearchFailed(true)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
     void run()
     return () => {
       cancelled = true
     }
-  }, [hasChips, selectedWorkIds, selectedCharIds, selectedItemTypeIds, blockedUserIds])
+  }, [hasChips, selectedWorkIds, selectedCharIds, selectedItemTypeIds, blockedUserIds, retryToken])
 
   // 入力テキスト変化 effect (debounce 400ms、チップ 0 時のみ走る)
   useEffect(() => {
@@ -565,19 +577,26 @@ function TextSearchPane({
 
     debounceTimer.current = setTimeout(async () => {
       setLoading(true)
-      const cards = await searchCards({
-        query: trimmedInput,
-        excludeOwnerIds: blockedUserIds,
-      })
-      setResults(cards) // text fallback は created_at DESC のまま
-      setSearched(true)
-      setLoading(false)
+      setSearchFailed(false)
+      try {
+        const cards = await searchCards({
+          query: trimmedInput,
+          excludeOwnerIds: blockedUserIds,
+        })
+        setResults(cards) // text fallback は created_at DESC のまま
+        setSearched(true)
+      } catch (e) {
+        console.error('[search][offer][text]', e)
+        setSearchFailed(true)
+      } finally {
+        setLoading(false)
+      }
     }, 400)
 
     return () => {
       if (debounceTimer.current != null) clearTimeout(debounceTimer.current)
     }
-  }, [trimmedInput, hasChips, blockedUserIds])
+  }, [trimmedInput, hasChips, blockedUserIds, retryToken])
 
   // フリーテキスト確定シグナル (R9/R20)。
   // 入力ベースの effect で既にライブ検索が走っているので追加処理なし、将来 user_keyword_history 記録等の拡張点。
@@ -623,6 +642,8 @@ function TextSearchPane({
         searched={searched}
         results={results}
         currentUserId={currentUserId}
+        error={searchFailed}
+        onRetry={() => setRetryToken((t) => t + 1)}
         emptyHint={getEmptyHint({
           masterReady,
           inputTrimmed: trimmedInput,
@@ -643,12 +664,18 @@ function ResultArea({
   results,
   currentUserId,
   emptyHint,
+  error = false,
+  onRetry,
 }: {
   loading: boolean
   searched: boolean
   results: Card[]
   currentUserId: string | null
   emptyHint: string
+  // ★検索は「検索前」「検索中」「0件」「エラー」の4状態。error は 0件と別状態として扱う。
+  //   error/onRetry は active 3 pane が必ず渡す。dead な MemberSearchPane 用に optional。
+  error?: boolean
+  onRetry?: () => void
 }) {
   const handleCardPress = (card: Card) => {
     router.push({
@@ -704,6 +731,17 @@ function ResultArea({
     return (
       <View style={styles.centerBox}>
         <ActivityIndicator color={colors.primary} />
+      </View>
+    )
+  }
+  if (error) {
+    // ★取得失敗: 「見つかりませんでした」(0件) と混同せず、固まらせず再試行 (home/wants と同手法)。
+    return (
+      <View style={styles.centerBox}>
+        <Text style={styles.emptyTitle}>読み込みに失敗しました</Text>
+        <Pressable style={styles.retryButton} onPress={() => onRetry?.()}>
+          <Text style={styles.retryButtonText}>再試行</Text>
+        </Pressable>
       </View>
     )
   }
@@ -764,6 +802,9 @@ function WantedSearchPane({
   const [results, setResults] = useState<Card[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
+  // A1: 検索失敗フラグ + 再試行トークン (0件と別状態・home/wants と同手法)。
+  const [searchFailed, setSearchFailed] = useState(false)
+  const [retryToken, setRetryToken] = useState(0)
 
   const selectedWorkIds = useMemo(() => selectedWorks.map((w) => w.id), [selectedWorks])
   const selectedCharIds = useMemo(() => selectedChars.map((c) => c.id), [selectedChars])
@@ -786,27 +827,35 @@ function WantedSearchPane({
     let cancelled = false
     const run = async () => {
       setLoading(true)
-      const data = await searchDirectMatch({
-        myOffers: {
-          works: selectedWorkIds,
-          characters: selectedCharIds,
-          itemTypes: selectedItemTypeIds,
-        },
-        myWants: { works: [], characters: [], itemTypes: [] },
-        excludeUserId: currentUserId,
-        excludeOwnerIds: blockedUserIds,
-        dedupByOwner: false,
-      })
-      if (cancelled) return
-      setResults(data.map((r) => r.offering_card))
-      setSearched(true)
-      setLoading(false)
+      setSearchFailed(false)
+      try {
+        const data = await searchDirectMatch({
+          myOffers: {
+            works: selectedWorkIds,
+            characters: selectedCharIds,
+            itemTypes: selectedItemTypeIds,
+          },
+          myWants: { works: [], characters: [], itemTypes: [] },
+          excludeUserId: currentUserId,
+          excludeOwnerIds: blockedUserIds,
+          dedupByOwner: false,
+        })
+        if (cancelled) return
+        setResults(data.map((r) => r.offering_card))
+        setSearched(true)
+      } catch (e) {
+        if (cancelled) return
+        console.error('[search][want]', e)
+        setSearchFailed(true)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
     void run()
     return () => {
       cancelled = true
     }
-  }, [hasChips, selectedWorkIds, selectedCharIds, selectedItemTypeIds, currentUserId, blockedUserIds])
+  }, [hasChips, selectedWorkIds, selectedCharIds, selectedItemTypeIds, currentUserId, blockedUserIds, retryToken])
 
   const handleFreeTextNoop = useCallback(() => {}, [])
 
@@ -846,6 +895,8 @@ function WantedSearchPane({
         searched={searched}
         results={results}
         currentUserId={currentUserId}
+        error={searchFailed}
+        onRetry={() => setRetryToken((t) => t + 1)}
         emptyHint={
           hasChips
             ? '条件に一致する出品（相手の求）が見つかりませんでした'
@@ -879,6 +930,9 @@ function DirectMatchPane({
   const [results, setResults] = useState<DirectMatchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
+  // A1: 検索失敗フラグ + 再試行トークン (0件と別状態・home/wants と同手法)。
+  const [searchFailed, setSearchFailed] = useState(false)
+  const [retryToken, setRetryToken] = useState(0)
 
   // ① 候補ドロップダウンのキーボード被り対策 (入力域 ScrollView に注入)。
   const { scrollRef, onScroll, ensureVisible } = useKeyboardAwareScroll()
@@ -910,21 +964,29 @@ function DirectMatchPane({
     let cancelled = false
     const run = async () => {
       setLoading(true)
-      const data = await searchDirectMatch({
-        // ★上下スワップ (相手カード視点に統一): 上バー(offer* state)=相手の譲 → myWants
-        //   (engine searchDirectMatch で相手 characters と照合)。下バー(want* state)=相手の求
-        //   → myOffers (engine で相手 want_* と照合)。engine 本体は不変・割り当てのみ入替。
-        //   これで上バー入力→結果カード【譲】/ 下バー入力→結果カード【求】 と視点が揃う。
-        myWants: { works: offerWorkIds, characters: offerCharIds, itemTypes: offerItemIds },
-        myOffers: { works: wantWorkIds, characters: wantCharIds, itemTypes: wantItemIds },
-        excludeUserId: currentUserId,
-        excludeOwnerIds: blockedUserIds,
-        dedupByOwner: false, // 全カード表示 (owner集約せず該当card全件)。求タブと統一。
-      })
-      if (cancelled) return
-      setResults(data)
-      setSearched(true)
-      setLoading(false)
+      setSearchFailed(false)
+      try {
+        const data = await searchDirectMatch({
+          // ★上下スワップ (相手カード視点に統一): 上バー(offer* state)=相手の譲 → myWants
+          //   (engine searchDirectMatch で相手 characters と照合)。下バー(want* state)=相手の求
+          //   → myOffers (engine で相手 want_* と照合)。engine 本体は不変・割り当てのみ入替。
+          //   これで上バー入力→結果カード【譲】/ 下バー入力→結果カード【求】 と視点が揃う。
+          myWants: { works: offerWorkIds, characters: offerCharIds, itemTypes: offerItemIds },
+          myOffers: { works: wantWorkIds, characters: wantCharIds, itemTypes: wantItemIds },
+          excludeUserId: currentUserId,
+          excludeOwnerIds: blockedUserIds,
+          dedupByOwner: false, // 全カード表示 (owner集約せず該当card全件)。求タブと統一。
+        })
+        if (cancelled) return
+        setResults(data)
+        setSearched(true)
+      } catch (e) {
+        if (cancelled) return
+        console.error('[search][direct]', e)
+        setSearchFailed(true)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
     void run()
     return () => {
@@ -940,6 +1002,7 @@ function DirectMatchPane({
     wantItemIds,
     currentUserId,
     blockedUserIds,
+    retryToken,
   ])
 
   const handleFreeTextNoop = useCallback(() => {}, [])
@@ -1018,6 +1081,8 @@ function DirectMatchPane({
         searched={searched}
         results={results.map((r) => r.offering_card)}
         currentUserId={currentUserId}
+        error={searchFailed}
+        onRetry={() => setRetryToken((t) => t + 1)}
         emptyHint={
           hasAnyAxis
             ? 'マッチする相手が見つかりませんでした'
@@ -1416,6 +1481,21 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  // A1: 検索失敗時の再試行UI (home/wants と同一トークン)。
+  retryButton: {
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
   listContent: {
     paddingHorizontal: spacing.base,

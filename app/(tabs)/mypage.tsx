@@ -66,35 +66,48 @@ export default function MyPageScreen() {
   // 運営(operator)のみ「通報管理」リンクを出すための判定。既定 false (一般ユーザーには出さない)。
   const [operator, setOperator] = useState(false)
   const [dataLoading, setDataLoading] = useState(true)
+  // A1: 読み込み失敗フラグ。★core 3 fetch(profile/cards/offers) が1つでも失敗したら
+  //   ページ単位で error 表示に倒す (false-empty 是正・理由は報告参照)。Trust/operator は
+  //   個別 soft-fail (null/false) のままページを落とさない。
+  const [loadFailed, setLoadFailed] = useState(false)
+
+  const loadData = useCallback(() => {
+    if (userId == null) return
+    setDataLoading(true)
+    setLoadFailed(false)
+    Promise.all([
+      fetchProfile(userId),
+      fetchUserCards(userId, 'active'),
+      fetchMyOffers(userId),
+      // Trust 数値 RPC。失敗しても他データ表示を止めないよう個別に握り潰す (null fallback)。
+      fetchUserTrust(userId).catch(() => null),
+      // 運営判定。失敗時は false (安全側=リンクを出さない)。
+      isOperator().catch(() => false),
+    ]).then(([p, c, offers, t, op]) => {
+      if (p != null) setProfile(p)
+      setCards(c)
+      setTrust(t)
+      setOperator(op)
+      setHistoryOffers(
+        offers.filter(
+          (o) =>
+            o.status === 'accepted' ||
+            o.status === 'declined' ||
+            (o.trade != null && o.trade.status != null)
+        )
+      )
+      refreshBadge()
+    }).catch((e) => {
+      // ★core fetch のいずれか失敗 → 「まだ出品がありません」等の嘘の空表示にせず error 化。
+      console.error('[MyPage][loadData]', e)
+      setLoadFailed(true)
+    }).finally(() => setDataLoading(false))
+  }, [userId, refreshBadge])
 
   useFocusEffect(
     useCallback(() => {
-      if (userId == null) return
-      setDataLoading(true)
-      Promise.all([
-        fetchProfile(userId),
-        fetchUserCards(userId, 'active'),
-        fetchMyOffers(userId),
-        // Trust 数値 RPC。失敗しても他データ表示を止めないよう個別に握り潰す (null fallback)。
-        fetchUserTrust(userId).catch(() => null),
-        // 運営判定。失敗時は false (安全側=リンクを出さない)。
-        isOperator().catch(() => false),
-      ]).then(([p, c, offers, t, op]) => {
-        if (p != null) setProfile(p)
-        setCards(c)
-        setTrust(t)
-        setOperator(op)
-        setHistoryOffers(
-          offers.filter(
-            (o) =>
-              o.status === 'accepted' ||
-              o.status === 'declined' ||
-              (o.trade != null && o.trade.status != null)
-          )
-        )
-        refreshBadge()
-      }).finally(() => setDataLoading(false))
-    }, [userId, refreshBadge])
+      loadData()
+    }, [loadData])
   )
 
   const openMailto = async (url: string) => {
@@ -256,6 +269,21 @@ export default function MyPageScreen() {
           )
         })}
       </View>
+    )
+  }
+
+  if (loadFailed) {
+    // ★取得失敗: ヘッダーは残しつつ本体を error 表示に。嘘の空表示 (0件) を出さない。
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <ScreenHeader title="マイページ" showBackButton={false} rightActions={<HeaderActions />} />
+        <View style={styles.errorBox}>
+          <Text style={styles.retryText}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => loadData()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
     )
   }
 
@@ -687,6 +715,31 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: fontWeight.semibold,
     marginTop: spacing.xs,
+  },
+  // A1: 読み込み失敗時の再試行UI (home/wants と同一トークン)。
+  errorBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  retryText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.base,
+  },
+  retryButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
 
   // ── card meta (history) ──

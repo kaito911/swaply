@@ -162,7 +162,7 @@ type UIStateConfig = {
 const UI_STATE_CONFIG: Record<UIState, UIStateConfig> = {
   waiting_my_ship: {
     headline: 'あなたの発送待ちです',
-    note: '発送後、追跡番号を入力してください。同時発送ルールにより、相手も同時に発送する必要があります。',
+    note: '発送後、追跡番号を入力してください。',
     stepIndex: 1,
   },
   waiting_their_ship: {
@@ -323,23 +323,30 @@ function ShipmentBox({
   title: string
   shipment: ShipmentRow
 }) {
+  // 存在しない情報は行ごと出さない (「未設定」「未登録」を画面に出さない)。
+  //   shipment 行が未作成 (status undefined) は「未発送」として扱う。
+  const statusLabel = shipment.status == null ? '未発送' : getShipmentLabel(shipment.status)
   return (
     <View style={styles.shipmentBox}>
       <Text style={styles.sectionSubTitle}>{title}</Text>
-      <Text style={styles.shipmentText}>状態: {getShipmentLabel(shipment.status)}</Text>
-      <Text style={styles.shipmentText}>
-        配送方法: {getShippingMethodLabel(shipment.shipping_method)}
-      </Text>
-      <Text style={styles.shipmentText}>
-        追跡番号: {shipment.tracking_number || '未登録'}
-      </Text>
-      <Text style={styles.shipmentText}>配送会社: {shipment.carrier || '未登録'}</Text>
-      <Text style={styles.shipmentText}>
-        発送時刻: {formatDateTime(shipment.shipped_at)}
-      </Text>
-      <Text style={styles.shipmentText}>
-        受取時刻: {formatDateTime(shipment.received_at)}
-      </Text>
+      <Text style={styles.shipmentText}>状態: {statusLabel}</Text>
+      {shipment.shipping_method != null && (
+        <Text style={styles.shipmentText}>
+          配送方法: {getShippingMethodLabel(shipment.shipping_method)}
+        </Text>
+      )}
+      {shipment.tracking_number != null && shipment.tracking_number !== '' && (
+        <Text style={styles.shipmentText}>追跡番号: {shipment.tracking_number}</Text>
+      )}
+      {shipment.carrier != null && shipment.carrier !== '' && (
+        <Text style={styles.shipmentText}>配送会社: {shipment.carrier}</Text>
+      )}
+      {shipment.shipped_at != null && shipment.shipped_at !== '' && (
+        <Text style={styles.shipmentText}>発送時刻: {formatDateTime(shipment.shipped_at)}</Text>
+      )}
+      {shipment.received_at != null && shipment.received_at !== '' && (
+        <Text style={styles.shipmentText}>受取時刻: {formatDateTime(shipment.received_at)}</Text>
+      )}
     </View>
   )
 }
@@ -373,6 +380,8 @@ export default function TradeDetailScreen() {
   // ③ 成立→発送の住所導線: 自分の配送先が登録済かを本人RLSで判定 (相手に届けてもらうために必要)。
   //   null = 未取得 (初回フラッシュ防止でナッジを出さない)、false = 未登録 (ナッジ表示)、true = 登録済。
   const [myAddressRegistered, setMyAddressRegistered] = useState<boolean | null>(null)
+  // 問題報告の折りたたみ。通常時は導線1行、タップで同一画面内展開 (中身/送信は不変)。
+  const [disputeOpen, setDisputeOpen] = useState(false)
 
   const loadTrade = useCallback(async () => {
     if (!offerId || typeof offerId !== 'string') {
@@ -644,7 +653,7 @@ export default function TradeDetailScreen() {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color="#6D5EF5" />
+          <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.centerText}>取引情報を読み込み中です</Text>
         </View>
       </SafeAreaView>
@@ -827,6 +836,44 @@ export default function TradeDetailScreen() {
           return (
             <View style={styles.actionCard}>
               <Text style={styles.actionTitle}>発送を通知する</Text>
+
+              {/* [5→3] 相手の配送先を発送フォームの最上部へ (行動順: 住所確認→梱包→発送→入力)。
+                  waiting_my_ship でのみ描画されるため completed / cancelled では出ない
+                  (完了・キャンセルは終端状態でこのフォーム自体が描画されない = 元の
+                  hasAddress && uiState!=='completed' && !=='cancelled' 条件を包含して満たす)。 */}
+              {hasAddress && (
+                <View style={styles.formAddressBlock}>
+                  <Text style={styles.sectionSubTitle}>相手の配送先</Text>
+                  <Text style={styles.addressNote}>
+                    発送時に使用してください。取引成立後に開示された住所です。
+                  </Text>
+                  {counterpartProfile.shipping_name != null && (
+                    <View style={styles.addressRow}>
+                      <Text style={styles.addressLabel}>氏名</Text>
+                      <Text style={styles.addressValue}>{counterpartProfile.shipping_name}</Text>
+                    </View>
+                  )}
+                  {counterpartProfile.postal_code != null && (
+                    <View style={styles.addressRow}>
+                      <Text style={styles.addressLabel}>郵便番号</Text>
+                      <Text style={styles.addressValue}>{counterpartProfile.postal_code}</Text>
+                    </View>
+                  )}
+                  {counterpartProfile.address_line1 != null && (
+                    <View style={styles.addressRow}>
+                      <Text style={styles.addressLabel}>住所</Text>
+                      <Text style={styles.addressValue}>{counterpartProfile.address_line1}</Text>
+                    </View>
+                  )}
+                  {counterpartProfile.address_line2 != null && (
+                    <View style={styles.addressRow}>
+                      <Text style={styles.addressLabel}>建物名</Text>
+                      <Text style={styles.addressValue}>{counterpartProfile.address_line2}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+
               <Text style={styles.noticeText}>
                 配送方法を選んで発送後に登録してください。
                 普通郵便・ミニレター以外は追跡番号を入力してください。
@@ -868,7 +915,7 @@ export default function TradeDetailScreen() {
                     value={trackingNumber}
                     onChangeText={setTrackingNumber}
                     placeholder="追跡番号を入力"
-                    placeholderTextColor="#9A94AA"
+                    placeholderTextColor={colors.textTertiary}
                     style={styles.input}
                     autoCapitalize="none"
                   />
@@ -880,7 +927,7 @@ export default function TradeDetailScreen() {
                 value={carrier}
                 onChangeText={setCarrier}
                 placeholder="ヤマト / 日本郵便 など"
-                placeholderTextColor="#9A94AA"
+                placeholderTextColor={colors.textTertiary}
                 style={styles.input}
               />
 
@@ -890,6 +937,11 @@ export default function TradeDetailScreen() {
                   相手が配送先未登録です。登録され次第、発送できます。
                 </Text>
               )}
+
+              {/* 発送登録後の修正経路は存在しない (フォームが消えて二度と出ない) ことを明示。 */}
+              <Text style={styles.submitCautionText}>
+                発送を通知すると、内容はあとから変更できません。
+              </Text>
 
               <Pressable
                 style={[
@@ -903,21 +955,22 @@ export default function TradeDetailScreen() {
                   {submittingShipment ? '送信中...' : '発送を通知する'}
                 </Text>
               </Pressable>
-
-              {canCancelTrade && (
-                <Pressable
-                  style={styles.cancelLink}
-                  onPress={handleCancelTrade}
-                  disabled={cancellingTrade}
-                >
-                  <Text style={styles.cancelLinkText}>
-                    {cancellingTrade ? '処理中...' : '取引をキャンセルする'}
-                  </Text>
-                </Pressable>
-              )}
             </View>
           )
         })()}
+
+        {/* キャンセルは発送カードの外・グレーの下線リンク (破壊操作の警告は確認ダイアログで担う)。 */}
+        {canCancelTrade && (
+          <Pressable
+            style={styles.cancelLink}
+            onPress={handleCancelTrade}
+            disabled={cancellingTrade}
+          >
+            <Text style={styles.cancelLinkText}>
+              {cancellingTrade ? '処理中...' : '取引をキャンセルする'}
+            </Text>
+          </Pressable>
+        )}
 
         {uiState === 'waiting_my_receipt' && (
           <View style={styles.actionCard}>
@@ -962,39 +1015,46 @@ export default function TradeDetailScreen() {
           )}
         </View>
 
-        {/* [5] 相手の配送先 ── 発送に必要な情報 */}
-        {hasAddress && uiState !== 'completed' && uiState !== 'cancelled' && (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>相手の配送先</Text>
-            <Text style={styles.addressNote}>
-              発送時に使用してください。取引成立後に開示された住所です。
-            </Text>
-            {counterpartProfile.shipping_name != null && (
-              <View style={styles.addressRow}>
-                <Text style={styles.addressLabel}>氏名</Text>
-                <Text style={styles.addressValue}>{counterpartProfile.shipping_name}</Text>
-              </View>
-            )}
-            {counterpartProfile.postal_code != null && (
-              <View style={styles.addressRow}>
-                <Text style={styles.addressLabel}>郵便番号</Text>
-                <Text style={styles.addressValue}>{counterpartProfile.postal_code}</Text>
-              </View>
-            )}
-            {counterpartProfile.address_line1 != null && (
-              <View style={styles.addressRow}>
-                <Text style={styles.addressLabel}>住所</Text>
-                <Text style={styles.addressValue}>{counterpartProfile.address_line1}</Text>
-              </View>
-            )}
-            {counterpartProfile.address_line2 != null && (
-              <View style={styles.addressRow}>
-                <Text style={styles.addressLabel}>建物名</Text>
-                <Text style={styles.addressValue}>{counterpartProfile.address_line2}</Text>
-              </View>
-            )}
-          </View>
-        )}
+        {/* [5] 相手の配送先 (独立セクション = 後から確認する住所)。
+            ★waiting_my_ship では発送フォーム最上部 (これから使う住所) に出すので、
+              ここでは waiting_my_ship を除外 = フォーム内と排他 (二重表示しない)。
+            ★completed / cancelled 非表示は旧条件を維持。disputed / 受取系 / 相手発送待ちでは
+              トラブル説明・送り先照合のため従来どおり表示する。 */}
+        {hasAddress &&
+          uiState !== 'waiting_my_ship' &&
+          uiState !== 'completed' &&
+          uiState !== 'cancelled' && (
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>相手の配送先</Text>
+              <Text style={styles.addressNote}>
+                発送時に使用してください。取引成立後に開示された住所です。
+              </Text>
+              {counterpartProfile.shipping_name != null && (
+                <View style={styles.addressRow}>
+                  <Text style={styles.addressLabel}>氏名</Text>
+                  <Text style={styles.addressValue}>{counterpartProfile.shipping_name}</Text>
+                </View>
+              )}
+              {counterpartProfile.postal_code != null && (
+                <View style={styles.addressRow}>
+                  <Text style={styles.addressLabel}>郵便番号</Text>
+                  <Text style={styles.addressValue}>{counterpartProfile.postal_code}</Text>
+                </View>
+              )}
+              {counterpartProfile.address_line1 != null && (
+                <View style={styles.addressRow}>
+                  <Text style={styles.addressLabel}>住所</Text>
+                  <Text style={styles.addressValue}>{counterpartProfile.address_line1}</Text>
+                </View>
+              )}
+              {counterpartProfile.address_line2 != null && (
+                <View style={styles.addressRow}>
+                  <Text style={styles.addressLabel}>建物名</Text>
+                  <Text style={styles.addressValue}>{counterpartProfile.address_line2}</Text>
+                </View>
+              )}
+            </View>
+          )}
 
         {/* [6] 発送状況 ── 追跡情報 */}
         <View style={styles.sectionCard}>
@@ -1037,28 +1097,19 @@ export default function TradeDetailScreen() {
           </Pressable>
         )}
 
-        {/* キャンセル（waiting_my_ship 以外で表示可能なケース） */}
-        {canCancelTrade && uiState !== 'waiting_my_ship' && (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>発送前キャンセル</Text>
-            <Text style={styles.noticeText}>
-              双方とも未発送の間だけキャンセルできます。
-            </Text>
-            <Pressable
-              style={[styles.dangerButton, cancellingTrade && styles.disabledButton]}
-              onPress={handleCancelTrade}
-              disabled={cancellingTrade}
-            >
-              <Text style={styles.dangerButtonText}>
-                {cancellingTrade ? '処理中...' : '取引をキャンセルする'}
-              </Text>
-            </Pressable>
-          </View>
-        )}
-
         {/* 問題報告 */}
         {canOpenDispute && (
           <View style={styles.sectionCard}>
+            {!disputeOpen ? (
+              <Pressable
+                style={styles.disclosureRow}
+                onPress={() => setDisputeOpen(true)}
+              >
+                <Text style={styles.disclosureText}>取引について困っていますか？</Text>
+                <Text style={styles.disclosureChevron}>›</Text>
+              </Pressable>
+            ) : (
+            <>
             <Text style={styles.sectionTitle}>問題報告</Text>
             <Text style={styles.noticeText}>
               例: 相手が発送しない / 追跡番号が無効 / 中身が違う / 状態が違う
@@ -1069,7 +1120,7 @@ export default function TradeDetailScreen() {
               value={disputeReason}
               onChangeText={setDisputeReason}
               placeholder="相手が発送しない / 追跡番号が無効 など"
-              placeholderTextColor="#9A94AA"
+              placeholderTextColor={colors.textTertiary}
               style={styles.input}
             />
 
@@ -1078,7 +1129,7 @@ export default function TradeDetailScreen() {
               value={disputeDetail}
               onChangeText={setDisputeDetail}
               placeholder="状況を具体的に入力"
-              placeholderTextColor="#9A94AA"
+              placeholderTextColor={colors.textTertiary}
               style={[styles.input, styles.multilineInput]}
               multiline
               textAlignVertical="top"
@@ -1093,6 +1144,8 @@ export default function TradeDetailScreen() {
                 {openingDispute ? '送信中...' : '問題を報告する'}
               </Text>
             </Pressable>
+            </>
+            )}
           </View>
         )}
 
@@ -1152,7 +1205,7 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 14,
     paddingHorizontal: 20,
-    backgroundColor: '#6D5EF5',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1168,7 +1221,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 18,
     borderWidth: 1,
-    borderColor: '#ECE8FA',
+    borderColor: colors.border,
     gap: 8,
   },
   headerCardCompleted: {
@@ -1196,7 +1249,7 @@ const styles = StyleSheet.create({
   headerBackButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#6D5EF5',
+    color: colors.textSecondary,
   },
   uiStateHeadline: {
     fontSize: 24,
@@ -1205,7 +1258,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   headlineMyTurn: {
-    color: '#4F35C2',
+    color: colors.textPrimary,
   },
   headlineCompleted: {
     color: '#047857',
@@ -1271,7 +1324,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: '#ECE8FA',
+    borderColor: colors.border,
   },
   progressRow: {
     flexDirection: 'row',
@@ -1292,7 +1345,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#059669',
   },
   progressDotActive: {
-    backgroundColor: '#6D5EF5',
+    backgroundColor: colors.primary,
   },
   progressDotFuture: {
     backgroundColor: '#F4F4F5',
@@ -1328,7 +1381,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   progressLabelActive: {
-    color: '#6D5EF5',
+    color: colors.primary,
   },
   progressLabelDone: {
     color: '#059669',
@@ -1338,26 +1391,44 @@ const styles = StyleSheet.create({
   },
 
   // ── [3] Action ───────────────────────────
+  // 発送は正常フロー = 警告色 (黄) をやめ白地に。主役性は左端の coral 縦バー (線) で示す。
   actionCard: {
-    backgroundColor: colors.tagAccentBg,
+    backgroundColor: colors.backgroundCard,
     borderRadius: 20,
     padding: 18,
-    borderWidth: 1.5,
-    borderColor: colors.tagAccentBorder,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
   },
   actionTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: colors.tagAccentText,
+    color: colors.textPrimary,
     marginBottom: 6,
   },
+  // 発送フォーム最上部に載せた相手の配送先ブロック (下に境界線で本体と区切る)。
+  formAddressBlock: {
+    marginBottom: 14,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  // 発送は取り消し不可を明示する注意書き (送信ボタン直上)。
+  submitCautionText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.textTertiary,
+    marginBottom: 10,
+  },
   cancelLink: {
-    marginTop: 12,
+    marginTop: 4,
     alignItems: 'center',
+    paddingVertical: 8,
   },
   cancelLinkText: {
     fontSize: 13,
-    color: '#B91C1C',
+    color: colors.textSecondary,
     fontWeight: '600',
     textDecorationLine: 'underline',
   },
@@ -1369,9 +1440,25 @@ const styles = StyleSheet.create({
   },
   reportLinkText: {
     fontSize: 13,
-    color: '#8A8499',
+    color: colors.textSecondary,
     fontWeight: '600',
     textDecorationLine: 'underline',
+  },
+  // 問題報告の折りたたみ導線 (通常時1行・タップで展開)。
+  disclosureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  disclosureText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  disclosureChevron: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.textTertiary,
   },
 
   // ── [4,5,6] Section Cards ────────────────
@@ -1380,7 +1467,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#ECE8FA',
+    borderColor: colors.border,
   },
   sectionTitle: {
     fontSize: 16,
@@ -1391,12 +1478,12 @@ const styles = StyleSheet.create({
   sectionSubTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#5B556D',
+    color: colors.textSecondary,
     marginBottom: 8,
   },
   divider: {
     height: 1,
-    backgroundColor: '#ECE8FA',
+    backgroundColor: colors.border,
     marginVertical: 14,
   },
   emptyInlineText: {
@@ -1408,7 +1495,7 @@ const styles = StyleSheet.create({
   cardItemRow: {
     flexDirection: 'row',
     gap: 12,
-    backgroundColor: '#F8F7FC',
+    backgroundColor: colors.backgroundMuted,
     borderRadius: 18,
     padding: 12,
     marginBottom: 10,
@@ -1417,27 +1504,27 @@ const styles = StyleSheet.create({
     width: 74,
     height: 74,
     borderRadius: 14,
-    backgroundColor: '#E9E5F8',
+    backgroundColor: colors.backgroundMuted,
   },
   cardImageFallback: {
     width: 74,
     height: 74,
     borderRadius: 14,
-    backgroundColor: '#E9E5F8',
+    backgroundColor: colors.backgroundMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cardImageFallbackText: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#6D5EF5',
+    color: colors.textTertiary,
   },
   cardMeta: {
     flex: 1,
   },
   rolePill: {
     alignSelf: 'flex-start',
-    backgroundColor: '#ECE8FA',
+    backgroundColor: colors.backgroundMuted,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -1446,7 +1533,7 @@ const styles = StyleSheet.create({
   rolePillText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#5B4BC4',
+    color: colors.primary,
   },
   cardTitle: {
     fontSize: 15,
@@ -1456,7 +1543,7 @@ const styles = StyleSheet.create({
   },
   cardMetaText: {
     fontSize: 13,
-    color: '#5B556D',
+    color: colors.textSecondary,
     marginBottom: 3,
   },
 
@@ -1474,7 +1561,7 @@ const styles = StyleSheet.create({
   },
   addressLabel: {
     fontSize: 13,
-    color: '#8A8499',
+    color: colors.textSecondary,
     width: 68,
     flexShrink: 0,
   },
@@ -1487,23 +1574,23 @@ const styles = StyleSheet.create({
 
   // ── Shipment ─────────────────────────────
   shipmentBox: {
-    backgroundColor: '#F8F7FC',
+    backgroundColor: colors.backgroundMuted,
     borderRadius: 16,
     padding: 14,
   },
   shipmentText: {
     fontSize: 13,
-    color: '#5B556D',
+    color: colors.textSecondary,
     marginBottom: 6,
   },
 
   // ── [7] Note ─────────────────────────────
   noteCard: {
-    backgroundColor: '#F4F1FF',
+    backgroundColor: colors.backgroundMuted,
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#E5DEFF',
+    borderColor: colors.border,
   },
   noteCardCompleted: {
     backgroundColor: '#ECFDF3',
@@ -1564,8 +1651,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   shippingMethodBtnSelected: {
-    borderColor: '#6D5EF5',
-    backgroundColor: '#EEF2FF',
+    // 選択は coral 枠 + coral 太字ラベルで示す (ラベンダー塗りをやめ、面でなく線で表現)。
+    borderColor: colors.primary,
+    backgroundColor: colors.background,
   },
   shippingMethodBtnPressed: {
     opacity: 0.7,
@@ -1576,7 +1664,7 @@ const styles = StyleSheet.create({
     color: '#52525B',
   },
   shippingMethodBtnLabelSelected: {
-    color: '#6D5EF5',
+    color: colors.primary,
     fontWeight: '700',
   },
   noticeText: {
@@ -1588,24 +1676,12 @@ const styles = StyleSheet.create({
   primaryButton: {
     height: 52,
     borderRadius: 16,
-    backgroundColor: '#6D5EF5',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryButtonText: {
     fontSize: 15,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  dangerButton: {
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: '#DC2626',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dangerButtonText: {
-    fontSize: 14,
     fontWeight: '800',
     color: '#FFFFFF',
   },

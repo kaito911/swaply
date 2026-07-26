@@ -38,7 +38,6 @@ import {
   searchDirectMatch,
   supabase,
 } from '@/lib/supabase'
-import { findCharacterIdsByText, getWorkSuggestions } from '@/lib/master'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { router } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -141,30 +140,44 @@ export default function HomeScreen() {
 
         const myId = user?.id ?? null
 
-        // 「推しと一致!」: 推し(フリーテキスト)を master 解決 → 一致カード。
-        //   member_name → findCharacterIdsByText (aliases/表記揺れ吸収)、
-        //   group_name → getWorkSuggestions[0] で work 解決。解決0なら空レーン (非表示)。
+        // 「推しと一致!」: 登録した推し(slug)の「グループ一致」カードを表示する。
+        //   ★グループ一致を必須 (AND)。fuzzy 解決は廃止し、保存済みの slug を
+        //     そのまま work_id フィルタに使う (別グループの同名メンバー混入という偽陽性を構造的に排除)。
+        //   ★member はグループ内での「上位表示」ランキングにのみ使い、絞り込み条件にはしない。
+        //     → グループのみ登録 (member 未指定) の推しは、そのグループの全出品が対象 = 正しい挙動。
+        //   ★oshi 行ごとに「グループ + そのグループの member 集合」で判定する (flat 集約はしない)。
         let oshiMatch: Card[] = []
         if (user != null) {
           const oshiList = await fetchUserOshi(user.id)
-          const charIds = new Set<string>()
           const workIds = new Set<string>()
+          const memberByWork = new Map<string, Set<string>>() // work slug → member slug 集合 (ランキング用)
           for (const o of oshiList) {
+            const g = o.group_name.trim()
+            if (g === '') continue
+            workIds.add(g)
             if (o.member_name != null && o.member_name.trim() !== '') {
-              findCharacterIdsByText(o.member_name).forEach((id) => charIds.add(id))
-            }
-            if (o.group_name.trim() !== '') {
-              const w = getWorkSuggestions(o.group_name, 1)[0]
-              if (w != null) workIds.add(w.id)
+              const set = memberByWork.get(g) ?? new Set<string>()
+              set.add(o.member_name.trim())
+              memberByWork.set(g, set)
             }
           }
-          if (charIds.size > 0 || workIds.size > 0) {
-            oshiMatch = await fetchOshiMatchCards({
+          if (workIds.size > 0) {
+            const fetched = await fetchOshiMatchCards({
               userId: user.id,
-              charIds: [...charIds],
               workIds: [...workIds],
               excludeOwnerIds: blockedUserIds,
             })
+            // ★member 一致を上位へ。カードの work に紐づく member 集合とだけ突き合わせるため、
+            //   別グループの同名メンバーがランキングに影響しない。集合が空 (グループのみ登録) は
+            //   member 一致 false 扱い = 並べ替えなしで全件そのまま表示。
+            const isMemberMatch = (c: Card): boolean => {
+              const members = c.work_id != null ? memberByWork.get(c.work_id) : undefined
+              if (members == null || members.size === 0) return false
+              return (c.characters ?? []).some((id) => members.has(id))
+            }
+            oshiMatch = [...fetched].sort(
+              (a, b) => (isMemberMatch(b) ? 1 : 0) - (isMemberMatch(a) ? 1 : 0),
+            )
           }
         }
         setOshiMatchCards(oshiMatch.filter((c) => c.owner_user_id !== myId))

@@ -1,8 +1,28 @@
 // app/oshi-edit.tsx
 // 推し編集画面
 // マイページ → 推し編集 で遷移
+//
+// 入力はチップ/slug ベースに統一 (他の master 入力と同じ部品を流用):
+//   - グループ: WorkSection (master_works autocomplete + 自由入力)。返り値 workId (slug/自由入力) を保存。
+//   - メンバー: MultiSelectAutocomplete を controlled で「単数」流用 (character slug を保存)。
+//     ★member は 1 行 1 人。onChange で常に末尾 1 件のみ採用し、複数選択 UI にしない。
+//     ★master_characters が 0 件の作品ではメンバー選択ステップ自体を出さない。
+//   - 保存は既存の text 列 (group_name / member_name) に slug をそのまま入れる (列追加なし・OTA 完結)。
+//   - 表示側は slug → display_name_ja に変換して見せる (生 slug を出さない)。
 import { addUserOshi, deleteUserOshi, fetchUserOshi } from '@/lib/supabase'
-import { UserOshi } from '@/lib/types'
+import { UserOshi, MasterCharacter } from '@/lib/types'
+import {
+  getCharacterById,
+  getCharacterSuggestions,
+  getWorkById,
+} from '@/lib/master'
+import { WorkSection } from '@/components/listing/section/WorkSection'
+import type { WorkSectionValue } from '@/components/listing/section/types'
+import { MultiSelectAutocomplete } from '@/components/MultiSelectAutocomplete'
+import {
+  KeyboardAwareScrollProvider,
+  useKeyboardAwareScroll,
+} from '@/components/KeyboardAwareScroll'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
@@ -18,10 +38,17 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+
+/** slug (または自由入力文字列) を表示名へ。master 未ヒット時は素通り (自由入力/旧データ)。 */
+function groupLabelOf(groupSlug: string): string {
+  return getWorkById(groupSlug)?.display_name_ja ?? groupSlug
+}
+function memberLabelOf(memberSlug: string): string {
+  return getCharacterById(memberSlug)?.display_name_ja ?? memberSlug
+}
 
 export default function OshiEditScreen() {
   const { session, loading: authLoading } = useAuthContext()
@@ -32,12 +59,22 @@ export default function OshiEditScreen() {
   const [saving, setSaving] = useState(false)
   const [showForm, setShowForm] = useState(false)
 
-  const [groupName, setGroupName] = useState('')
-  const [memberName, setMemberName] = useState('')
+  // グループ = WorkSection の値 (slug or 自由入力)。メンバー = 単数の master character。
+  const [work, setWork] = useState<WorkSectionValue>(null)
+  const [memberChar, setMemberChar] = useState<MasterCharacter | null>(null)
+
+  // 候補ドロップダウンをキーボード被りから守る (Provider 外だと no-op のため明示 provide)。
+  const { scrollRef, onScroll, ensureVisible } = useKeyboardAwareScroll()
+
+  // 選択中グループに master_characters が存在するときだけメンバーステップを出す。
+  //   getCharacterSuggestions('', {workId}) は空文字で「全件」を返す (入力が短いから空ではない)。
+  //   自由入力グループ (master 未登録) は charactersByWork に無く 0 件 → 自動的に非表示。
+  const memberOptionsAvailable =
+    work != null && getCharacterSuggestions('', { workId: work.workId }).length > 0
 
   const resetForm = () => {
-    setGroupName('')
-    setMemberName('')
+    setWork(null)
+    setMemberChar(null)
     setShowForm(false)
   }
 
@@ -56,15 +93,14 @@ export default function OshiEditScreen() {
   )
 
   const handleAdd = async () => {
-    const trimmedGroup = groupName.trim()
-    if (trimmedGroup === '' || userId == null) return
+    if (work == null || userId == null) return
 
     try {
       setSaving(true)
       const item = await addUserOshi({
         userId,
-        groupName: trimmedGroup,
-        memberName: memberName.trim() !== '' ? memberName.trim() : null,
+        groupName: work.workId, // ★slug (自由入力時は自由入力文字列) をそのまま保存
+        memberName: memberChar?.id ?? null, // ★character slug、未選択なら null (グループのみ)
       })
       setItems((prev) => [...prev, item])
       resetForm()
@@ -77,9 +113,10 @@ export default function OshiEditScreen() {
   }
 
   const handleDelete = (item: UserOshi) => {
+    const groupLabel = groupLabelOf(item.group_name)
     const label = item.member_name != null
-      ? `${item.group_name} / ${item.member_name}`
-      : item.group_name
+      ? `${groupLabel} / ${memberLabelOf(item.member_name)}`
+      : groupLabel
     Alert.alert(
       '削除しますか？',
       `「${label}」を推しから削除します。`,
@@ -124,107 +161,125 @@ export default function OshiEditScreen() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.descCard}>
-            <Text style={styles.descText}>
-              推し登録はフィルターとおすすめ精度の向上にのみ使います。TrustやMatchingの優遇には影響しません。
-            </Text>
-          </View>
-
-          {!showForm ? (
-            <Pressable
-              style={styles.addButton}
-              onPress={() => setShowForm(true)}
-            >
-              <Ionicons name="add" size={20} color={colors.primary} />
-              <Text style={styles.addButtonText}>推しを追加する</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.formCard}>
-              <Text style={styles.formTitle}>推しを登録する</Text>
-
-              <View style={styles.fieldBlock}>
-                <Text style={styles.fieldLabel}>グループ名 *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="例：TREASURE"
-                  value={groupName}
-                  onChangeText={setGroupName}
-                  autoCorrect={false}
-                  autoFocus
-                />
-              </View>
-
-              <View style={styles.fieldBlock}>
-                <Text style={styles.fieldLabel}>メンバー名（任意）</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="例：ジュンギュ"
-                  value={memberName}
-                  onChangeText={setMemberName}
-                  autoCorrect={false}
-                />
-              </View>
-
-              <View style={styles.formActions}>
-                <Pressable
-                  style={styles.cancelButton}
-                  onPress={resetForm}
-                  disabled={saving}
-                >
-                  <Text style={styles.cancelButtonText}>キャンセル</Text>
-                </Pressable>
-                <PrimaryCTA
-                  label="登録する"
-                  onPress={handleAdd}
-                  loading={saving}
-                  disabled={groupName.trim() === ''}
-                  size="lg"
-                  style={{ flex: 2 }}
-                />
-                {/* 隣 cancelButton は 44h のまま (今回スコープ外)。
-                    lg=56h との段差は実機で要確認、必要なら md に落とす候補。 */}
-              </View>
+        <KeyboardAwareScrollProvider value={ensureVisible}>
+          <ScrollView
+            ref={scrollRef}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.descCard}>
+              <Text style={styles.descText}>
+                登録した推しの出品を、ホームでまとめて表示します。
+              </Text>
             </View>
-          )}
 
-          {items.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Ionicons name="heart-outline" size={40} color={colors.border} />
-              <Text style={styles.emptyText}>まだ推しが登録されていません</Text>
-            </View>
-          ) : (
-            <View style={styles.listCard}>
-              <Text style={styles.listLabel}>登録済み（{items.length}件）</Text>
-              {items.map((item, index) => (
-                <View
-                  key={item.id}
-                  style={[
-                    styles.itemRow,
-                    index < items.length - 1 && styles.itemRowBorder,
-                  ]}
-                >
-                  <View style={styles.itemMeta}>
-                    <Text style={styles.itemGroup}>{item.group_name}</Text>
-                    {item.member_name != null && (
-                      <Text style={styles.itemMember}>{item.member_name}</Text>
-                    )}
-                  </View>
-                  <Pressable
-                    style={styles.deleteButton}
-                    onPress={() => handleDelete(item)}
-                    hitSlop={8}
-                  >
-                    <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                  </Pressable>
+            {!showForm ? (
+              <Pressable
+                style={styles.addButton}
+                onPress={() => setShowForm(true)}
+              >
+                <Ionicons name="add" size={20} color={colors.primary} />
+                <Text style={styles.addButtonText}>推しを追加する</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.formCard}>
+                <Text style={styles.formTitle}>推しを登録する</Text>
+
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.fieldLabel}>グループ・作品名 *</Text>
+                  <WorkSection
+                    value={work}
+                    onChange={(next) => {
+                      setWork(next)
+                      setMemberChar(null) // 作品が変わればメンバー選択はリセット
+                    }}
+                  />
                 </View>
-              ))}
-            </View>
-          )}
-        </ScrollView>
+
+                {work != null && memberOptionsAvailable && (
+                  <View style={styles.fieldBlock}>
+                    <Text style={styles.fieldLabel}>メンバー名（任意・1人）</Text>
+                    <MultiSelectAutocomplete<MasterCharacter>
+                      selected={memberChar != null ? [memberChar] : []}
+                      onChange={(next) =>
+                        // ★controlled で単数化: 常に末尾 1 件のみ採用 (複数選択 UI にしない)
+                        setMemberChar(next.length > 0 ? next[next.length - 1] : null)
+                      }
+                      fetchSuggestions={(input) =>
+                        getCharacterSuggestions(input, { workId: work.workId })
+                      }
+                      getKey={(c) => c.id}
+                      renderOption={(c) => (
+                        <Text style={styles.optionText}>{c.display_name_ja}</Text>
+                      )}
+                      renderChip={(c) => (
+                        <Text style={styles.chipText}>{c.display_name_ja}</Text>
+                      )}
+                      placeholder="例: 炭治郎"
+                      softLimit={2} /* 単数のためヒントは出ない (0/1 件のみ) */
+                    />
+                  </View>
+                )}
+
+                <View style={styles.formActions}>
+                  <Pressable
+                    style={styles.cancelButton}
+                    onPress={resetForm}
+                    disabled={saving}
+                  >
+                    <Text style={styles.cancelButtonText}>キャンセル</Text>
+                  </Pressable>
+                  <PrimaryCTA
+                    label="登録する"
+                    onPress={handleAdd}
+                    loading={saving}
+                    disabled={work == null}
+                    size="lg"
+                    style={{ flex: 2 }}
+                  />
+                  {/* 隣 cancelButton は 44h のまま (今回スコープ外)。
+                      lg=56h との段差は実機で要確認、必要なら md に落とす候補。 */}
+                </View>
+              </View>
+            )}
+
+            {items.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Ionicons name="heart-outline" size={40} color={colors.border} />
+                <Text style={styles.emptyText}>まだ推しが登録されていません</Text>
+              </View>
+            ) : (
+              <View style={styles.listCard}>
+                <Text style={styles.listLabel}>登録済み（{items.length}件）</Text>
+                {items.map((item, index) => (
+                  <View
+                    key={item.id}
+                    style={[
+                      styles.itemRow,
+                      index < items.length - 1 && styles.itemRowBorder,
+                    ]}
+                  >
+                    <View style={styles.itemMeta}>
+                      <Text style={styles.itemGroup}>{groupLabelOf(item.group_name)}</Text>
+                      {item.member_name != null && (
+                        <Text style={styles.itemMember}>{memberLabelOf(item.member_name)}</Text>
+                      )}
+                    </View>
+                    <Pressable
+                      style={styles.deleteButton}
+                      onPress={() => handleDelete(item)}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+        </KeyboardAwareScrollProvider>
       </KeyboardAvoidingView>
     </SafeAreaView>
   )
@@ -321,15 +376,15 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.semibold,
     color: colors.textSecondary,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    fontSize: fontSize.base,
+  optionText: {
+    fontSize: 14,
+    fontWeight: fontWeight.semibold,
     color: colors.textPrimary,
-    backgroundColor: colors.background,
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: fontWeight.semibold,
+    color: colors.textInverse,
   },
   formActions: {
     flexDirection: 'row',

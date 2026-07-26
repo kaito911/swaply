@@ -10,6 +10,7 @@
 //   設計の全体像・復活手順: docs/design_shelf_and_is_public.md
 import { addShelfItem, deleteShelfItem, fetchShelfItems, fetchUserOshi } from '@/lib/supabase'
 import { ShelfItem, UserOshi } from '@/lib/types'
+import { getCharacterById, getWorkById } from '@/lib/master'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
@@ -162,8 +163,11 @@ export default function ShelfScreen() {
                 {oshiItems.map((item) => (
                   <View key={item.id} style={styles.oshiChip}>
                     <Text style={styles.oshiChipText}>
-                      {item.group_name}
-                      {item.member_name != null ? ` / ${item.member_name}` : ''}
+                      {/* slug → 表示名 (master 未ヒットは自由入力/旧データとして素通り) */}
+                      {getWorkById(item.group_name)?.display_name_ja ?? item.group_name}
+                      {item.member_name != null
+                        ? ` / ${getCharacterById(item.member_name)?.display_name_ja ?? item.member_name}`
+                        : ''}
                     </Text>
                   </View>
                 ))}

@@ -264,16 +264,15 @@ export async function fetchNewCards(
 // 推しが 1 つも master 解決できなければ (charIds/workIds 空) → 空配列。DB変更なし。
 export async function fetchOshiMatchCards(params: {
   userId: string
-  charIds: string[]
-  workIds: string[]
+  workIds: string[] // 推しグループ (master_works.id slug)。★グループ一致を必須にする (AND の要)。
   excludeOwnerIds?: string[]
   limit?: number
 }): Promise<Card[]> {
-  const { userId, charIds, workIds, excludeOwnerIds = [], limit = 20 } = params
-  const orParts: string[] = []
-  if (charIds.length > 0) orParts.push(`characters.ov.{${charIds.join(',')}}`)
-  if (workIds.length > 0) orParts.push(`work_id.in.(${workIds.join(',')})`)
-  if (orParts.length === 0) return []
+  const { userId, workIds, excludeOwnerIds = [], limit = 20 } = params
+  // ★グループ (work_id) 一致のみで絞る。旧実装の characters.ov との OR は廃止した。
+  //   member はここでは絞らず、呼出側 (home) で「一致を上位表示」のランキングにのみ使う
+  //   (別グループの同名メンバーが混ざる偽陽性を構造的に排除)。
+  if (workIds.length === 0) return []
 
   let query = supabase
     .from('cards')
@@ -281,7 +280,7 @@ export async function fetchOshiMatchCards(params: {
     .eq('status', 'active')
     .eq('is_public', true)
     .neq('owner_user_id', userId)
-    .or(orParts.join(','))
+    .in('work_id', workIds)
 
   if (excludeOwnerIds.length > 0) {
     query = query.not('owner_user_id', 'in', `(${excludeOwnerIds.join(',')})`)

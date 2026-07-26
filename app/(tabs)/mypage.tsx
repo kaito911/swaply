@@ -13,14 +13,14 @@ import { HeaderActions } from '@/components/HeaderActions'
 import { PioneerBadge } from '@/components/PioneerBadge'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import {
-  fetchDistinctPartnerCount,
   fetchMyOffers,
   fetchProfile,
   fetchUserCards,
+  fetchUserTrust,
   isOperator,
   supabase,
 } from '@/lib/supabase'
-import { Card, Offer, Profile } from '@/lib/types'
+import { Card, formatLastActive, Offer, Profile, UserTrust } from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { SUPPORT_MAILTO, LEGAL_MAILTO } from '@/constants/contact'
 import { Ionicons } from '@expo/vector-icons'
@@ -45,6 +45,26 @@ import { useBadge } from '@/providers/BadgeProvider'
 // 出品中は専用一覧画面が未整備のため上限を設けず全件横スクロール表示 (β1 は件数少)。
 const HISTORY_PREVIEW_LIMIT = 5
 
+// トラブル色サイン。入力は get_user_trust().trouble_stage (段階・回復・チャラは全て DB 側)。
+//   0=通常 / 1=一度トラブル / 2=二度以上。★数字は絶対に出さない・色のみ。
+//   0 (通常) は「無」= ドットを出さない (常時緑は情報にならず、問題時のみ surface させる)。
+const TROUBLE_SIGN_COLOR: Record<number, string> = {
+  1: colors.warning,
+  2: colors.error,
+}
+const TROUBLE_SIGN_A11Y: Record<number, string> = {
+  1: '取引状態: 注意',
+  2: '取引状態: 要確認',
+}
+
+// ship_median_hours の表示整形。null は呼出側で行ごと非表示にするため、ここには渡さない。
+//   <1 → 「1時間以内」/ <24 → 「N時間」/ それ以上 → 「N日」。
+function formatShipHours(hours: number): string {
+  if (hours < 1) return '1時間以内'
+  if (hours < 24) return `${Math.round(hours)}時間`
+  return `${Math.floor(hours / 24)}日`
+}
+
 // ─────────────────────────────────────────
 // screen
 // ─────────────────────────────────────────
@@ -59,9 +79,9 @@ export default function MyPageScreen() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [cards, setCards] = useState<Card[]>([])
   const [historyOffers, setHistoryOffers] = useState<Offer[]>([])
-  // 交換人数: get_distinct_partner_count RPC (INVOKER・引数なし)。
-  // completed な trades / venue_trades の distinct 相手数。「信頼の記録」で表示。
-  const [partnerCount, setPartnerCount] = useState(0)
+  // 自分の Trust 数値: get_user_trust RPC (profiles の死列を使わず都度算出)。
+  // partner_count / trade_count / ship_median_hours / last_active_at / trouble_stage。
+  const [trust, setTrust] = useState<UserTrust | null>(null)
   // 運営(operator)のみ「通報管理」リンクを出すための判定。既定 false (一般ユーザーには出さない)。
   const [operator, setOperator] = useState(false)
   const [dataLoading, setDataLoading] = useState(true)
@@ -74,14 +94,14 @@ export default function MyPageScreen() {
         fetchProfile(userId),
         fetchUserCards(userId, 'active'),
         fetchMyOffers(userId),
-        // 交換人数 RPC。失敗しても他データ表示を止めないよう個別に握り潰す (0 fallback)。
-        fetchDistinctPartnerCount().catch(() => 0),
+        // Trust 数値 RPC。失敗しても他データ表示を止めないよう個別に握り潰す (null fallback)。
+        fetchUserTrust(userId).catch(() => null),
         // 運営判定。失敗時は false (安全側=リンクを出さない)。
         isOperator().catch(() => false),
-      ]).then(([p, c, offers, partners, op]) => {
+      ]).then(([p, c, offers, t, op]) => {
         if (p != null) setProfile(p)
         setCards(c)
-        setPartnerCount(partners)
+        setTrust(t)
         setOperator(op)
         setHistoryOffers(
           offers.filter(
@@ -141,11 +161,24 @@ export default function MyPageScreen() {
   const displayName = profile?.display_name ?? null
   const avatarChar = ((handle || displayName || 'U').slice(0, 1)).toUpperCase()
   const avatarUrl = profile?.avatar_url ?? null
-  // 交換人数 (partnerCount) のみ live (fetchDistinctPartnerCount=実データ)。
-  // 他の Trust 列 (trade_count / ship_rate / reply_median_hours / last_active_at) は
-  // seed 固定の死列のため表示から除外した (タスクB')。トラブル色サイン (troubleStage) も
-  // trouble_count が死列で常に stage0、かつ将来の申告データ生反映は #22 閾値設計を
-  // バイパスするため削除した。
+
+  // ── Trust 数値 (get_user_trust 由来・都度算出) ──
+  // 0/null の項目は行ごと出さない (0を突きつけない)。率(%)は一切出さない。
+  // 一文形式・見出しなし。全項目が空なら trustLines は空配列 → セクションごと非表示。
+  const trustLines: string[] = []
+  if (trust != null) {
+    if (trust.partner_count > 0) trustLines.push(`${trust.partner_count}人と交換`)
+    if (trust.trade_count > 0) trustLines.push(`${trust.trade_count}回取引`)
+    // ship_median_hours が null (発送実績なし) の行は出さない。<1 は「1時間以内」。
+    if (trust.ship_median_hours != null) {
+      trustLines.push(`発送まで ${formatShipHours(trust.ship_median_hours)}`)
+    }
+    if (trust.last_active_at != null) {
+      trustLines.push(`最終ログイン ${formatLastActive(trust.last_active_at)}`)
+    }
+  }
+  // トラブル色サイン: DB 算出の trouble_stage をそのまま使う (クライアント判定なし)。
+  const troubleStage = trust?.trouble_stage ?? 0
 
   const historyPreview = historyOffers.slice(0, HISTORY_PREVIEW_LIMIT)
 
@@ -277,6 +310,17 @@ export default function MyPageScreen() {
                 ) : (
                   <Text style={styles.avatarText}>{avatarChar}</Text>
                 )}
+                {/* トラブル色サイン (数字なし・色のみ)。0 (通常) は非表示、問題時のみ surface。 */}
+                {troubleStage >= 1 && (
+                  <View
+                    style={[
+                      styles.troubleDot,
+                      { backgroundColor: TROUBLE_SIGN_COLOR[troubleStage] },
+                    ]}
+                    accessible
+                    accessibilityLabel={TROUBLE_SIGN_A11Y[troubleStage]}
+                  />
+                )}
               </View>
             </View>
             <View style={styles.heroMeta}>
@@ -305,12 +349,13 @@ export default function MyPageScreen() {
           </View>
         </View>
 
-        {/* ── 交換人数 (#22⑦「X人と交換」一文のみ・見出しなし・0人なら非表示) ── */}
-        {partnerCount > 0 && (
+        {/* ── 自分の Trust 数値 (一文形式・見出しなし・0/nullは行ごと非表示・率は出さない) ── */}
+        {trustLines.length > 0 && (
           <View style={styles.sectionBlock}>
-            <View style={styles.partnerRow}>
-              <Text style={styles.partnerValue}>{partnerCount}</Text>
-              <Text style={styles.partnerUnit}>人と交換</Text>
+            <View style={styles.trustCard}>
+              {trustLines.map((line) => (
+                <Text key={line} style={styles.trustLine}>{line}</Text>
+              ))}
             </View>
           </View>
         )}
@@ -585,25 +630,30 @@ const styles = StyleSheet.create({
     marginVertical: spacing.lg,
   },
 
-  // ── 信頼の記録 (交換人数のみ・「X人と交換」一文) ──
-  partnerRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
+  // ── 自分の Trust 数値 (一文形式・複数行を1枠に) ──
+  trustCard: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.lg,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.base,
-    gap: 4,
+    gap: 6,
   },
-  partnerValue: {
-    fontSize: fontSize.lg,
-    fontWeight: fontWeight.bold,
+  trustLine: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
     color: colors.textPrimary,
   },
-  partnerUnit: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
+  // トラブル色サイン: アバター右下の status dot。白リングで縁を切り視認性確保。
+  troubleDot: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2.5,
+    borderColor: colors.backgroundCard,
   },
   // ── 横スクロールカード (出品中) ──
   hScrollContent: {

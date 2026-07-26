@@ -5,6 +5,7 @@ import {
   fetchTradeUnreadCounts,
   fetchVenueTradeUnreadCount,
   supabase,
+  touchLastActive,
 } from '@/lib/supabase'
 import { useAuthContext } from '@/providers/AuthProvider'
 import React, {
@@ -135,23 +136,26 @@ export function BadgeProvider({ children }: { children: ReactNode }) {
     }
   }, [userId])
 
-  // 初回・userId変更時に取得
+  // 初回・userId変更時に取得。ついでに最終アクティブを更新 (スロットルは DB 側)。
   useEffect(() => {
     fetchCount()
-  }, [fetchCount])
+    if (userId != null) void touchLastActive()
+  }, [fetchCount, userId])
 
-  // アプリがフォアグラウンドに戻ったときに再取得
+  // アプリがフォアグラウンドに戻ったときに再取得。既存 AppState 'active' に相乗りし、
+  // 最終アクティブも更新する (新規リスナーは足さない・頻度制御は DB 側スロットル)。
   useEffect(() => {
     const subscription = AppState.addEventListener(
       'change',
       (state: AppStateStatus) => {
         if (state === 'active') {
           fetchCount()
+          if (userId != null) void touchLastActive()
         }
       }
     )
     return () => subscription.remove()
-  }, [fetchCount])
+  }, [fetchCount, userId])
 
   // per-trade Map の合計 (①ベル・②取引タブに足す派生値)。
   let tradeUnreadTotal = 0

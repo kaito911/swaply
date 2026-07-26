@@ -560,6 +560,23 @@ export interface TradeUnreadCountRow {
   unread_count: number
 }
 
+// get_user_trust(p_user_id) RPC の戻り値 (jsonb)。
+//   profiles の死列は使わず trades / shipments / venue_trades / trade_reports から
+//   都度算出される。戻り値の shape は本番 RPC (SECURITY DEFINER) に完全一致させること。
+//   ・partner_count     : 交換した相手の distinct 人数 (completed)
+//   ・trade_count       : completed 件数 (通常 + 会場)
+//   ・ship_median_hours : 成立→発送登録の中央値 (時間)。発送実績なしは null
+//   ・last_active_at     : 最終アクティブ (touch_last_active が更新)。null あり
+//   ・trouble_stage      : 0=通常 / 1=一度 / 2=二度以上 (段階・回復・チャラは全て DB 側で計算)
+export interface UserTrust {
+  user_id: string
+  partner_count: number
+  trade_count: number
+  ship_median_hours: number | null
+  last_active_at: string | null
+  trouble_stage: number
+}
+
 /**
  * 求カード (want) との一致度スコア。
  * - strong: 単独出品で完全一致 (v2) / 全 3 軸完全一致 (v1)

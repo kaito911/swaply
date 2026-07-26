@@ -31,6 +31,7 @@ import {
   TradeMessage,
   SendTradeMessageResult,
   TradeUnreadCountRow,
+  UserTrust,
   WantedCard,
   WantMatchScore,
 } from './types'
@@ -3760,4 +3761,33 @@ export async function fetchDistinctPartnerCount(): Promise<number> {
     throw new Error(error.message !== '' ? error.message : 'FETCH_PARTNER_COUNT_FAILED')
   }
   return typeof data === 'number' ? data : 0
+}
+
+/**
+ * ユーザーの Trust 数値を都度算出して取得。RPC get_user_trust(p_user_id) → jsonb。
+ * ★profiles の死列 (trade_count / ship_rate / reply_median_hours / trouble_count /
+ *   last_active_at) は一切使わない。trades / shipments / venue_trades / trade_reports
+ *   から毎回算出される (SECURITY DEFINER)。段階・回復・チャラは全て DB 側で計算済み。
+ */
+export async function fetchUserTrust(userId: string): Promise<UserTrust> {
+  const { data, error } = await supabase.rpc('get_user_trust', {
+    p_user_id: userId,
+  })
+  if (error != null) {
+    console.error('[fetchUserTrust]', error)
+    throw error
+  }
+  return data as UserTrust
+}
+
+/**
+ * 最終アクティブ時刻を更新。RPC touch_last_active() (引数なし・auth.uid() サーバ側)。
+ * ★スロットル (前回更新から1時間以内は no-op) は DB 側に内蔵。クライアントで頻度制御しない。
+ * best-effort: 失敗しても throw せず warn のみ (バックグラウンド更新のため)。
+ */
+export async function touchLastActive(): Promise<void> {
+  const { error } = await supabase.rpc('touch_last_active')
+  if (error != null) {
+    console.warn('[touchLastActive]', error)
+  }
 }

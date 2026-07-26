@@ -253,7 +253,8 @@ export async function fetchNewCards(
 
   if (error) {
     console.error('[fetchNewCards]', error)
-    return []
+    // 案C: 取得失敗を握って [] を返さず throw する (呼出側 try/catch が loadFailed を立てる)。
+    throw error
   }
 
   return (data ?? []) as Card[]
@@ -413,7 +414,7 @@ export async function fetchEasyCards(
 
   if (error) {
     console.error('[fetchEasyCards]', error)
-    return []
+    throw error // 案C: 握らず throw (呼出側 try/catch で loadFailed)
   }
 
   return sortEasyCards((data ?? []) as Card[], myWants).slice(0, limit)
@@ -431,7 +432,7 @@ export async function fetchLikedCards(userId: string): Promise<Card[]> {
 
   if (error) {
     console.error('[fetchLikedCards]', error)
-    return []
+    throw error // 案C: 握らず throw (呼出側 try/catch で loadFailed)
   }
   const rows = (data ?? []) as unknown as { card: Card | null }[]
   // 判断1: active な出品のみ (traded/inactive になった過去いいねは一覧から除外)。
@@ -462,7 +463,7 @@ export async function fetchRecommendedCards(
 
   if (error) {
     console.error('[fetchRecommendedCards]', error)
-    return []
+    throw error // 案C: 握らず throw (呼出側 try/catch で loadFailed)
   }
 
   return (data ?? []) as Card[]
@@ -607,7 +608,7 @@ export async function fetchMyLikedCardIds(
 
   if (error) {
     console.error('[fetchMyLikedCardIds]', error)
-    return new Set()
+    throw error // 案C: 握らず throw (呼出側 try/catch で loadFailed)
   }
   return new Set((data ?? []).map((r) => r.card_id as string))
 }
@@ -819,7 +820,7 @@ export async function searchDirectMatch(params: {
   const { data, error } = await query
   if (error) {
     console.error('[searchDirectMatch]', error)
-    return []
+    throw error // 案C: 握らず throw (呼出側 try/catch で loadFailed)
   }
   const cards = (data ?? []) as (Card & { owner: Profile | null })[]
 
@@ -1233,7 +1234,7 @@ export async function fetchMyOffers(userId: string): Promise<Offer[]> {
 
   if (error) {
     console.error('[fetchMyOffers]', error)
-    return []
+    throw error // 案C: 握らず throw (呼出側 try/catch で loadFailed)
   }
 
   const offers = (data ?? []) as Offer[]
@@ -2150,7 +2151,7 @@ export async function searchCards(params: {
         .limit(limit)
       if (error) {
         console.error('[searchCards/chips]', error)
-        return []
+        throw error // 案C: 握らず throw (呼出側 try/catch で loadFailed)
       }
       return (data ?? []) as Card[]
     }
@@ -2202,7 +2203,8 @@ export async function searchCards(params: {
     for (const result of results) {
       if (result.error) {
         console.error('[searchCards/chips]', result.error)
-        continue
+        // 案C: 部分成功を返さず throw (機内=全失敗。部分失敗も「読み込めませんでした」を優先)。
+        throw result.error
       }
       for (const c of result.data ?? []) {
         if (seen.has(c.id)) continue
@@ -2279,7 +2281,8 @@ export async function searchCards(params: {
   for (const result of results) {
     if (result.error) {
       console.error('[searchCards/freetext]', result.error)
-      continue
+      // 案C: 部分成功を返さず throw (機内=全失敗。部分失敗も「読み込めませんでした」を優先)。
+      throw result.error
     }
     for (const c of result.data ?? []) {
       if (seen.has(c.id)) continue
@@ -2957,7 +2960,7 @@ export async function fetchVenueHolds(
 
   if (error) {
     console.error('[fetchVenueHolds]', error)
-    return []
+    throw error // 案C: 握らず throw (呼出側 try/catch で loadFailed)。付随 profile/supply join は best-effort のまま。
   }
 
   const holds = (data ?? []) as VenueHold[]

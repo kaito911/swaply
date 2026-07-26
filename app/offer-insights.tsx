@@ -10,6 +10,7 @@ import {
 } from '@/lib/types'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuthContext } from '@/providers/AuthProvider'
+import { Redirect } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
@@ -189,6 +190,12 @@ export default function OfferInsightsScreen() {
     setRefreshing(true)
     load().finally(() => setRefreshing(false))
   }, [load])
+
+  // ★開発用画面。本番ビルドではディープリンクでも到達させない (__DEV__ ガード)。
+  //   hooks は全て上で宣言済みのため、この位置の早期 return は rules-of-hooks を破らない。
+  if (!__DEV__) {
+    return <Redirect href="/(tabs)/home" />
+  }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>

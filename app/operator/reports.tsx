@@ -16,8 +16,8 @@ import {
   type ContentReportCategory,
   type ContentReportRow,
 } from '@/lib/supabase'
-import { useFocusEffect } from 'expo-router'
-import React, { useCallback, useState } from 'react'
+import { router, useFocusEffect } from 'expo-router'
+import React, { useCallback, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -58,6 +58,19 @@ export default function OperatorReportsScreen() {
   const [loading, setLoading] = useState(true)
   const [reports, setReports] = useState<ContentReportRow[]>([])
   const [resolvingId, setResolvingId] = useState<string | null>(null)
+
+  // ★同一利用者への通報件数 (クライアント側集計)。get_content_reports は件数を返さないため
+  //   現在の open 一覧を reported_user_id で数える (未対応の集中を可視化)。
+  //   ※全期間 (resolved 含む) の件数は RPC 拡張が必要=DB変更のため今回は open のみ。
+  const userReportCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const r of reports) {
+      if (r.reported_user_id != null) {
+        m.set(r.reported_user_id, (m.get(r.reported_user_id) ?? 0) + 1)
+      }
+    }
+    return m
+  }, [reports])
 
   const load = useCallback(async () => {
     try {
@@ -124,11 +137,13 @@ export default function OperatorReportsScreen() {
           onPress: () => void resolve(report, 'unpublish'),
         })
       }
+      // ★文言案(K確定待ち): 却下は「対処」ではなく「確認して閉じる」なので誇張しない。
+      //   ユーザー通報は却下しか無く利用者の処分(BAN)は未実装のため、その旨を明示する。
       Alert.alert(
-        '通報への対処',
+        '通報の確認',
         isCard
           ? 'この出品を非公開 (フィード・検索から除外) にするか、通報を却下します。'
-          : 'この通報を却下します。',
+          : 'この通報を却下します。\nこの操作では利用者への処分は行いません。',
         buttons,
       )
     },
@@ -180,13 +195,31 @@ export default function OperatorReportsScreen() {
           <Text style={styles.meta}>
             通報者: {item.reporter_handle ?? '不明'}・{formatDateTime(item.created_at)}
           </Text>
+          {/* ★対象利用者への通報集中の可視化 + プロフィール(trust/[id])導線。
+              BAN は未実装だが「この人に N 件」が見えれば運営が手動判断できる。 */}
+          {item.reported_user_id != null && (
+            <View style={styles.userActionRow}>
+              {(userReportCounts.get(item.reported_user_id) ?? 0) >= 2 && (
+                <Text style={styles.reportCount}>
+                  この利用者への未対応通報 {userReportCounts.get(item.reported_user_id)} 件
+                </Text>
+              )}
+              <Pressable
+                onPress={() => router.push(`/trust/${item.reported_user_id}` as never)}
+                hitSlop={6}
+                style={styles.profileLinkWrap}
+              >
+                <Text style={styles.profileLink}>プロフィールを見る</Text>
+              </Pressable>
+            </View>
+          )}
           {resolvingId === item.id && (
             <ActivityIndicator size="small" color={colors.primary} style={styles.rowLoader} />
           )}
         </Pressable>
       )
     },
-    [onPressReport, resolvingId],
+    [onPressReport, resolvingId, userReportCounts],
   )
 
   // 権限なし: 非 operator には一覧を一切見せない。
@@ -330,6 +363,29 @@ const styles = StyleSheet.create({
   meta: {
     fontSize: 11,
     color: colors.textTertiary,
+  },
+  // ★対象利用者 行 (通報件数 + プロフィール導線)。
+  userActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginTop: 2,
+  },
+  reportCount: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: fontWeight.bold,
+    color: colors.error,
+  },
+  profileLinkWrap: {
+    marginLeft: 'auto',
+  },
+  profileLink: {
+    fontSize: 12,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+    textDecorationLine: 'underline',
   },
   rowLoader: {
     position: 'absolute',

@@ -64,10 +64,10 @@ export interface Profile {
   last_active_at: string | null
   created_at: string
   updated_at: string
-  shipping_name: string | null
-  postal_code: string | null
-  address_line1: string | null
-  address_line2: string | null
+  // ★住所4列(shipping_name/postal_code/address_line1/address_line2)は profiles テーブルに
+  //   実在せず(配送先は別テーブル=fetchShippingAddress の ShippingAddress 型 / 取引詳細は
+  //   get_trade_detail_by_offer の ローカル ProfileRow)、この幽霊フィールドが過去に PII 漏洩の
+  //   S0 誤判定を招いたため削除。共有 Profile 型経由の参照は全域ゼロを確認済。
 
   // fetchMyOffers / get_trade_detail_by_offer で返る可能性がある補助項目
   username?: string | null

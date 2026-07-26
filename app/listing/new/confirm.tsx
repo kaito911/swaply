@@ -268,32 +268,24 @@ export default function ListingNewConfirmScreen() {
       setSubmitting(true)
 
       // 表面を Storage にアップロード
+      //   ★アップロード失敗は握らず throw → 外側 catch で「出品エラー」。cards は作らない
+      //     (bulk.tsx と同形。旧実装は失敗を握り画像なしで出品する沈黙失敗だった)。
       let resolvedImageUrl: string | null = null
       if (imageUri != null && imageUri !== '' && !imageUri.startsWith('http')) {
-        try {
-          resolvedImageUrl = await uploadCardImage({ userId, imageUri })
-        } catch (error) {
-          console.error('[confirm] uploadCardImage failed', error)
-          resolvedImageUrl = null
-        }
+        resolvedImageUrl = await uploadCardImage({ userId, imageUri })
       } else {
         resolvedImageUrl = imageUri !== '' ? imageUri : null
       }
 
-      // 裏面を Storage にアップロード(任意)
+      // 裏面を Storage にアップロード(任意)。★同様に失敗は throw (沈黙失敗にしない)。
       let resolvedImageBackUrl: string | null = null
       if (imageBackUri) {
         if (!imageBackUri.startsWith('http')) {
-          try {
-            resolvedImageBackUrl = await uploadCardImage({
-              userId,
-              imageUri: imageBackUri,
-              fileName: `back-${Date.now()}.jpg`,
-            })
-          } catch (error) {
-            console.error('[confirm] uploadCardImage (back) failed', error)
-            resolvedImageBackUrl = null
-          }
+          resolvedImageBackUrl = await uploadCardImage({
+            userId,
+            imageUri: imageBackUri,
+            fileName: `back-${Date.now()}.jpg`,
+          })
         } else {
           resolvedImageBackUrl = imageBackUri
         }

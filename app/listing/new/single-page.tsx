@@ -304,12 +304,9 @@ export default function ListingNewSinglePageScreen() {
       let resolvedImageUrl: string | null = null
       const frontUri = state.image.frontUri
       if (frontUri != null && frontUri !== '' && !frontUri.startsWith('http')) {
-        try {
-          resolvedImageUrl = await uploadCardImage({ userId, imageUri: frontUri })
-        } catch (error) {
-          console.error('[single-page] uploadCardImage failed', error)
-          resolvedImageUrl = null
-        }
+        // ★アップロード失敗は握らず throw → 外側 catch で「出品エラー」。cards は作らない
+        //   (bulk.tsx と同形。旧実装は失敗を握り画像なしで出品する沈黙失敗だった)。
+        resolvedImageUrl = await uploadCardImage({ userId, imageUri: frontUri })
       } else if (frontUri != null && frontUri.startsWith('http')) {
         resolvedImageUrl = frontUri
       }
@@ -319,16 +316,12 @@ export default function ListingNewSinglePageScreen() {
       const backUri = state.image.backUri
       if (backUri != null && backUri !== '') {
         if (!backUri.startsWith('http')) {
-          try {
-            resolvedImageBackUrl = await uploadCardImage({
-              userId,
-              imageUri: backUri,
-              fileName: `back-${Date.now()}.jpg`,
-            })
-          } catch (error) {
-            console.error('[single-page] uploadCardImage (back) failed', error)
-            resolvedImageBackUrl = null
-          }
+          // ★同様に失敗は throw (沈黙失敗にしない)。
+          resolvedImageBackUrl = await uploadCardImage({
+            userId,
+            imageUri: backUri,
+            fileName: `back-${Date.now()}.jpg`,
+          })
         } else {
           resolvedImageBackUrl = backUri
         }

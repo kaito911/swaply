@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { initSentry } from '@/lib/sentry'
 import { colors } from '@/constants/theme'
 import { PushNotificationResponseHandler } from '@/components/PushNotificationResponseHandler'
 import { PushTokenSync } from '@/components/PushTokenSync'
@@ -12,6 +13,11 @@ import OnboardingScreen, { ONBOARDING_DONE_KEY } from './onboarding'
 import React, { useEffect, useState } from 'react'
 import { ActivityIndicator, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+
+// ★アプリ起動時 (モジュール読み込み時) に最初に Sentry を初期化する。
+//   本番かつ DSN 設定時のみ有効化 (__DEV__ / DSN 未設定は no-op)。
+//   PII 除去は lib/sentry.ts の beforeSend / beforeBreadcrumb が担う。
+initSentry()
 
 function RootNavigator() {
   const { session, loading } = useAuthContext()

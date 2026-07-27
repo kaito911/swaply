@@ -24,9 +24,11 @@ import { Card, Offer, Profile, trustDisplayStrings, UserTrust } from '@/lib/type
 import { TroubleDot } from '@/components/TroubleDot'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { SUPPORT_MAILTO, LEGAL_MAILTO } from '@/constants/contact'
+import { isSentryDsnConfigured, sendSentrySmokeTest } from '@/lib/sentry'
 import { Ionicons } from '@expo/vector-icons'
+import * as Application from 'expo-application'
 import { router, useFocusEffect } from 'expo-router'
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -56,6 +58,24 @@ export default function MyPageScreen() {
   const [logoutLoading, setLogoutLoading] = useState(false)
 
   const userId = useMemo(() => session?.user?.id ?? null, [session])
+
+  // ── Sentry smoke test ──
+  // バージョン表記を 7 回タップで発火。本番 build でしかイベントが飛ばないため、
+  // 「DSN が届いていない」状態と「エラーが 0 件」状態を区別する動作確認用。
+  // ★DSN の値そのものは表示しない (真偽のみ)。__DEV__ 限定にしない (本番で動く)。
+  // ★公開後も残して問題ない実装 (単なる version 表記 + 隠しタップ)。
+  const smokeTapCount = useRef(0)
+  const handleVersionTap = () => {
+    smokeTapCount.current += 1
+    if (smokeTapCount.current >= 7) {
+      smokeTapCount.current = 0
+      sendSentrySmokeTest(`smoke build ${Application.nativeBuildVersion ?? '?'}`)
+      Alert.alert(
+        'Sentry smoke test',
+        `DSN設定済み: ${isSentryDsnConfigured() ? 'true' : 'false'}`,
+      )
+    }
+  }
 
   const [profile, setProfile] = useState<Profile | null>(null)
   const [cards, setCards] = useState<Card[]>([])
@@ -522,6 +542,15 @@ export default function MyPageScreen() {
         >
           <Text style={styles.deleteAccountText}>アカウントを削除</Text>
         </Pressable>
+
+        {/* バージョン表記 (7 回タップで Sentry smoke test)。
+            通常はただの version フッター。公開後も残す。 */}
+        <Pressable style={styles.versionRow} onPress={handleVersionTap} hitSlop={6}>
+          <Text style={styles.versionText}>
+            Swaply v{Application.nativeApplicationVersion ?? '—'} (
+            {Application.nativeBuildVersion ?? '—'})
+          </Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   )
@@ -852,5 +881,15 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textTertiary,
     textDecorationLine: 'underline',
+  },
+  // バージョン表記 (7 回タップで smoke test)。控えめな tertiary。
+  versionRow: {
+    marginTop: spacing.lg,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  versionText: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
   },
 })

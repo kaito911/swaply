@@ -8,6 +8,7 @@ import { LikeButton } from '@/components/LikeButton'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card } from '@/lib/types'
 import { formatStructuredGive, formatStructuredWantFields } from '@/lib/master'
+import { useMasterCache } from '@/hooks/useMasterCache'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
@@ -78,6 +79,8 @@ export function FeedGridCard({
 // 譲/求を 3行×2ブロック (グループ/メンバー/グッズ種別) で表示。共通 GiveWantBlock。
 // grid は幅が狭い (3列) ため size="grid" で各フォント −1。求が空はブロックごと非表示。
 function FeedGridTitle({ card }: { card: Card }) {
+  // 修正3: master cache 更新を購読し、slug/空欄→名前への差し替えで再描画する。
+  useMasterCache()
   const give = formatStructuredGive(card)
   const want = formatStructuredWantFields(card)
   return (

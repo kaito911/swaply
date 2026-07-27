@@ -228,6 +228,19 @@ export function sendSentrySmokeTest(message: string): void {
   Sentry.captureMessage(message)
 }
 
+// マスタ取得の失敗/0件を本番で計測する (調査⑥の「characters がエラーか行数切り詰めか」を
+//   本番データで決着させるため)。★PII は一切含めない: テーブル名 (literal)・件数・error 有無のみ。
+export function reportMasterFetchIssue(info: {
+  table: string
+  count: number
+  hasError: boolean
+}): void {
+  Sentry.captureMessage(
+    `master fetch issue: table=${info.table} count=${info.count} error=${info.hasError}`,
+    'warning',
+  )
+}
+
 let initialized = false
 
 export function initSentry(): void {

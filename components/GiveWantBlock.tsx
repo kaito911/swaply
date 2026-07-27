@@ -36,6 +36,12 @@ export function GiveWantBlock({
   const s = SIZES[size]
   const isGive = kind === 'give'
   const label = isGive ? '【譲】' : '【求】'
+
+  // ★修正2: group/member/goods が全て空 (master 未解決/読み込み中) のときは
+  //   【譲】【求】ラベルごと描画しない (ラベルだけ残ると壊れて見えるため)。
+  if (fields.group === '' && fields.member === '' && fields.goods === '') {
+    return null
+  }
   // メンバー(主役)の色: 譲=ink / 求=coral。グループ行(淡い): 譲=slate / 求=coral。
   const memberColor = isGive ? colors.textPrimary : colors.primary
   const groupColor = isGive ? colors.textSecondary : colors.primary

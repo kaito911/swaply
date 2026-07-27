@@ -10,6 +10,7 @@ import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card } from '@/lib/types'
 import { formatStructuredGive, formatStructuredWantFields } from '@/lib/master'
+import { useMasterCache } from '@/hooks/useMasterCache'
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import React from 'react'
@@ -106,6 +107,8 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
 // 譲/求を 3行×2ブロック (グループ/メンバー/グッズ種別) で表示。master 解決の
 // per-field を共通 GiveWantBlock に渡す。求が空 (旧テストデータ) はブロックごと非表示。
 function HomeLargeTitle({ card }: { card: Card }) {
+  // 修正3: master cache 更新を購読し、slug/空欄→名前への差し替えで再描画する。
+  useMasterCache()
   const give = formatStructuredGive(card)
   const want = formatStructuredWantFields(card)
   return (

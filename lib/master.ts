@@ -16,7 +16,9 @@
 //   3. matcher v2 内で findCharacterIdsByText(text) を sync 呼出
 //   4. フリーテキスト追加時に recordListingKeyword(userId, text) で履歴記録
 
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
+import { reportMasterFetchIssue } from './sentry'
 import type {
   Card,
   MasterCategory,
@@ -55,6 +57,71 @@ function createEmptyCache(): MasterCacheState {
 
 let cache: MasterCacheState = createEmptyCache()
 
+// ─────────────────────────────────────────
+// 永続化 + 購読 + リトライ (堅牢化: 修正1/3/4/5/6)
+// ─────────────────────────────────────────
+
+// ★バージョン付きキー。master スキーマを変えたら v2 に上げれば旧データは自然に無視される。
+const MASTER_CACHE_STORAGE_KEY = 'master_cache_v1'
+
+type MasterTable = 'works' | 'characters' | 'itemTypes'
+
+// その回のネットワーク取得で「error なし かつ 1件以上」を確認できたか (修正5)。
+//   0件/エラーは未確認のままにし、リトライ / AppState 復帰の再取得対象にする。
+//   ★3本まとめて失敗扱いにはせず、確認できたテーブルだけ true にする。
+const networkConfirmed: Record<MasterTable, boolean> = {
+  works: false,
+  characters: false,
+  itemTypes: false,
+}
+
+let refreshInFlight = false
+
+// ── 購読 (修正3): モジュール cache を useSyncExternalStore で購読可能にする ──
+//   cache は React state ではないため後から埋まっても再描画されない (症状C の主因)。
+//   version を単調増加させ getSnapshot に返すことで、cache 差し替え時に購読側を再描画させる。
+const listeners = new Set<() => void>()
+let cacheVersion = 0
+
+function notify(): void {
+  cacheVersion++
+  for (const l of listeners) l()
+}
+
+export function subscribeMasterCache(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+export function getMasterCacheVersion(): number {
+  return cacheVersion
+}
+
+// works/characters/itemTypes の3配列から派生 Map 込みの cache を組み立てる。
+//   ready = 「3種すべてに1件以上」= 表示・autocomplete が完全に機能する状態。
+function buildCache(
+  works: MasterWork[],
+  characters: MasterCharacter[],
+  itemTypes: MasterItemType[],
+): MasterCacheState {
+  return {
+    works,
+    worksById: new Map(works.map((w) => [w.id, w])),
+    characters,
+    charactersById: new Map(characters.map((c) => [c.id, c])),
+    charactersByWork: groupByWork(characters),
+    itemTypes,
+    itemTypesById: new Map(itemTypes.map((t) => [t.id, t])),
+    ready: works.length > 0 && characters.length > 0 && itemTypes.length > 0,
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function groupByWork(chars: MasterCharacter[]): Map<string, MasterCharacter[]> {
   const map = new Map<string, MasterCharacter[]>()
   for (const c of chars) {
@@ -73,43 +140,190 @@ function groupByWork(chars: MasterCharacter[]): Map<string, MasterCharacter[]> {
 // ─────────────────────────────────────────
 
 /**
- * 全マスタを並列 fetch してキャッシュに投入する。
- * 失敗時は空キャッシュで継続 (autocomplete 不能だがフリーテキスト fallback で出品可)。
+ * 起動時: (1) AsyncStorage の前回スナップショットで即 hydrate して表示可能にし (修正1)、
+ * (2) バックグラウンドで最新をネットワーク取得して置き換える (リトライ付き・修正4/5)。
+ *
+ * 認証は永続化されているのに master だけ毎回コールドで 538 件取り直していた非対称
+ * (= 症状(A)(C)/起動遅延の共通原因) を解消する。<MasterCacheProvider> から起動時 1 回呼ぶ。
  */
 export async function initMasterCache(): Promise<void> {
+  await hydrateFromStorage()
+  await refreshMasterCache()
+}
+
+// 前回保存分を読み込み cache に投入 (ネットワーク前に名前を出す = 修正1)。
+//   破損 / 形不一致 / 旧キーは無視して継続 (空のまま refresh に委ねる)。
+async function hydrateFromStorage(): Promise<void> {
   try {
-    const [worksRes, charsRes, typesRes] = await Promise.all([
-      supabase.from('master_works').select('*').order('sort_order'),
-      supabase.from('master_characters').select('*').order('sort_order'),
-      supabase
-        .from('master_item_types')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order'),
-    ])
+    const raw = await AsyncStorage.getItem(MASTER_CACHE_STORAGE_KEY)
+    if (raw == null) return
+    const parsed = JSON.parse(raw) as {
+      works?: unknown
+      characters?: unknown
+      itemTypes?: unknown
+    }
+    if (
+      !Array.isArray(parsed.works) ||
+      !Array.isArray(parsed.characters) ||
+      !Array.isArray(parsed.itemTypes)
+    ) {
+      return
+    }
+    // 既にネットワーク確認済みがあるなら hydrate で上書きしない (最新優先)。
+    if (
+      networkConfirmed.works ||
+      networkConfirmed.characters ||
+      networkConfirmed.itemTypes
+    ) {
+      return
+    }
+    cache = buildCache(
+      parsed.works as MasterWork[],
+      parsed.characters as MasterCharacter[],
+      parsed.itemTypes as MasterItemType[],
+    )
+    notify()
+  } catch (err) {
+    console.error('[master][hydrate]', err)
+  }
+}
 
-    if (worksRes.error) console.error('[initMasterCache] works', worksRes.error)
-    if (charsRes.error) console.error('[initMasterCache] characters', charsRes.error)
-    if (typesRes.error) console.error('[initMasterCache] item_types', typesRes.error)
+// 3種すべてネットワーク確認済みなら AsyncStorage に coherent なスナップショットを保存。
+//   部分確認では保存しない (stale と fresh の混在を避ける)。
+async function persistIfComplete(): Promise<void> {
+  if (
+    !(
+      networkConfirmed.works &&
+      networkConfirmed.characters &&
+      networkConfirmed.itemTypes
+    )
+  ) {
+    return
+  }
+  try {
+    await AsyncStorage.setItem(
+      MASTER_CACHE_STORAGE_KEY,
+      JSON.stringify({
+        works: cache.works,
+        characters: cache.characters,
+        itemTypes: cache.itemTypes,
+      }),
+    )
+  } catch (err) {
+    console.error('[master][persist]', err)
+  }
+}
 
-    const works = (worksRes.data ?? []) as MasterWork[]
-    const characters = (charsRes.data ?? []) as MasterCharacter[]
-    const itemTypes = (typesRes.data ?? []) as MasterItemType[]
+function tablesNotConfirmed(): MasterTable[] {
+  const out: MasterTable[] = []
+  if (!networkConfirmed.works) out.push('works')
+  if (!networkConfirmed.characters) out.push('characters')
+  if (!networkConfirmed.itemTypes) out.push('itemTypes')
+  return out
+}
 
-    cache = {
-      works,
-      worksById: new Map(works.map((w) => [w.id, w])),
-      characters,
-      charactersById: new Map(characters.map((c) => [c.id, c])),
-      charactersByWork: groupByWork(characters),
-      itemTypes,
-      itemTypesById: new Map(itemTypes.map((t) => [t.id, t])),
-      ready: true,
+// 1テーブル分の結果を評価。★error あり or 0件は「失敗」とみなし (修正5)、
+//   Sentry に captureMessage して (修正6) null を返す。PII は一切含めない。
+function evalTableResult<T>(
+  dbTable: string,
+  res: { data: T[] | null; error: unknown },
+): T[] | null {
+  const data = (res.data ?? []) as T[]
+  const hasError = res.error != null
+  if (hasError || data.length === 0) {
+    if (hasError) console.error(`[initMasterCache] ${dbTable}`, res.error)
+    reportMasterFetchIssue({ table: dbTable, count: data.length, hasError })
+    return null
+  }
+  return data
+}
+
+// 未確認テーブルだけを並列 fetch。★成功したものだけ返す (他テーブルの失敗に巻き込まれない)。
+async function fetchNeededTables(need: MasterTable[]): Promise<{
+  works: MasterWork[] | null
+  characters: MasterCharacter[] | null
+  itemTypes: MasterItemType[] | null
+}> {
+  const out = {
+    works: null as MasterWork[] | null,
+    characters: null as MasterCharacter[] | null,
+    itemTypes: null as MasterItemType[] | null,
+  }
+  await Promise.all(
+    need.map(async (t) => {
+      if (t === 'works') {
+        const res = await supabase.from('master_works').select('*').order('sort_order')
+        out.works = evalTableResult<MasterWork>('master_works', res)
+      } else if (t === 'characters') {
+        const res = await supabase
+          .from('master_characters')
+          .select('*')
+          .order('sort_order')
+        out.characters = evalTableResult<MasterCharacter>('master_characters', res)
+      } else {
+        const res = await supabase
+          .from('master_item_types')
+          .select('*')
+          .eq('is_active', true)
+          .order('sort_order')
+        out.itemTypes = evalTableResult<MasterItemType>('master_item_types', res)
+      }
+    }),
+  )
+  return out
+}
+
+// 成功したテーブルだけ cache に反映し、networkConfirmed を立てて notify (=購読側再描画)。
+function applyFetched(out: {
+  works: MasterWork[] | null
+  characters: MasterCharacter[] | null
+  itemTypes: MasterItemType[] | null
+}): void {
+  if (out.works != null) networkConfirmed.works = true
+  if (out.characters != null) networkConfirmed.characters = true
+  if (out.itemTypes != null) networkConfirmed.itemTypes = true
+  cache = buildCache(
+    out.works ?? cache.works,
+    out.characters ?? cache.characters,
+    out.itemTypes ?? cache.itemTypes,
+  )
+  notify()
+}
+
+// 未確認テーブルを指数バックオフでリトライ取得する (修正4/5)。
+//   ★機内モード起動 → 途中で機内OFF のケースは、この窓 (最大約31秒) 内のリトライが拾う。
+//     前面での機内OFF は AppState 遷移を伴わないため AppState では拾えないため、
+//     リトライ窓が実質の回復経路になる (検証3)。
+async function refreshMasterCache(): Promise<void> {
+  if (refreshInFlight) return
+  refreshInFlight = true
+  try {
+    const backoffMs = [1000, 2000, 4000, 8000, 16000] // 初回試行 + 最大5リトライ
+    for (let attempt = 0; attempt <= backoffMs.length; attempt++) {
+      const need = tablesNotConfirmed()
+      if (need.length === 0) break
+      const out = await fetchNeededTables(need)
+      applyFetched(out)
+      await persistIfComplete()
+      if (tablesNotConfirmed().length === 0) break
+      if (attempt < backoffMs.length) {
+        await delay(backoffMs[attempt])
+      }
     }
   } catch (err) {
-    console.error('[initMasterCache]', err)
-    // 空キャッシュのまま継続
+    console.error('[refreshMasterCache]', err)
+  } finally {
+    refreshInFlight = false
   }
+}
+
+/**
+ * AppState が 'active' に戻ったとき、未確認テーブルがあれば再取得する (修正4)。
+ * バックグラウンド→復帰での取りこぼし回復用。全確認済みなら no-op。
+ */
+export function ensureMasterCacheFresh(): void {
+  if (tablesNotConfirmed().length === 0) return
+  void refreshMasterCache()
 }
 
 export function isMasterCacheReady(): boolean {
@@ -119,6 +333,9 @@ export function isMasterCacheReady(): boolean {
 /** テスト用にキャッシュをクリア (本番コードからは呼ばない) */
 export function _resetMasterCacheForTest(): void {
   cache = createEmptyCache()
+  networkConfirmed.works = false
+  networkConfirmed.characters = false
+  networkConfirmed.itemTypes = false
 }
 
 // ─────────────────────────────────────────
@@ -373,10 +590,12 @@ export function formatStructuredWant(
 ): { text: string | null; sameSeries: boolean } {
   const wantWorks = card.want_works ?? []
   const charNames = (card.want_characters ?? [])
-    .map((id) => getCharacterById(id)?.display_name_ja ?? id)
+    // ★修正2 (追補): master 未解決時に slug を出さない ('' → filter で除去)。
+    //   resolveMembers/resolveGoods と同じ扱い。検索結果 (search.tsx) の slug 露出を解消。
+    .map((id) => getCharacterById(id)?.display_name_ja ?? '')
     .filter((s) => s !== '')
   const typeNames = (card.want_item_types ?? [])
-    .map((id) => getItemTypeById(id)?.display_name_ja ?? id)
+    .map((id) => getItemTypeById(id)?.display_name_ja ?? '')
     .filter((s) => s !== '')
 
   const sameSeries =
@@ -431,7 +650,9 @@ function resolveGroup(workId: string | null | undefined): string {
 //   (氏名が途中で切れる=元の不具合を避けるため、tail 省略でなく明示的に丸める)。
 function resolveMembers(ids: string[]): string {
   const names = ids
-    .map((id) => getCharacterById(id)?.display_name_ja ?? id)
+    // ★修正2: master 未解決時に slug を出さない。'' にして下の filter で落とす
+    //   (treasure_yoshi は事故に見えるが、空欄は読み込み中に見える)。
+    .map((id) => getCharacterById(id)?.display_name_ja ?? '')
     .filter((s) => s !== '')
   if (names.length <= 2) return names.join('・')
   return `${names.slice(0, 2).join('・')} 他${names.length - 2}名`
@@ -439,7 +660,8 @@ function resolveMembers(ids: string[]): string {
 
 function resolveGoods(ids: string[]): string {
   return ids
-    .map((id) => getItemTypeById(id)?.display_name_ja ?? id)
+    // ★修正2: master 未解決時に slug を出さない ('' → filter で除去)。
+    .map((id) => getItemTypeById(id)?.display_name_ja ?? '')
     .filter((s) => s !== '')
     .join('・')
 }

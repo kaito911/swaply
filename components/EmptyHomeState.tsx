@@ -41,10 +41,11 @@ const styles = StyleSheet.create({
     paddingTop: spacing['4xl'],
     paddingBottom: spacing['4xl'],
   },
-  // ブランドロゴ画像。高さ 30px 基準 (旧 28pt 文字相当)、幅は aspectRatio 864:254 で自動。
+  // ブランドロゴ画像。864:254 の実数指定 (h30 → w102、旧 28pt 文字相当)。
+  //   ★aspectRatio は幅主軸に解決され巨大化するため width/height を実数指定。
   logo: {
+    width: 102,
     height: 30,
-    aspectRatio: 864 / 254,
     marginBottom: spacing.lg,
   },
   main: {

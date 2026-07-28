@@ -276,10 +276,11 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
     gap: spacing.sm,
   },
-  // ブランドロゴ画像 (hero)。高さ 56px 基準、幅は aspectRatio 864:254 で自動 (≈190px)。
+  // ブランドロゴ画像 (hero)。864:254 の実数指定 (h56 → w190)。
+  //   ★aspectRatio は幅主軸に解決され巨大化するため width/height を実数指定。
   logo: {
+    width: 190,
     height: 56,
-    aspectRatio: 864 / 254,
     marginBottom: spacing.sm,
   },
   tagline: {

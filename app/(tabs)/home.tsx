@@ -592,11 +592,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
-  // ブランドロゴ画像。高さ 28px 基準、幅は aspectRatio 864:254 から自動算出 (≈95px)。
-  //   最小幅端末でも右3アイコンと重ならない (space-between + contain)。
+  // ブランドロゴ画像。864:254 の実数指定 (h28 → w95)。
+  //   ★aspectRatio+height は Flexbox で幅主軸に解決され巨大化する事故があったため
+  //     width/height を実数で明示。flexShrink:0 で HeaderActions を押し出さない。
   logo: {
+    width: 95,
     height: 28,
-    aspectRatio: 864 / 254,
+    flexShrink: 0,
   },
   headerRow: {
     flexDirection: 'row',

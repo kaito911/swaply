@@ -3,12 +3,20 @@ import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { colors, fontWeight, spacing } from '@/constants/theme'
 import { router } from 'expo-router'
 import React from 'react'
-import { StyleSheet, Text, View } from 'react-native'
+import { Image, StyleSheet, Text, View } from 'react-native'
 
 export function EmptyHomeState() {
   return (
     <View style={styles.wrap}>
-      <Text style={styles.logo}>Swaply</Text>
+      {/* ブランドロゴ画像に統合 (旧コーラル文字ロゴ)。読み上げ用 label 明示。 */}
+      <Image
+        source={require('../assets/images/splash-icon.png')}
+        style={styles.logo}
+        resizeMode="contain"
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel="Swaply"
+      />
       <Text style={styles.main}>まだ交換できるカードがありません</Text>
       <Text style={styles.sub}>
         {'このアプリは\n「出品」と「いいね」から\n交換が生まれます'}
@@ -33,11 +41,10 @@ const styles = StyleSheet.create({
     paddingTop: spacing['4xl'],
     paddingBottom: spacing['4xl'],
   },
+  // ブランドロゴ画像。高さ 30px 基準 (旧 28pt 文字相当)、幅は aspectRatio 864:254 で自動。
   logo: {
-    fontSize: 28,
-    fontWeight: fontWeight.extrabold,
-    color: colors.primary,
-    letterSpacing: -0.5,
+    height: 30,
+    aspectRatio: 864 / 254,
     marginBottom: spacing.lg,
   },
   main: {

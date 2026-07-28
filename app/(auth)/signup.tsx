@@ -7,6 +7,7 @@ import { router } from 'expo-router'
 import React, { useState } from 'react'
 import {
     Alert,
+    Image,
     KeyboardAvoidingView,
     Platform,
     Pressable,
@@ -84,10 +85,15 @@ export default function SignUpScreen() {
         >
           {/* ─ ヘッダー ─ */}
           <View style={styles.headerWrap}>
-            <View style={[styles.logoMark, { backgroundColor: colors.primary }]}>
-              <Text style={styles.logoMarkText}>S</Text>
-            </View>
-            <Text style={styles.logoText}>Swaply</Text>
+            {/* ブランドロゴ (2シンボル + ワードマーク) に統合。サブコピーは残す。 */}
+            <Image
+              source={require('../../assets/images/splash-icon.png')}
+              style={styles.logo}
+              resizeMode="contain"
+              accessible
+              accessibilityRole="image"
+              accessibilityLabel="Swaply"
+            />
             <Text style={styles.tagline}>交換を、もっとスムーズに。</Text>
           </View>
 
@@ -270,24 +276,11 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
     gap: spacing.sm,
   },
-  logoMark: {
-    width: 64,
-    height: 64,
-    borderRadius: radius['2xl'],
-    alignItems: 'center',
-    justifyContent: 'center',
+  // ブランドロゴ画像 (hero)。高さ 56px 基準、幅は aspectRatio 864:254 で自動 (≈190px)。
+  logo: {
+    height: 56,
+    aspectRatio: 864 / 254,
     marginBottom: spacing.sm,
-  },
-  logoMarkText: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  logoText: {
-    fontSize: fontSize.hero,
-    fontWeight: '800',
-    color: colors.primary,
-    letterSpacing: -1,
   },
   tagline: {
     fontSize: fontSize.base,

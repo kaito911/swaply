@@ -46,7 +46,9 @@ export function FeedGridCard({
           <Image
             source={{ uri: card.image_url }}
             style={styles.image}
-            contentFit="contain"
+            // ★E: 一覧カードは中央クロップで正方形に見せる (cover)。新旧混在でも
+            //   正方形 (aspectRatio 1) に統一され一覧の高さは崩れない。
+            contentFit="cover"
             transition={200}
             cachePolicy="memory-disk"
           />
@@ -102,9 +104,10 @@ const styles = StyleSheet.create({
   // width 未指定時の後方互換 (flex 等分)。list/[section] は width を渡すため通常未使用。
   cardFlex: { flex: 1 },
   imageWrap: {
-    // ★RN の aspectRatio は width/height。確定仕様「高さ=幅×0.90」= width/height=1/0.9≈1.11。
+    // ★E: 一覧カードは正方形フレーム (aspectRatio 1) + cover で中央クロップ。
+    //   縦長グッズも新旧混在も一律に正方形で揃い、グリッド高さが崩れない。
     width: '100%',
-    aspectRatio: 1.11,
+    aspectRatio: 1,
     backgroundColor: colors.backgroundMuted,
   },
   image: { width: '100%', height: '100%' },

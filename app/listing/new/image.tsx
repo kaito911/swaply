@@ -17,8 +17,7 @@ async function pickFromCamera(): Promise<string | null> {
   if (!(await ensureMediaPermission('camera'))) return null
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes: ['images'],
-    allowsEditing: true,
-    aspect: [3, 4],
+    // ★E: 自由な縦横比を許可 (切らない)。表示側で一覧=中央クロップ正方形 / 詳細=全体表示。
     quality: 0.8,
   })
   if (result.canceled) return null
@@ -34,8 +33,7 @@ async function pickFromLibrary(): Promise<string | null> {
   if (!(await ensureMediaPermission('library'))) return null
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
-    allowsEditing: true,
-    aspect: [3, 4],
+    // ★E: 自由な縦横比を許可 (切らない)。
     quality: 0.8,
   })
   if (result.canceled) return null

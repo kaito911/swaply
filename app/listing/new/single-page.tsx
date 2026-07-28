@@ -49,7 +49,7 @@ import {
 import { WorkSection } from '@/components/listing/section/WorkSection'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
-import { deleteDraft, loadDraft, saveDraft } from '@/lib/listingDrafts'
+import { deleteDraft, isMeaningfulDraft, loadDraft, saveDraft } from '@/lib/listingDrafts'
 import { useToast } from '@/providers/ToastProvider'
 import {
   getCharacterById,
@@ -243,12 +243,13 @@ export default function ListingNewSinglePageScreen() {
   const submittedRef = useRef(false)
 
   // ── 1. hydrate ──
-  // 再開の場合は既存 draft を読み込んで state を復元
+  // 再開の場合は既存 draft を読み込んで state を復元 (★userId 別キー)
   useEffect(() => {
     if (isNew) return
+    if (userId == null) return
     if (draftId == null || draftId === '') return
     let cancelled = false
-    void loadDraft(draftId).then((draft) => {
+    void loadDraft(userId, draftId).then((draft) => {
       if (cancelled) return
       if (draft != null) {
         dispatch({ type: 'HYDRATE', state: draft.state })
@@ -258,18 +259,21 @@ export default function ListingNewSinglePageScreen() {
     return () => {
       cancelled = true
     }
-  }, [draftId, isNew])
+  }, [draftId, isNew, userId])
 
   // ── 2. debounce 自動保存 ──
-  // hydrate 完了後、state 変更のたびに debounce 800ms で saveDraft
+  // hydrate 完了後、state 変更のたびに debounce 800ms で saveDraft (★userId 別キー)。
+  // ★C: 何も入力していない state は保存しない (空の「無題の出品」量産を防ぐ)。
   useEffect(() => {
     if (!hydrated) return
+    if (userId == null) return
     if (draftId == null || draftId === '') return
+    if (!isMeaningfulDraft(state)) return
     const t = setTimeout(() => {
-      void saveDraft(draftId, state)
+      void saveDraft(userId, draftId, state)
     }, DRAFT_DEBOUNCE_MS)
     return () => clearTimeout(t)
-  }, [state, hydrated, draftId])
+  }, [state, hydrated, draftId, userId])
 
   // ── 3. 離脱時の確定保存 + トースト ──
   // navigation の beforeRemove で保存 (戻る / スワイプ / router.back 全部拾う)。
@@ -278,13 +282,16 @@ export default function ListingNewSinglePageScreen() {
     const unsubscribe = navigation.addListener('beforeRemove', () => {
       // 出品成功 (submittedRef=true) では draft は既に削除済のため保存しない
       if (submittedRef.current) return
+      if (userId == null) return
       if (draftId == null || draftId === '') return
-      void saveDraft(draftId, stateRef.current).then(() => {
+      // ★C: 何も入力せず閉じた場合は保存しない (トーストも出さない)。
+      if (!isMeaningfulDraft(stateRef.current)) return
+      void saveDraft(userId, draftId, stateRef.current).then(() => {
         showToast('下書きに保存しました')
       })
     })
     return unsubscribe
-  }, [navigation, draftId, showToast])
+  }, [navigation, draftId, showToast, userId])
 
   // ── 4. submit ──
   const handleSubmit = useCallback(async () => {
@@ -367,9 +374,9 @@ export default function ListingNewSinglePageScreen() {
       const { error: cardError } = await supabase.from('cards').insert(row)
       if (cardError) throw cardError
 
-      // 成功: draft 削除 → 出品完了 → mypage
+      // 成功: draft 削除 → 出品完了 → mypage (userId は上部 292 行で non-null 保証済み)
       submittedRef.current = true
-      await deleteDraft(draftId)
+      await deleteDraft(userId, draftId)
       Alert.alert('出品完了', '出品が完了しました。', [
         {
           text: 'OK',

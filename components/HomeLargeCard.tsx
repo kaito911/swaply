@@ -59,7 +59,9 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
           <Image
             source={{ uri: card.image_url }}
             style={styles.image}
-            contentFit="contain"
+            // ★E: 一覧カードは中央クロップで正方形に見せる (cover)。新旧混在でも
+            //   正方形 (aspectRatio 1) に統一され一覧の高さは崩れない。
+            contentFit="cover"
             transition={200}
             cachePolicy="memory-disk"
           />
@@ -130,10 +132,10 @@ const styles = StyleSheet.create({
     marginRight: spacing.md,
   },
   imageWrap: {
-    // 幅可変に伴い固定 height を廃止し aspectRatio 化 (contain で顔切れ回避)。
-    // ★RN の aspectRatio は width/height。確定仕様「高さ=幅×0.90」= width/height=1/0.9≈1.11。
+    // ★E: 一覧カードは正方形フレーム (aspectRatio 1) + cover で中央クロップ。
+    //   縦長グッズも新旧混在も一律に正方形で揃い、レーンの高さが崩れない。
     width: '100%',
-    aspectRatio: 1.11,
+    aspectRatio: 1,
     backgroundColor: colors.backgroundMuted,
   },
   imagePlaceholder: {

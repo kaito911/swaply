@@ -13,6 +13,7 @@
 
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
+import { useAuth } from '@/hooks/useAuth'
 import {
   deleteDraft,
   generateDraftId,
@@ -45,13 +46,23 @@ function formatUpdatedAt(ts: number): string {
 }
 
 export default function ListingNewEntryScreen() {
+  const { userId } = useAuth()
   const [drafts, setDrafts] = useState<ListingDraft[] | null>(null)
 
   // 画面 focus のたびに再読み込み (single-page からの戻り / 削除後の反映)
   useFocusEffect(
     useCallback(() => {
       let cancelled = false
-      void loadDrafts().then((list) => {
+      // 未ログインは下書きを持てない (キーが userId 別のため) → 即新規作成へ。
+      if (userId == null) {
+        const newId = generateDraftId()
+        router.replace({
+          pathname: '/listing/new/single-page' as never,
+          params: { draftId: newId, isNew: '1' },
+        })
+        return
+      }
+      void loadDrafts(userId).then((list) => {
         if (cancelled) return
         // 下書き 0 件 → 即 single-page へ replace (ハブは出さない)
         if (list.length === 0) {
@@ -67,7 +78,7 @@ export default function ListingNewEntryScreen() {
       return () => {
         cancelled = true
       }
-    }, []),
+    }, [userId]),
   )
 
   const handleNewDraft = () => {
@@ -95,8 +106,9 @@ export default function ListingNewEntryScreen() {
           text: '削除',
           style: 'destructive',
           onPress: async () => {
-            await deleteDraft(draft.id)
-            const next = await loadDrafts()
+            if (userId == null) return
+            await deleteDraft(userId, draft.id)
+            const next = await loadDrafts(userId)
             if (next.length === 0) {
               // 全消し → 新規作成に切替
               handleNewDraft()

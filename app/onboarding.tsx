@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import React, { useEffect, useRef, useState } from 'react'
 import {
   Animated,
+  Image,
   StyleSheet,
   Text,
   TextInput,
@@ -75,10 +76,15 @@ export default function OnboardingScreen({ onComplete }: Props) {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.container}>
           <View style={styles.heroArea}>
-            <View style={[styles.logoMark, { backgroundColor: colors.primary }]}>
-              <Text style={styles.logoMarkText}>S</Text>
-            </View>
-            <Text style={styles.logoText}>Swaply</Text>
+            {/* ブランドロゴ (2シンボル + ワードマーク) に統合。挨拶コピーは残す。 */}
+            <Image
+              source={require('../assets/images/splash-icon.png')}
+              style={styles.logo}
+              resizeMode="contain"
+              accessible
+              accessibilityRole="image"
+              accessibilityLabel="Swaply"
+            />
             <Text style={styles.welcomeGreeting}>ようこそ、Swaplyへ。</Text>
           </View>
 
@@ -209,24 +215,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing['3xl'],
     gap: spacing.sm,
   },
-  logoMark: {
-    width: 72,
-    height: 72,
-    borderRadius: radius['2xl'],
-    alignItems: 'center',
-    justifyContent: 'center',
+  // ブランドロゴ画像 (hero)。高さ 60px 基準、幅は aspectRatio 864:254 で自動 (≈204px)。
+  //   旧マーク 72px と同等の hero 存在感を確保。
+  logo: {
+    height: 60,
+    aspectRatio: 864 / 254,
     marginBottom: spacing.sm,
-  },
-  logoMarkText: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  logoText: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: colors.primary,
-    letterSpacing: -1,
   },
   welcomeGreeting: {
     fontSize: fontSize.lg,

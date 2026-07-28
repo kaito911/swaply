@@ -2,9 +2,21 @@
 //
 // Phase B: 出品 1 ページ化の下書きハブ用ユーティリティ。
 //
-// AsyncStorage に「下書きの配列 (ListingDraft[])」を単一キー ('listing_drafts_v1')
-// で保存する。1 端末 1 ユーザー想定 (β1 まで) のため user_id 分離しない。
-// (再登場する user_id 分離要件が出たらキーを 'listing_drafts_v1:{userId}' に拡張)
+// AsyncStorage に「下書きの配列 (ListingDraft[])」を★ユーザー別キー
+// ('listing_drafts_v1:{userId}') で保存する。
+//
+// ★2026-07 修正 (B): 旧実装は単一キー 'listing_drafts_v1' で user_id 非分離だったため、
+//   同一端末で A ログアウト → B ログインすると A の下書きが B に見える漏れがあった。
+//   キーに userId を含めることでアカウント間を分離する (ログアウト時クリア方式は、
+//   同一アカウント再ログインで自分の下書きまで消えるため不採用)。
+//
+// 旧キー ('listing_drafts_v1' 無印) の扱い (B-3):
+//   ★migrate も delete もせず「orphan (放置)」する。理由:
+//     - 旧キーは複数アカウント混在で所有者を特定できない → どのユーザーに migrate しても
+//       「他人の下書きが見える」漏れを再発させる。
+//     - delete すると現在ユーザーの正当な作りかけ下書きまで破壊しうる (所有証明不能)。
+//     - orphan なら二度と read されない (=漏れゼロ) かつ破壊もしない。端末内の小さな
+//       dead data が残るだけ (UI には一切出ない)。最も安全。
 //
 // 設計方針:
 //   - 下書きは端末永続、機種変では失われる (Phase B 判断: AsyncStorage 採用)
@@ -16,7 +28,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { ListingFormState } from '@/components/listing/section/types'
 import { getWorkById } from './master'
 
-const STORAGE_KEY = 'listing_drafts_v1'
+// ★ユーザー別キーの接頭辞。実キーは `${STORAGE_KEY_PREFIX}:${userId}`。
+//   旧・無印 'listing_drafts_v1' は orphan (read/write しない)。
+const STORAGE_KEY_PREFIX = 'listing_drafts_v1'
+
+function draftsKey(userId: string): string {
+  return `${STORAGE_KEY_PREFIX}:${userId}`
+}
 
 export type ListingDraft = {
   id: string
@@ -49,12 +67,32 @@ export function deriveDraftTitle(state: ListingFormState): string {
 }
 
 /**
- * 保存済み下書きを全件取得する (updatedAt 降順)。
+ * ★入力が「意味のある下書き」か判定する (C: 空の「無題の出品」量産を防ぐ)。
+ * 画像 / 作品 / キャラ / 種別 / 求 / 求詳細 のいずれかが入っていれば true。
+ * 何も入力していない (= INITIAL 相当) なら false → 保存しない。
+ */
+export function isMeaningfulDraft(state: ListingFormState): boolean {
+  return (
+    state.image.frontUri != null ||
+    state.image.backUri != null ||
+    state.work != null ||
+    state.characters.length > 0 ||
+    state.itemTypes.length > 0 ||
+    state.want.works.length > 0 ||
+    state.want.characters.length > 0 ||
+    state.want.itemTypes.length > 0 ||
+    state.want.sameSeriesAsOffer ||
+    state.condition.want_description.trim() !== ''
+  )
+}
+
+/**
+ * 保存済み下書きを全件取得する (updatedAt 降順)。★userId 別キーで分離。
  * AsyncStorage 失敗や JSON parse 失敗は空配列 fallback。
  */
-export async function loadDrafts(): Promise<ListingDraft[]> {
+export async function loadDrafts(userId: string): Promise<ListingDraft[]> {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY)
+    const raw = await AsyncStorage.getItem(draftsKey(userId))
     if (raw == null) return []
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
@@ -67,15 +105,16 @@ export async function loadDrafts(): Promise<ListingDraft[]> {
 }
 
 /**
- * 単一の下書きを保存する (upsert)。既存 id なら上書き、新規なら追加。
+ * 単一の下書きを保存する (upsert)。既存 id なら上書き、新規なら追加。★userId 別キー。
  * title は state から自動導出、updatedAt は now で上書き。
  */
 export async function saveDraft(
+  userId: string,
   id: string,
   state: ListingFormState,
 ): Promise<void> {
   try {
-    const drafts = await loadDrafts()
+    const drafts = await loadDrafts(userId)
     const next: ListingDraft = {
       id,
       state,
@@ -88,30 +127,33 @@ export async function saveDraft(
     } else {
       drafts.push(next)
     }
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(drafts))
+    await AsyncStorage.setItem(draftsKey(userId), JSON.stringify(drafts))
   } catch (err) {
     console.warn('[listingDrafts] saveDraft failed', err)
   }
 }
 
 /**
- * ID 指定で下書きを削除する。存在しない ID は no-op。
+ * ID 指定で下書きを削除する。存在しない ID は no-op。★userId 別キー。
  */
-export async function deleteDraft(id: string): Promise<void> {
+export async function deleteDraft(userId: string, id: string): Promise<void> {
   try {
-    const drafts = await loadDrafts()
+    const drafts = await loadDrafts(userId)
     const filtered = drafts.filter((d) => d.id !== id)
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(filtered))
+    await AsyncStorage.setItem(draftsKey(userId), JSON.stringify(filtered))
   } catch (err) {
     console.warn('[listingDrafts] deleteDraft failed', err)
   }
 }
 
 /**
- * ID 指定で単一下書きを取得する。存在しない or 破損時は null。
+ * ID 指定で単一下書きを取得する。存在しない or 破損時は null。★userId 別キー。
  */
-export async function loadDraft(id: string): Promise<ListingDraft | null> {
-  const drafts = await loadDrafts()
+export async function loadDraft(
+  userId: string,
+  id: string,
+): Promise<ListingDraft | null> {
+  const drafts = await loadDrafts(userId)
   return drafts.find((d) => d.id === id) ?? null
 }
 

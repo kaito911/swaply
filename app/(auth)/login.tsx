@@ -6,6 +6,7 @@ import { router } from 'expo-router'
 import React, { useState } from 'react'
 import {
     Alert,
+    Image,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -106,11 +107,16 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.logoWrap}>
-            <View style={[styles.logoMark, { backgroundColor: colors.primary }]}>
-              <Text style={styles.logoMarkText}>S</Text>
-            </View>
-
-            <Text style={styles.logoText}>Swaply</Text>
+            {/* ブランドロゴ (2シンボル + ワードマーク)。旧「角丸S マーク + Swaply」を
+                1枚のロゴ画像に統合。サブコピーは残す。読み上げ用に accessibilityLabel 明示。 */}
+            <Image
+              source={require('../../assets/images/splash-icon.png')}
+              style={styles.logo}
+              resizeMode="contain"
+              accessible
+              accessibilityRole="image"
+              accessibilityLabel="Swaply"
+            />
             <Text style={styles.tagline}>交換を、もっとスムーズに。</Text>
           </View>
 
@@ -216,24 +222,12 @@ const styles = StyleSheet.create({
     paddingBottom: spacing['2xl'],
     gap: spacing.sm,
   },
-  logoMark: {
-    width: 64,
-    height: 64,
-    borderRadius: radius['2xl'],
-    alignItems: 'center',
-    justifyContent: 'center',
+  // ブランドロゴ画像 (hero)。高さ 56px 基準、幅は aspectRatio 864:254 で自動 (≈190px)。
+  //   旧マーク 64px と同等の hero 存在感を横長ワードマークで確保。
+  logo: {
+    height: 56,
+    aspectRatio: 864 / 254,
     marginBottom: spacing.sm,
-  },
-  logoMarkText: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  logoText: {
-    fontSize: fontSize.hero,
-    fontWeight: '800',
-    color: colors.primary,
-    letterSpacing: -1,
   },
   tagline: {
     fontSize: fontSize.base,

@@ -438,9 +438,14 @@ export async function fetchLikedCards(userId: string): Promise<Card[]> {
   }
   const rows = (data ?? []) as unknown as { card: Card | null }[]
   // 判断1: active な出品のみ (traded/inactive になった過去いいねは一覧から除外)。
+  // ★is_public: 非公開 (棚) 化されたカードは他人向け一覧から除外 (RLS 未実装③のためクライアントで gate)。
+  //   CARD_FEED_SELECT は `*` で is_public を含むため、明示 false のみ除外する。
   return rows
     .map((r) => r.card)
-    .filter((c): c is Card => c != null && c.status === 'active')
+    .filter(
+      (c): c is Card =>
+        c != null && c.status === 'active' && c.is_public !== false,
+    )
 }
 
 export async function fetchRecommendedCards(
@@ -487,7 +492,19 @@ export async function fetchCard(cardId: string): Promise<Card | null> {
     return null
   }
 
-  return data as Card
+  const card = data as Card
+  // ★is_public gate: 非公開 (棚) カードは所有者本人以外には返さない (id 直取得の漏れを塞ぐ)。
+  //   本人は自分の非公開カードを見られる (fetchUserCards と同じ設計思想=可視性軸は所有と直交)。
+  //   RLS 側は is_public 未実装 (③) のため DB は行を返す → クライアントで gate する。
+  //   uid は getSession (ローカル参照・ネットワーク不要) から取得し、fetchCard の
+  //   シグネチャを変えない (呼出側 listing/[id] 等の変更ゼロ)。
+  if (card.is_public === false) {
+    const { data: sessionData } = await supabase.auth.getSession()
+    const viewerId = sessionData.session?.user?.id ?? null
+    if (viewerId !== card.owner_user_id) return null
+  }
+
+  return card
 }
 
 // ─────────────────────────────────────────
@@ -593,7 +610,15 @@ export async function fetchMyLikedCards(
     console.error('[fetchMyLikedCards]', error)
     return []
   }
-  return (data ?? []) as unknown as LikedCardWithCard[]
+  const rows = (data ?? []) as unknown as LikedCardWithCard[]
+  // ★status/is_public フィルタ (従来は未フィルタ)。/likes は他人の公開出品の保存一覧のため、
+  //   active かつ公開 (is_public !== false) のみ残す。card join は防御的に null チェック。
+  return rows.filter(
+    (r) =>
+      r.card != null &&
+      r.card.status === 'active' &&
+      r.card.is_public !== false,
+  )
 }
 
 /**

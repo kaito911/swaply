@@ -115,6 +115,10 @@ export interface Card {
   adjustment_max: number | null
   allows_mail: boolean
   allows_handoff: boolean
+  // 可視性軸 (顔2/商品棚)。true=公開出品 (フィード/検索に出る)、false=私物/棚 (非公開)。
+  //   DB は not null default true。部分 SELECT の経路では欠落しうるため optional。
+  //   詳細: docs/design_shelf_and_is_public.md
+  is_public?: boolean
   // items 拡張 (refactor_plan v1.11 章 3.9 / Step 2.5 commit 1 c601667 で配列化)
   // 既存データは空配列、新規出品で値を要求 (UI 層で最低 1 個必須)。
   // work_id / characters[] / item_types[] は論理的に master_* を参照するが

@@ -43,6 +43,7 @@ import { router } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
@@ -406,7 +407,17 @@ export default function HomeScreen() {
         {/* Header */}
         <View style={styles.headerWrap}>
           <View style={styles.headerTop}>
-            <Text style={styles.logoText}>Swaply</Text>
+            {/* ブランドロゴ (2シンボル + ワードマーク)。高さ基準で幅は 864:254 から算出。
+                画像化で読み上げが消えるため accessibilityLabel を明示。右3アイコンとは
+                headerTop の space-between + 固定幅ロゴで重ならない。 */}
+            <Image
+              source={require('../../assets/images/splash-icon.png')}
+              style={styles.logo}
+              resizeMode="contain"
+              accessible
+              accessibilityRole="image"
+              accessibilityLabel="Swaply"
+            />
             <HeaderActions />
           </View>
           <View style={styles.headerRow}>
@@ -581,11 +592,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
-  logoText: {
-    fontSize: 24,
-    fontWeight: fontWeight.extrabold,
-    color: colors.primary,
-    letterSpacing: -0.5,
+  // ブランドロゴ画像。高さ 28px 基準、幅は aspectRatio 864:254 から自動算出 (≈95px)。
+  //   最小幅端末でも右3アイコンと重ならない (space-between + contain)。
+  logo: {
+    height: 28,
+    aspectRatio: 864 / 254,
   },
   headerRow: {
     flexDirection: 'row',

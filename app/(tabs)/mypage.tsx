@@ -57,7 +57,7 @@ const HISTORY_PREVIEW_LIMIT = 5
 // ─────────────────────────────────────────
 
 export default function MyPageScreen() {
-  const { session } = useAuthContext()
+  const { session, loading: authLoading } = useAuthContext()
   const { refreshBadge } = useBadge()
   const [logoutLoading, setLogoutLoading] = useState(false)
 
@@ -121,9 +121,18 @@ export default function MyPageScreen() {
       sessionLine = `session 取得不能: ${e instanceof Error ? e.message : String(e)}`
     }
 
+    // DEBUG: 原因特定後に削除。[Context] = RootNavigator が分岐に使う React state
+    //   (useAuthContext)。hook はコンポーネント本体で取得済みの session/authLoading を
+    //   参照する (async 内で hook は呼ばない)。getSession(storage) と並べて乖離を確認する。
+    const ctxUid = session?.user?.id ? `${session.user.id.slice(0, 8)}…` : '-'
+    const contextLine =
+      session == null
+        ? `session: null\nloading: ${authLoading}`
+        : `session: exists\nuser.id: ${ctxUid}\nloading: ${authLoading}`
+
     Alert.alert(
       'DEBUG (原因特定後に削除)',
-      `${dsnLine}\n\n[OTA]\n${otaLine}\n\n[AsyncStorage]\n${keysLine}\n\n[Session]\n${sessionLine}`,
+      `${dsnLine}\n\n[OTA]\n${otaLine}\n\n[AsyncStorage]\n${keysLine}\n\n[Session (getSession/storage)]\n${sessionLine}\n\n[Context (routing に使う値)]\n${contextLine}`,
     )
   }
 

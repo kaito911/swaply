@@ -126,6 +126,11 @@ function RootNavigator() {
         />
 
         <Stack.Screen
+          name="offer/by-card/[cardId]"
+          options={{ headerShown: false }} // 画面内 ScreenHeader (申請者 card軸比較)
+        />
+
+        <Stack.Screen
           name="trust/[id]"
           options={{ headerShown: false }} // 画面内 ScreenHeader 統一 (3.5a 規約)
         />

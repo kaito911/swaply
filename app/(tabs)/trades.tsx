@@ -139,6 +139,32 @@ export default function ProposeScreen() {
     return m
   }, [receivedOffers])
 
+  // ★card軸 (相手から): 受信 pending を target_card ごとに束ね、各出品の「最新申請 created_at」
+  //   降順で並べる。申請1件以上の出品のみ出る (0件は現れない)。新規クエリ不要 (receivedOffers 由来)。
+  const receivedCardGroups = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        card: NonNullable<OfferWithTrade['target_card']>
+        offers: OfferWithTrade[]
+        latest: number
+      }
+    >()
+    for (const o of receivedOffers) {
+      const card = o.target_card
+      if (card?.id == null) continue
+      const ts = new Date(o.created_at).getTime()
+      const g = m.get(card.id)
+      if (g == null) {
+        m.set(card.id, { card, offers: [o], latest: ts })
+      } else {
+        g.offers.push(o)
+        if (ts > g.latest) g.latest = ts
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => b.latest - a.latest)
+  }, [receivedOffers])
+
   // 取引中タブ: trade が動いているもの、または accepted 直後で trade 未生成のもの
   const inProgressOffers = useMemo(() => {
     return offers.filter((offer) => {
@@ -289,6 +315,46 @@ export default function ProposeScreen() {
     }
   }
 
+  // ★「相手から」card軸一覧 (新規・received 経路専用)。既存の行レンダラ/バケット分岐/
+  //   ハンドラには一切干渉しない。1行=自分の出品1件、タップで申請者並列比較画面へ。
+  const renderReceivedByCard = () => {
+    if (receivedCardGroups.length === 0) {
+      const empty = renderEmptyText()
+      return (
+        <View style={styles.centerBox}>
+          <Text style={styles.emptyTitle}>{empty.title}</Text>
+          <Text style={styles.emptyBody}>{empty.body}</Text>
+        </View>
+      )
+    }
+    return (
+      <View style={styles.list}>
+        {receivedCardGroups.map((g) => (
+          <Pressable
+            key={g.card.id}
+            style={styles.byCardRow}
+            onPress={() => router.push(`/offer/by-card/${g.card.id}` as never)}
+          >
+            {g.card.image_url != null && g.card.image_url !== '' ? (
+              <Image source={{ uri: g.card.image_url }} style={styles.byCardImage} />
+            ) : (
+              <View style={[styles.byCardImage, styles.byCardImageEmpty]} />
+            )}
+            <View style={styles.byCardMeta}>
+              <Text style={styles.byCardName} numberOfLines={2}>
+                {g.card.name && g.card.name.trim().length > 0
+                  ? g.card.name
+                  : 'グッズ情報なし'}
+              </Text>
+              <Text style={styles.byCardCount}>申請 {g.offers.length}件</Text>
+            </View>
+            <Text style={styles.byCardChevron}>›</Text>
+          </Pressable>
+        ))}
+      </View>
+    )
+  }
+
   const renderContent = () => {
     if (loading) {
       return (
@@ -320,6 +386,12 @@ export default function ProposeScreen() {
           </Text>
         </View>
       )
+    }
+
+    // ★受信サブタブ (相手から) は card 軸一覧へ丸ごと委譲 (非破壊)。以降の offer-empty /
+    //   バケット分岐 (dead) / 行レンダラは received 経路を通らない。他タブは従来どおり。
+    if (activeTab === 'proposal' && proposalSubTab === 'received') {
+      return renderReceivedByCard()
     }
 
     if (visibleOffers.length === 0) {
@@ -1072,6 +1144,48 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: 12,
+  },
+  // ★card軸 (相手から) の1行 = 自分の出品1件。
+  byCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  byCardImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+    backgroundColor: colors.backgroundMuted,
+    flexShrink: 0,
+  },
+  byCardImageEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  byCardMeta: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  byCardName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  byCardCount: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  byCardChevron: {
+    fontSize: 22,
+    color: colors.textTertiary,
+    flexShrink: 0,
   },
   sectionTitle: {
     fontSize: 14,

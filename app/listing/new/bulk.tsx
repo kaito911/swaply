@@ -187,7 +187,7 @@ function buildPointName(
   }
   const typeNames = itemTypes.map(itemTypeDisplay)
   if (typeNames.length > 0) {
-    parts.push(`(${typeNames.join('・')})`)
+    parts.push(typeNames.join('・'))
   }
   return parts.length > 0 ? parts.join(' / ') : '無題の出品'
 }

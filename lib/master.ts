@@ -617,7 +617,7 @@ export function formatStructuredWant(
     )
   }
   if (typeNames.length > 0) {
-    parts.push(`(${typeNames.join('・')})`)
+    parts.push(typeNames.join('・'))
   }
   if (sameSeries) {
     parts.push('同シリーズ')

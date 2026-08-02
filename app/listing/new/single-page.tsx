@@ -201,7 +201,7 @@ function buildSetName(state: ListingFormState): string {
     )
   }
   if (typeNames.length > 0) {
-    parts.push(`(${typeNames.join('・')})`)
+    parts.push(typeNames.join('・'))
   }
   return parts.join(' / ')
 }

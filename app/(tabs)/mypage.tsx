@@ -31,7 +31,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Updates from 'expo-updates'
 import { Ionicons } from '@expo/vector-icons'
 import * as Application from 'expo-application'
-import { router, useFocusEffect } from 'expo-router'
+import { router, useFocusEffect, usePathname } from 'expo-router'
 import React, { useCallback, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -58,6 +58,8 @@ const HISTORY_PREVIEW_LIMIT = 5
 
 export default function MyPageScreen() {
   const { session, loading: authLoading } = useAuthContext()
+  // DEBUG: 原因特定後に削除。現在の pathname (index.tsx の無条件リダイレクト裏取り用)。
+  const debugPathname = usePathname()
   const { refreshBadge } = useBadge()
   const [logoutLoading, setLogoutLoading] = useState(false)
 
@@ -132,7 +134,7 @@ export default function MyPageScreen() {
 
     Alert.alert(
       'DEBUG (原因特定後に削除)',
-      `${dsnLine}\n\n[OTA]\n${otaLine}\n\n[AsyncStorage]\n${keysLine}\n\n[Session (getSession/storage)]\n${sessionLine}\n\n[Context (routing に使う値)]\n${contextLine}`,
+      `${dsnLine}\n\n[OTA]\n${otaLine}\n\n[AsyncStorage]\n${keysLine}\n\n[Session (getSession/storage)]\n${sessionLine}\n\n[Context (routing に使う値)]\n${contextLine}\n\n[Route (現在のpathname)]\n${debugPathname}`,
     )
   }
 

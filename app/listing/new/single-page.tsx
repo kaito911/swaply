@@ -591,23 +591,9 @@ export default function ListingNewSinglePageScreen() {
 
           <View style={styles.sectionDivider} />
 
-          {/* ⑤ 状態・調整金 */}
+          {/* ⑤ 求 (求の詳細より前。ConditionSection の「前のセクションで選んだ求に補足」と整合) */}
           <SectionHeader
             index={5}
-            title="求の詳細・調整金"
-            done={isConditionDone()}
-            optional
-          />
-          <ConditionSection
-            value={state.condition}
-            onChange={(v) => dispatch({ type: 'SET_CONDITION', value: v })}
-          />
-
-          <View style={styles.sectionDivider} />
-
-          {/* ⑥ 求 (最後) */}
-          <SectionHeader
-            index={6}
             title="求"
             done={isWantDone(state.want)}
           />
@@ -617,6 +603,20 @@ export default function ListingNewSinglePageScreen() {
             userId={userId}
             offerWork={state.work}
             offerItemTypes={state.itemTypes}
+          />
+
+          <View style={styles.sectionDivider} />
+
+          {/* ⑥ 求の詳細 (最後・任意)。調整金 UI はフラグ死蔵のため見出しから「・調整金」を外す */}
+          <SectionHeader
+            index={6}
+            title="求の詳細"
+            done={isConditionDone()}
+            optional
+          />
+          <ConditionSection
+            value={state.condition}
+            onChange={(v) => dispatch({ type: 'SET_CONDITION', value: v })}
           />
 
           {/* 出品 CTA */}

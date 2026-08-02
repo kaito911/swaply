@@ -64,16 +64,16 @@ export default function VenueMyPostsScreen() {
   const [posts, setPosts] = useState<VenueSupplyPost[]>([])
   const [holdCounts, setHoldCounts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
+  // A1: 主 fetch 失敗時の再試行フラグ。失敗を「0件(空)」に倒さず再試行UIを出す (holds/home と同手法)。
+  const [loadFailed, setLoadFailed] = useState(false)
   const [withdrawing, setWithdrawing] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     if (venueId == null || userId == null) return
+    // A1: 主 fetch を try/catch/finally で包み、失敗時は「0件」ではなく再試行UIに倒す
+    //   (holds.tsx と同手法。失敗を false-empty にしない)。
     setLoading(true)
-    // PR-V2-fix2: lib/supabase.ts 側で fetchMySupplyPosts がネットワーク起因失敗時に
-    //   throw するよう変更されるため、ここで受け止めて silent fallback (空配列) する。
-    //   my-posts 画面は V2 のエラー UI (再試行ボタン等) の対象外、catch なしでの画面落ち
-    //   (= 無限スピン or 赤画面) を防ぐのが目的。finally で setLoading(false) を確実に呼び
-    //   無限スピンを防止する。
+    setLoadFailed(false)
     try {
       const fresh = await fetchMySupplyPosts(venueId, userId)
       setPosts(fresh)
@@ -83,11 +83,8 @@ export default function VenueMyPostsScreen() {
       const counts = await fetchHoldCountsForSupplyPosts(myPostIds, userId)
       setHoldCounts(counts)
     } catch (error) {
-      console.warn('[VenueMyPosts][reload]', error)
-      // 既存 posts / holdCounts は空にリセット (画面は「投稿がありません」既存 UI に倒れる)。
-      // my-posts 画面の UI 出し分け強化は本 PR スコープ外 (V2 は会場一覧 / 会場詳細の 2 画面のみ)。
-      setPosts([])
-      setHoldCounts({})
+      console.error('[VenueMyPosts][reload]', error)
+      setLoadFailed(true)
     } finally {
       setLoading(false)
     }
@@ -140,6 +137,20 @@ export default function VenueMyPostsScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.centerBox}>
           <ActivityIndicator color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  if (loadFailed) {
+    // ★取得失敗: 「まだ投稿がありません」(0件) を出さず、固まらせず再試行 (holds/home と同手法)。
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyTitle}>読み込みに失敗しました</Text>
+          <Pressable style={styles.retryButton} onPress={() => void reload()}>
+            <Text style={styles.retryButtonText}>再試行</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     )
@@ -269,6 +280,21 @@ export default function VenueMyPostsScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  // A1: 再試行UI (holds.tsx と同一トークン)。
+  retryButton: {
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
+  },
+  retryButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
   content: { padding: spacing.base, paddingBottom: 120, gap: spacing.md },
   emptyBox: {
     alignItems: 'center',

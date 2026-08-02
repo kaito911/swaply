@@ -125,7 +125,7 @@ export default function OperatorReportsScreen() {
       const buttons: Parameters<typeof Alert.alert>[2] = [
         { text: 'キャンセル', style: 'cancel' },
         {
-          text: '却下する',
+          text: '確認済みにする',
           onPress: () => void resolve(report, 'dismiss'),
         },
       ]
@@ -137,13 +137,13 @@ export default function OperatorReportsScreen() {
           onPress: () => void resolve(report, 'unpublish'),
         })
       }
-      // ★文言案(K確定待ち): 却下は「対処」ではなく「確認して閉じる」なので誇張しない。
-      //   ユーザー通報は却下しか無く利用者の処分(BAN)は未実装のため、その旨を明示する。
+      // 却下は「対処」ではなく「確認して記録し閉じる」。ユーザー通報は確認のみで
+      //   利用者の処分(BAN)は未実装のため、その旨を明示する。
       Alert.alert(
         '通報の確認',
         isCard
-          ? 'この出品を非公開 (フィード・検索から除外) にするか、通報を却下します。'
-          : 'この通報を却下します。\nこの操作では利用者への処分は行いません。',
+          ? 'この出品を非公開 (フィード・検索から除外) にするか、確認済みとして記録します。'
+          : 'この通報を確認済みとして記録します。\n現時点で利用者への処分は行いません。',
         buttons,
       )
     },

@@ -14,9 +14,10 @@
 //   - 承認成功後の Alert 文言は trades.tsx:181-190 と同一 (「承認しました」「取引が開始されました。」)。
 
 import { ScreenHeader } from '@/components/ScreenHeader'
+import { TroubleDot } from '@/components/TroubleDot'
 import { colors } from '@/constants/theme'
-import { acceptOffer, fetchMyOffers } from '@/lib/supabase'
-import type { Offer } from '@/lib/types'
+import { acceptOffer, fetchMyOffers, fetchUserTrust } from '@/lib/supabase'
+import { trustDisplayStrings, type Offer, type UserTrust } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { useBadge } from '@/providers/BadgeProvider'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
@@ -78,6 +79,10 @@ export default function OfferByCardScreen() {
   const [loading, setLoading] = useState(true)
   const [loadFailed, setLoadFailed] = useState(false)
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
+  // 申請者ごとの Trust (proposer_user_id → UserTrust|null)。null=全項目「—」表示。
+  const [trustByUser, setTrustByUser] = useState<Map<string, UserTrust | null>>(
+    new Map(),
+  )
 
   const load = useCallback(async () => {
     if (userId == null || cardId == null || cardId === '') {
@@ -98,6 +103,18 @@ export default function OfferByCardScreen() {
       )
       setOffers(forCard)
       setCard(forCard[0]?.target_card ?? null)
+
+      // 各申請者の Trust を並列取得 (重複 proposer は1回)。各 catch で null soft-fail
+      //   (1件失敗が他を止めない。listing/[id] の null fallback 方針と同じ)。
+      const proposerIds = Array.from(
+        new Set(forCard.map((o) => o.proposer_user_id)),
+      )
+      const trustList = await Promise.all(
+        proposerIds.map((pid) => fetchUserTrust(pid).catch(() => null)),
+      )
+      const tmap = new Map<string, UserTrust | null>()
+      proposerIds.forEach((pid, i) => tmap.set(pid, trustList[i]))
+      setTrustByUser(tmap)
     } catch (error) {
       console.error('[OfferByCard][load]', error)
       setLoadFailed(true)
@@ -202,22 +219,56 @@ export default function OfferByCardScreen() {
         {offers.map((offer) => {
           const cards = proposerCards(offer)
           const isAccepting = acceptingId === offer.id
+          const trust = trustByUser.get(offer.proposer_user_id) ?? null
+          const tv = trustDisplayStrings(trust)
+          const trustCells = [
+            { value: tv.partner, label: '交換' },
+            { value: tv.trade, label: '取引' },
+            { value: tv.ship, label: '発送まで' },
+            { value: tv.last, label: '直近' },
+          ]
           return (
             <View key={offer.id} style={styles.applicant}>
-              <Text style={styles.applicantName} numberOfLines={1}>
-                {proposerName(offer)}
-              </Text>
+              <View style={styles.applicantNameRow}>
+                <Text style={styles.applicantName} numberOfLines={1}>
+                  {proposerName(offer)}
+                </Text>
+                {/* トラブル色サイン (stage 0 は非表示・既存挙動)。 */}
+                <TroubleDot stage={trust?.trouble_stage ?? 0} />
+              </View>
+
+              {/* Trust 4項目 (横並び4枠)。★各セル固定フォントで見た目サイズを揃える
+                  (adjustsFontSizeToFit は各セル独立に縮み比較性を損なうため使わない)。 */}
+              <View style={styles.trustGrid}>
+                {trustCells.map((cell, i, arr) => (
+                  <View
+                    key={cell.label}
+                    style={[styles.trustCell, i < arr.length - 1 && styles.trustCellBorder]}
+                  >
+                    <Text style={styles.trustCellValue} numberOfLines={1}>
+                      {cell.value}
+                    </Text>
+                    <Text style={styles.trustCellLabel} numberOfLines={1}>
+                      {cell.label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
 
               <Text style={styles.blockLabel}>相手が出すグッズ</Text>
               {cards.map((c, i) => (
-                // 相手が出すグッズをタップ → 既存の商品詳細 (他5経路と同一 pathname/params)。
+                // 相手が出すグッズをタップ → 確認専用の詳細画面 (提案ボタン等を出さない)。
                 //   id が取れない行はタップ無効。見た目は giveRow 不変・押下時 opacity のみ。
                 <Pressable
                   key={i}
                   style={({ pressed }) => [styles.giveRow, pressed && { opacity: 0.6 }]}
                   onPress={() => {
                     if (c.id != null) {
-                      router.push({ pathname: '/listing/[id]', params: { id: c.id } })
+                      // 新規ルートは生成前 typed-route に未登録のため as never (既存の新規ルート踏襲)。
+                      router.push({
+                        pathname: '/offer/preview/[cardId]',
+                        params: { cardId: c.id },
+                      } as never)
                     }
                   }}
                   disabled={c.id == null}
@@ -310,7 +361,27 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 8,
   },
+  applicantNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   applicantName: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+  // Trust 横並び4枠 (mypage と同型だが、値は固定フォントで各枠を揃える)。
+  trustGrid: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 2,
+  },
+  trustCell: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 2,
+  },
+  trustCellBorder: { borderRightWidth: 1, borderRightColor: colors.borderLight },
+  // ★固定 fontSize (adjustsFontSizeToFit なし) で4枠の値サイズを揃える。
+  trustCellValue: { fontSize: 11, fontWeight: '700', color: colors.textPrimary },
+  trustCellLabel: { fontSize: 10, color: colors.textTertiary, marginTop: 3 },
   blockLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   giveRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   giveImage: {

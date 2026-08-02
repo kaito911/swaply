@@ -131,6 +131,11 @@ function RootNavigator() {
         />
 
         <Stack.Screen
+          name="offer/preview/[cardId]"
+          options={{ headerShown: false }} // 画面内 ScreenHeader (確認専用の商品詳細)
+        />
+
+        <Stack.Screen
           name="trust/[id]"
           options={{ headerShown: false }} // 画面内 ScreenHeader 統一 (3.5a 規約)
         />

@@ -42,11 +42,15 @@ function proposerName(offer: Offer): string {
 }
 
 // 相手 (proposer) が出すカード: offer_items のうち target_card 以外。
-function proposerCards(offer: Offer): { name: string; image: string | null }[] {
+// id は商品詳細への遷移用 (取れない行はタップ無効にする)。
+function proposerCards(
+  offer: Offer,
+): { id: string | null; name: string; image: string | null }[] {
   const targetCardId = offer.target_card?.id
   const items = offer.items?.filter((item) => item.card_id !== targetCardId) ?? []
-  if (items.length === 0) return [{ name: 'グッズ情報なし', image: null }]
+  if (items.length === 0) return [{ id: null, name: 'グッズ情報なし', image: null }]
   return items.map((item) => ({
+    id: item.card?.id ?? item.card_id ?? null,
     name: item.card?.name && item.card.name.trim().length > 0 ? item.card.name : 'グッズ情報なし',
     image: item.card?.image_url ?? null,
   }))
@@ -206,7 +210,18 @@ export default function OfferByCardScreen() {
 
               <Text style={styles.blockLabel}>相手が出すグッズ</Text>
               {cards.map((c, i) => (
-                <View key={i} style={styles.giveRow}>
+                // 相手が出すグッズをタップ → 既存の商品詳細 (他5経路と同一 pathname/params)。
+                //   id が取れない行はタップ無効。見た目は giveRow 不変・押下時 opacity のみ。
+                <Pressable
+                  key={i}
+                  style={({ pressed }) => [styles.giveRow, pressed && { opacity: 0.6 }]}
+                  onPress={() => {
+                    if (c.id != null) {
+                      router.push({ pathname: '/listing/[id]', params: { id: c.id } })
+                    }
+                  }}
+                  disabled={c.id == null}
+                >
                   {c.image != null && c.image !== '' ? (
                     <Image source={{ uri: c.image }} style={styles.giveImage} />
                   ) : (
@@ -215,7 +230,7 @@ export default function OfferByCardScreen() {
                   <Text style={styles.giveName} numberOfLines={2}>
                     {c.name}
                   </Text>
-                </View>
+                </Pressable>
               ))}
 
               {offer.message != null && offer.message.trim().length > 0 && (

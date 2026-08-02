@@ -58,6 +58,13 @@ export default function LoginScreen() {
         throw error
       }
 
+      // ★ログイン成功=セッション確定。ticker を即時再開する (AppState の active 遷移を
+      //   待たずに autoRefresh を復帰。AppState ガードは session 有時のみ再開するため、
+      //   ログイン直後は遷移が起きず ticker が止まったままになるのを補う)。失敗は握る。
+      supabase.auth.startAutoRefresh().catch((e) =>
+        console.error('[LoginScreen] startAutoRefresh', e),
+      )
+
       // ログイン成功後は _layout.tsx の session 監視が自動でルーティングする
       // router.replace は不要（onboardingDone チェックを経由させるため）
     } catch (error) {

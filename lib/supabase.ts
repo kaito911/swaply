@@ -82,7 +82,22 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // 独立に動作する (RN の addEventListener 契約通り)。競合しない。
 AppState.addEventListener('change', (state) => {
   if (state === 'active') {
-    supabase.auth.startAutoRefresh()
+    // ★セッションがあるときだけ autoRefresh を再開する。無条件 startAutoRefresh は、
+    //   ログアウト後の foreground 復帰で in-memory セッションが残っていた場合に
+    //   トークンを書き戻す最大の経路だったため、getSession で有無を確認してから呼ぶ。
+    //   getSession は非同期なので IIFE で await し、例外は握る (未処理 Promise 拒否を作らない)。
+    //   通常利用 (ログイン中) は session あり → 従来どおり startAutoRefresh される。
+    void (async () => {
+      try {
+        const { data } = await supabase.auth.getSession()
+        if (data.session != null) {
+          await supabase.auth.startAutoRefresh()
+        }
+      } catch (err) {
+        // 失敗時は安全側で再開しない (API 呼び出し時の reactive refresh で代替可)。
+        console.error('[supabase][AppState] startAutoRefresh guard', err)
+      }
+    })()
   } else {
     supabase.auth.stopAutoRefresh()
   }

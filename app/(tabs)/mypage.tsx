@@ -156,19 +156,26 @@ export default function MyPageScreen() {
         style: 'destructive',
         onPress: async () => {
           setLogoutLoading(true)
-          // scope:'local' で端末トークン削除を確実化 (global の revoke ネットワーク失敗で
-          //   ローカルが残るのを防ぐ)。エラーはユーザーに出さず console.error のみ
-          //   (ローカルは下の clearPersistedAuth で消えるため遷移して問題ない)。
+          // ★① 書き戻す主体 (autoRefresh ticker) を最初に止める。これを止めないと
+          //   signOut 失敗で in-memory セッションが残った場合に _saveSession でトークンが
+          //   書き戻される。①〜③はいずれも throw せず console.error のみで続行する。
+          try {
+            await supabase.auth.stopAutoRefresh()
+          } catch (err) {
+            console.error('[MyPage][handleLogout] stopAutoRefresh', err)
+          }
+          // ② scope:'local' で端末トークン削除を確実化 (成功で in-memory + storage 削除、
+          //   失敗しても続行)。
           try {
             const { error } = await supabase.auth.signOut({ scope: 'local' })
             if (error) console.error('[MyPage][handleLogout] signOut', error)
           } catch (err) {
-            console.error('[MyPage][handleLogout]', err)
+            console.error('[MyPage][handleLogout] signOut', err)
           }
-          // ★保険: signOut の成否に依らず永続トークンを明示削除 (throw しない)。
+          // ③ 保険: signOut の成否に依らず永続トークンを明示削除 (内部で throw しない)。
           await clearPersistedAuth()
           setLogoutLoading(false)
-          // 常に遷移 (ローカルは消えている)。
+          // ④ 常に遷移 (ローカルは消えている)。
           router.replace('/(auth)/login')
         },
       },

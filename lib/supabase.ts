@@ -88,6 +88,32 @@ AppState.addEventListener('change', (state) => {
   }
 })
 
+/**
+ * ログアウト/退会時に、端末に永続化された supabase セッショントークンを明示削除する。
+ *
+ * signOut() の内部削除に依存すると、scope='global' の revoke がネットワーク失敗した場合等に
+ * 永続キーが残り、再起動時 getSession() が幽霊トークンを拾って session≠null になる問題を防ぐ。
+ *
+ * ★storageKey は未設定 (デフォルト = `sb-<project-ref>-auth-token`) で project-ref は
+ *   .env 依存のためハードコードできない。getAllKeys() から「sb- で始まり -auth-token を含む」
+ *   キーのみを抽出して削除する (project-ref 非依存)。
+ * ★onboarding_done 等 supabase 以外のキーは巻き込まない (再ログイン時にオンボーディングを
+ *   再度やらせないため)。失敗しても throw しない (ログアウト不能を防ぐ・console.error のみ)。
+ */
+export async function clearPersistedAuth(): Promise<void> {
+  try {
+    const keys = await AsyncStorage.getAllKeys()
+    const authKeys = keys.filter(
+      (k) => k.startsWith('sb-') && k.includes('-auth-token'),
+    )
+    if (authKeys.length > 0) {
+      await AsyncStorage.multiRemove(authKeys)
+    }
+  } catch (err) {
+    console.error('[clearPersistedAuth]', err)
+  }
+}
+
 // ─────────────────────────────────────────
 // PR-V1 (venue resilience): 会場モードの読み込み系 fetch 共通タイムアウト
 // ─────────────────────────────────────────

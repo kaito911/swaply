@@ -13,6 +13,7 @@ import { HeaderActions } from '@/components/HeaderActions'
 import { PioneerBadge } from '@/components/PioneerBadge'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import {
+  clearPersistedAuth,
   fetchMyOffers,
   fetchProfile,
   fetchUserCards,
@@ -154,17 +155,21 @@ export default function MyPageScreen() {
         text: 'ログアウト',
         style: 'destructive',
         onPress: async () => {
+          setLogoutLoading(true)
+          // scope:'local' で端末トークン削除を確実化 (global の revoke ネットワーク失敗で
+          //   ローカルが残るのを防ぐ)。エラーはユーザーに出さず console.error のみ
+          //   (ローカルは下の clearPersistedAuth で消えるため遷移して問題ない)。
           try {
-            setLogoutLoading(true)
-            const { error } = await supabase.auth.signOut()
-            if (error) throw error
-            router.replace('/(auth)/login')
+            const { error } = await supabase.auth.signOut({ scope: 'local' })
+            if (error) console.error('[MyPage][handleLogout] signOut', error)
           } catch (err) {
             console.error('[MyPage][handleLogout]', err)
-            Alert.alert('エラー', 'ログアウトに失敗しました')
-          } finally {
-            setLogoutLoading(false)
           }
+          // ★保険: signOut の成否に依らず永続トークンを明示削除 (throw しない)。
+          await clearPersistedAuth()
+          setLogoutLoading(false)
+          // 常に遷移 (ローカルは消えている)。
+          router.replace('/(auth)/login')
         },
       },
     ])

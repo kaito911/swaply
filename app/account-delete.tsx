@@ -16,6 +16,7 @@ import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
+  clearPersistedAuth,
   deleteMyAccount,
   fetchActiveTradeCount,
   supabase,
@@ -82,13 +83,16 @@ export default function AccountDeleteScreen() {
               setSubmitting(true)
               await deleteMyAccount()
 
-              // 成功 → signOut + login 画面遷移
+              // 成功 → signOut + login 画面遷移 (deleteMyAccount 成功後のみ到達)。
               try {
-                await supabase.auth.signOut()
+                await supabase.auth.signOut({ scope: 'local' })
               } catch (signOutErr) {
                 // signOut 失敗は無視 (auth.users は削除済)
                 console.warn('[account-delete] signOut error', signOutErr)
               }
+              // ★退会成功後のみ端末トークンを明示削除 (幽霊セッションで再起動時ホームに
+              //   入るのを防ぐ)。deleteMyAccount 失敗時は上位 catch へ抜けここに来ない。
+              await clearPersistedAuth()
 
               Alert.alert(
                 'アカウントの削除を完了しました',

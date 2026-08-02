@@ -26,12 +26,9 @@ import { TroubleDot } from '@/components/TroubleDot'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { SUPPORT_MAILTO, LEGAL_MAILTO } from '@/constants/contact'
 import { isSentryDsnConfigured, sendSentrySmokeTest } from '@/lib/sentry'
-// DEBUG: 原因特定後に削除 (ログアウト永続トークン問題の実機事実取得用)。
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import * as Updates from 'expo-updates'
 import { Ionicons } from '@expo/vector-icons'
 import * as Application from 'expo-application'
-import { router, useFocusEffect, usePathname } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -57,9 +54,7 @@ const HISTORY_PREVIEW_LIMIT = 5
 // ─────────────────────────────────────────
 
 export default function MyPageScreen() {
-  const { session, loading: authLoading } = useAuthContext()
-  // DEBUG: 原因特定後に削除。現在の pathname (index.tsx の無条件リダイレクト裏取り用)。
-  const debugPathname = usePathname()
+  const { session } = useAuthContext()
   const { refreshBadge } = useBadge()
   const [logoutLoading, setLogoutLoading] = useState(false)
 
@@ -75,67 +70,12 @@ export default function MyPageScreen() {
     smokeTapCount.current += 1
     if (smokeTapCount.current >= 7) {
       smokeTapCount.current = 0
-      void showDebugInfo()
-    }
-  }
-
-  // DEBUG: 原因特定後に削除。ログアウト永続トークン問題の実機事実取得用。
-  //   各項目を個別 try/catch で拾い、取得できた分だけでも必ず最後の Alert で表示する
-  //   (全体を1つの try で囲まない = 何も出ない最悪を避ける)。
-  //   ★トークン本体・DSN値は出さない。keys はキー名のみ。session は有無/uid先頭8/expires_at のみ。
-  const showDebugInfo = async () => {
-    // 既存の Sentry スモーク送信 + DSN 確認 (壊さない)。送信自体が throw しても Alert は出す。
-    try {
       sendSentrySmokeTest(`smoke build ${Application.nativeBuildVersion ?? '?'}`)
-    } catch {
-      // ignore
+      Alert.alert(
+        'Sentry smoke test',
+        `DSN設定済み: ${isSentryDsnConfigured() ? 'true' : 'false'}`,
+      )
     }
-    const dsnLine = `DSN設定済み: ${isSentryDsnConfigured() ? 'true' : 'false'}`
-
-    let otaLine: string
-    try {
-      otaLine = `OTA updateId: ${Updates.updateId ?? 'null'}\nOTA createdAt: ${
-        Updates.createdAt != null ? Updates.createdAt.toISOString() : 'null'
-      }`
-    } catch (e) {
-      otaLine = `OTA 取得不能: ${e instanceof Error ? e.message : String(e)}`
-    }
-
-    let keysLine: string
-    try {
-      const keys = await AsyncStorage.getAllKeys()
-      keysLine = `keys (${keys.length}):\n${keys.length > 0 ? keys.join('\n') : '(なし)'}`
-    } catch (e) {
-      keysLine = `keys 取得不能: ${e instanceof Error ? e.message : String(e)}`
-    }
-
-    let sessionLine: string
-    try {
-      const { data } = await supabase.auth.getSession()
-      const s = data.session
-      if (s == null) {
-        sessionLine = 'session: null'
-      } else {
-        const uid = s.user?.id ? `${s.user.id.slice(0, 8)}…` : '?'
-        sessionLine = `session: exists\nuser.id: ${uid}\nexpires_at: ${s.expires_at ?? '?'}`
-      }
-    } catch (e) {
-      sessionLine = `session 取得不能: ${e instanceof Error ? e.message : String(e)}`
-    }
-
-    // DEBUG: 原因特定後に削除。[Context] = RootNavigator が分岐に使う React state
-    //   (useAuthContext)。hook はコンポーネント本体で取得済みの session/authLoading を
-    //   参照する (async 内で hook は呼ばない)。getSession(storage) と並べて乖離を確認する。
-    const ctxUid = session?.user?.id ? `${session.user.id.slice(0, 8)}…` : '-'
-    const contextLine =
-      session == null
-        ? `session: null\nloading: ${authLoading}`
-        : `session: exists\nuser.id: ${ctxUid}\nloading: ${authLoading}`
-
-    Alert.alert(
-      'DEBUG (原因特定後に削除)',
-      `${dsnLine}\n\n[OTA]\n${otaLine}\n\n[AsyncStorage]\n${keysLine}\n\n[Session (getSession/storage)]\n${sessionLine}\n\n[Context (routing に使う値)]\n${contextLine}\n\n[Route (現在のpathname)]\n${debugPathname}`,
-    )
   }
 
   const [profile, setProfile] = useState<Profile | null>(null)

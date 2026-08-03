@@ -11,6 +11,10 @@
 // CTA は既存 PrimaryCTA (コーラル、controlled) を流用。コーラルは CTA とタグのみ (UI は器)。
 import { PrimaryCTA } from '@/components/PrimaryCTA'
 import { ScreenHeader } from '@/components/ScreenHeader'
+import {
+  KeyboardAwareScrollProvider,
+  useKeyboardAwareScroll,
+} from '@/components/KeyboardAwareScroll'
 import { colors, spacing } from '@/constants/theme'
 import { LinearGradient } from 'expo-linear-gradient'
 import React from 'react'
@@ -46,6 +50,10 @@ export function VenueComposerScreen({
   submitDisabled = false,
 }: VenueComposerScreenProps) {
   const insets = useSafeAreaInsets()
+  // ③修正: MSA 候補がキーボードに隠れる問題対策。single-page.tsx と同型で
+  //   ScrollView に scrollRef/onScroll を配線し、ensureVisible を Provider で下流の
+  //   MultiSelectAutocomplete へ供給する (候補出現時に入力欄を可視域上部へ寄せる)。
+  const { scrollRef, onScroll, ensureVisible } = useKeyboardAwareScroll()
 
   return (
     <View style={styles.root}>
@@ -61,7 +69,11 @@ export function VenueComposerScreen({
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+        <KeyboardAwareScrollProvider value={ensureVisible}>
         <ScrollView
+          ref={scrollRef}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
           style={styles.flex}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -69,6 +81,7 @@ export function VenueComposerScreen({
         >
           {children}
         </ScrollView>
+        </KeyboardAwareScrollProvider>
 
         {/* sticky bottom CTA: ScrollView の兄弟として最下部に固定。 */}
         <View

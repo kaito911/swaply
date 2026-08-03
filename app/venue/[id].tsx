@@ -971,7 +971,7 @@ export default function VenueHomeScreen() {
                   ? ''
                   : [wantFields.member, wantFields.goods]
                       .filter((s) => s !== '')
-                      .join('・')
+                      .join(' ')
               return (
                 <View key={post.id} style={styles.supplyCard}>
                   {/* #3 EXCHANGE DROP: Realtime で滑り込んだ直後だけ「JUST DROPPED」。 */}

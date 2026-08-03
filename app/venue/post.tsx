@@ -83,9 +83,15 @@ export default function VenuePostScreen() {
         : getCharacterSuggestions(input, { workId }),
     [workId],
   )
+  // ④修正: 求メンバー候補も譲と同じく会場 work_id で固定 (単一グループ会場では
+  //   他グループの同名キャラを候補から排除しマッチ不成立を防ぐ)。work_id null の
+  //   NULL 会場 (複数グループ) では従来どおり作品横断にフォールバック。
   const fetchWantCharacterSuggestions = useCallback(
-    (input: string): MasterCharacter[] => getCharacterSuggestionsAcrossWorks(input),
-    [],
+    (input: string): MasterCharacter[] =>
+      workId == null
+        ? getCharacterSuggestionsAcrossWorks(input)
+        : getCharacterSuggestions(input, { workId }),
+    [workId],
   )
   const fetchItemTypeSuggestions = useCallback(
     (input: string): MasterItemType[] => getItemTypeSuggestions(input),
@@ -260,7 +266,9 @@ export default function VenuePostScreen() {
       <SectionTag label="求" tone="want" />
 
       <View style={styles.fieldBlock}>
-        <Text style={styles.fieldLabel}>メンバー / キャラ（任意・作品横断）</Text>
+        <Text style={styles.fieldLabel}>
+          メンバー / キャラ（任意{workId == null ? '・作品横断' : ''}）
+        </Text>
         <MultiSelectAutocomplete<MasterCharacter>
           selected={postWantCharacters}
           onChange={setPostWantCharacters}

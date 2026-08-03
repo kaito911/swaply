@@ -13,6 +13,7 @@ import { MultiSelectAutocomplete } from '@/components/MultiSelectAutocomplete'
 import { createVenueHold, uploadCardImage } from '@/lib/supabase'
 import type { MasterCharacter, MasterItemType } from '@/lib/types'
 import {
+  getCharacterSuggestions,
   getCharacterSuggestionsAcrossWorks,
   getItemTypeSuggestions,
   recordListingKeyword,
@@ -46,6 +47,8 @@ export default function VenueHoldScreen() {
   const venueId = paramStr(raw.venueId) || null
   const postId = paramStr(raw.postId) || null
   const receiverId = paramStr(raw.receiverId) || null
+  // ④修正: 会場 work_id を受け取りメンバー候補を単一グループに固定 ('' = NULL 会場)。
+  const workId = paramStr(raw.workId) || null
   const cardName = paramStr(raw.cardName)
   const posterName = paramStr(raw.posterName)
   const wantDisplay = paramStr(raw.wantDisplay)
@@ -74,9 +77,14 @@ export default function VenueHoldScreen() {
     setMyCardInput([...chars, ...items].join(' '))
   }, [myCardDirty, holdCharacters, holdCharacterFreeTexts, holdItemTypes])
 
+  // ④修正: post.tsx と同一の三項。会場 work_id があればそのグループに候補を固定、
+  //   NULL 会場のみ作品横断にフォールバック。
   const fetchCharacterSuggestions = useCallback(
-    (input: string): MasterCharacter[] => getCharacterSuggestionsAcrossWorks(input),
-    [],
+    (input: string): MasterCharacter[] =>
+      workId == null
+        ? getCharacterSuggestionsAcrossWorks(input)
+        : getCharacterSuggestions(input, { workId }),
+    [workId],
   )
   const fetchItemTypeSuggestions = useCallback(
     (input: string): MasterItemType[] => getItemTypeSuggestions(input),

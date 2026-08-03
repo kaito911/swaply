@@ -28,8 +28,10 @@ import {
 import { Venue, VenueSupplyPost } from '@/lib/types'
 import type { MasterCharacter } from '@/lib/types'
 import {
+  formatStructuredWantFields,
   getCharacterSuggestionsAcrossWorks,
   getItemTypeById,
+  getWorkById,
 } from '@/lib/master'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
 import { StatusBar } from 'expo-status-bar'
@@ -478,6 +480,8 @@ export default function VenueHomeScreen() {
         posterName: getDisplayName(post.poster),
         wantDisplay: post.want_card ?? '',
         myCardPreset: myCardPreset ?? '',
+        // ④修正: 会場グループを hold フォームへ引き継ぎ、提案側の候補も同グループに固定。
+        workId: venue?.work_id ?? '',
       },
     } as never)
   }
@@ -946,6 +950,28 @@ export default function VenueHomeScreen() {
                     ? `${postItemType}⇄${postItemType}`
                     : `${postItemType}(求:${myWantItemType})`
               }
+              // ⑤修正: 群名は work_id から master 解決する (旧 group_name は post 保存時に
+              //   常に null のため使わない)。master 未登録 work_id では '' になり、下の JSX で
+              //   群行ごと非表示にする (空見出しを残さない)。
+              const groupLabel =
+                post.work_id != null
+                  ? getWorkById(post.work_id)?.display_name_ja ?? ''
+                  : ''
+              // ⑤修正: 求は構造化列 (want_characters / want_item_types) から通常フローと同一の
+              //   formatStructuredWantFields で解決。会場は want_works を持たないので work_id を
+              //   want_works に流用 (null なら空配列で渡し例外を防ぐ)。群は会場単一のため求行には
+              //   出さず、member(＋あれば goods) を「・」結合で1行表示。解決結果が空なら「指定なし」。
+              const wantFields = formatStructuredWantFields({
+                want_works: post.work_id != null ? [post.work_id] : [],
+                want_characters: post.want_characters,
+                want_item_types: post.want_item_types,
+              })
+              const wantLine =
+                wantFields == null
+                  ? ''
+                  : [wantFields.member, wantFields.goods]
+                      .filter((s) => s !== '')
+                      .join('・')
               return (
                 <View key={post.id} style={styles.supplyCard}>
                   {/* #3 EXCHANGE DROP: Realtime で滑り込んだ直後だけ「JUST DROPPED」。 */}
@@ -992,13 +1018,14 @@ export default function VenueHomeScreen() {
                       <Text style={styles.supplyCardName} numberOfLines={2}>
                         {post.card_name}
                       </Text>
-                      {post.group_name != null && (
+                      {groupLabel !== '' && (
                         <Text style={styles.supplyCardGroup} numberOfLines={1}>
-                          {post.group_name}
+                          {groupLabel}
                         </Text>
                       )}
                       {/* PR-3: 求は常時表示 (Swaply は譲・求両面が価値)。
-                          want_card が null の場合は「指定なし」を hint 色で表示。 */}
+                          ⑤修正: want_characters/want_item_types を master 解決した wantLine を表示。
+                          解決結果が空 (未指定/未解決) の場合のみ「指定なし」を hint 色で表示。 */}
                       <Text
                         style={[
                           styles.supplyCardFieldLabel,
@@ -1007,9 +1034,9 @@ export default function VenueHomeScreen() {
                       >
                         求
                       </Text>
-                      {post.want_card != null ? (
+                      {wantLine !== '' ? (
                         <Text style={styles.supplyCardWant} numberOfLines={1}>
-                          {post.want_card}
+                          {wantLine}
                         </Text>
                       ) : (
                         <Text

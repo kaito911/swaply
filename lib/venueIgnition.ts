@@ -31,6 +31,9 @@ export const VENUE_LIGHT = {
   coral: '#FF6B8B',
   coralDeep: '#FF4D6D',
   orange: '#FF9F5C',
+  // 開演前カウントダウンのチップ背景用。LIVE(coral/primary)より一段弱い中間コーラルで
+  // 「開催予定 < 開催中」の序列を保つ (ShowtimeClock)。
+  coralMuted: '#EE8FA8',
 } as const
 
 // 会場モードの暗地ベース色 (ほぼ黒のディープネイビー)。会場背景bgとタブバー暗地なじませが

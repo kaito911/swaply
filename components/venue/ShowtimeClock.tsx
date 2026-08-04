@@ -62,9 +62,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 5,
     // ①修正: 半透明(10%)チップは親色が透け、白カード(一覧)上で白文字が同化して読めない。
-    //   不透明の正規オレンジ(VENUE_LIGHT.orange=#FF9F5C)にし親背景に依存せず可読化。
-    //   不透明塗りのため枠線は不要 (borderWidth/borderColor 削除)。
-    backgroundColor: VENUE_LIGHT.orange,
+    //   不透明の中間コーラル(VENUE_LIGHT.coralMuted=#EE8FA8)にし親背景に依存せず可読化。
+    //   LIVE(coral/primary)より一段弱く「開催予定 < 開催中」の序列を保つ。
+    //   不透明塗りのため枠線は不要 (borderWidth/borderColor 削除済)。
+    backgroundColor: VENUE_LIGHT.coralMuted,
   },
   label: {
     fontSize: 10,

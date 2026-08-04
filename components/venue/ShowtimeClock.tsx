@@ -5,7 +5,8 @@
 // ★starts_at が NULL の間は非表示で先行実装 (自動投入で埋まれば自動表示)。
 //
 // 表示条件: startsAt != null かつ 残り時間 > 0。それ以外は null (何も出さない)。
-import { fontWeight } from '@/constants/theme'
+import { colors, fontWeight } from '@/constants/theme'
+import { VENUE_LIGHT } from '@/lib/venueIgnition'
 import React, { useEffect, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 
@@ -60,15 +61,16 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(255,159,92,0.5)',
-    backgroundColor: 'rgba(255,159,92,0.10)',
+    // ①修正: 半透明(10%)チップは親色が透け、白カード(一覧)上で白文字が同化して読めない。
+    //   不透明の正規オレンジ(VENUE_LIGHT.orange=#FF9F5C)にし親背景に依存せず可読化。
+    //   不透明塗りのため枠線は不要 (borderWidth/borderColor 削除)。
+    backgroundColor: VENUE_LIGHT.orange,
   },
   label: {
     fontSize: 10,
     fontWeight: fontWeight.extrabold,
     letterSpacing: 1,
-    color: '#FFC59A',
+    color: colors.textInverse,
   },
   time: {
     fontSize: 15,

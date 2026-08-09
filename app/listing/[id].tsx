@@ -12,11 +12,14 @@ import {
   fetchCardLinkedWants,
   fetchMyBlockedUserIds,
   fetchMyLikedCardIds,
+  fetchMyOffers,
   fetchMyWantedCards,
   fetchUserTrust,
+  reactivateCard,
   removeLike,
   removeUserBlock,
   supabase,
+  withdrawCard,
 } from '@/lib/supabase'
 import {
   getCharacterById,
@@ -163,6 +166,13 @@ export default function ListingDetailScreen() {
   const [blockToggling, setBlockToggling] = useState(false)
   // 出品者の Trust (get_user_trust・都度算出)。profiles の死列は使わない。
   const [ownerTrust, setOwnerTrust] = useState<UserTrust | null>(null)
+  // ② 出品の取り下げ / 再出品 (自分の出品のみ)。
+  //   hasPendingOffer: 自分の出品に届いた pending offer が 1 件以上 → 取り下げ不可。
+  //   offersCheckFailed: fetchMyOffers 失敗 → 安全側に倒し取り下げを許可しない (守8)。
+  //   cardMutating: withdraw/reactivate 実行中の二重押下抑止。
+  const [hasPendingOffer, setHasPendingOffer] = useState(false)
+  const [offersCheckFailed, setOffersCheckFailed] = useState(false)
+  const [cardMutating, setCardMutating] = useState(false)
 
   const load = useCallback(async () => {
     if (!listingId) {
@@ -213,6 +223,27 @@ export default function ListingDetailScreen() {
           return acc
         }, 'none')
         setBestMatchScore(best)
+
+        // ② 自分の出品のときだけ pending offer を判定 (守7: 他人の出品では走らせない)。
+        //   fetchMyOffers は受信側 (自分の出品を target とする offer) も返す。失敗は soft-fail
+        //   で握り (守8)、offersCheckFailed=true にして「取り下げ可」と誤判定しない (安全側)。
+        if (fetched.owner_user_id === uid) {
+          const myOffers = await fetchMyOffers(uid).catch(() => null)
+          if (myOffers == null) {
+            setOffersCheckFailed(true)
+            setHasPendingOffer(false)
+          } else {
+            setOffersCheckFailed(false)
+            setHasPendingOffer(
+              myOffers.some(
+                (o) => o.target_card_id === fetched.id && o.status === 'pending',
+              ),
+            )
+          }
+        } else {
+          setHasPendingOffer(false)
+          setOffersCheckFailed(false)
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : '出品を読み込めませんでした')
@@ -438,6 +469,91 @@ export default function ListingDetailScreen() {
     } as never)
   }
 
+  // ② 出品の取り下げ (active → inactive)。守4: 取り下げのみ確認ダイアログ (可逆と明記)。
+  //   守5: card.status を楽観更新して画面即反映 (banner/CTA/メニューが変わる)・失敗時 revert。
+  const handleWithdrawOwnCard = () => {
+    if (cardMutating) return
+    Alert.alert(
+      '出品を取り下げますか？',
+      '一覧・検索から見えなくなります。あとから再出品できます。',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: '取り下げる',
+          style: 'destructive',
+          onPress: async () => {
+            const prev = card
+            setCardMutating(true)
+            setCard({ ...card, status: 'inactive' } as Card)
+            try {
+              await withdrawCard(card.id)
+            } catch (e) {
+              console.error('[listing/[id]][withdrawCard]', e)
+              setCard(prev)
+              Alert.alert('エラー', '取り下げに失敗しました')
+            } finally {
+              setCardMutating(false)
+            }
+          },
+        },
+      ],
+    )
+  }
+
+  // ② 再出品 (inactive → active)。守4: 可逆なのでダイアログなし。楽観更新 + 失敗時 revert。
+  const handleReactivateOwnCard = async () => {
+    if (cardMutating) return
+    const prev = card
+    setCardMutating(true)
+    setCard({ ...card, status: 'active' } as Card)
+    try {
+      await reactivateCard(card.id)
+    } catch (e) {
+      console.error('[listing/[id]][reactivateCard]', e)
+      setCard(prev)
+      Alert.alert('エラー', '再出品に失敗しました')
+    } finally {
+      setCardMutating(false)
+    }
+  }
+
+  // ② 右上「…」メニュー。呼出は isOwn かつ status=active/inactive のときのみ (描画側でガード)。
+  //   active + pending offer / offers 確認失敗 は取り下げ項目を出さず理由を表示 (守3・守8)。
+  const openOwnerMenu = () => {
+    if (card.status === 'active') {
+      if (hasPendingOffer) {
+        Alert.alert('取り下げできません', '提案が届いているため取り下げできません')
+        return
+      }
+      if (offersCheckFailed) {
+        Alert.alert(
+          '取り下げできません',
+          '提案の確認ができませんでした。時間をおいてもう一度お試しください。',
+        )
+        return
+      }
+      Alert.alert('出品の管理', undefined, [
+        {
+          text: '出品を取り下げる',
+          style: 'destructive',
+          onPress: handleWithdrawOwnCard,
+        },
+        { text: 'キャンセル', style: 'cancel' },
+      ])
+      return
+    }
+    if (card.status === 'inactive') {
+      Alert.alert('出品の管理', undefined, [
+        { text: '再出品する', onPress: () => void handleReactivateOwnCard() },
+        { text: 'キャンセル', style: 'cancel' },
+      ])
+    }
+  }
+
+  // ② 「…」を出す条件: 自分の出品 かつ status=active/inactive のみ (reserved/traded は非表示)。
+  const showOwnerMenu =
+    isOwn && (card.status === 'active' || card.status === 'inactive')
+
   // ── render ───────────────────────────────────────────────────────────────────
 
   const hasBackImage = card.image_back_url != null
@@ -455,7 +571,24 @@ export default function ListingDetailScreen() {
           <Text style={styles.backButtonText}>‹</Text>
         </Pressable>
         <Text style={styles.navTitle}>出品詳細</Text>
-        <View style={styles.navRight} />
+        {/* ② 自分の出品のみ右上「…」。他人の出品では従来どおり空スペーサー (守1)。 */}
+        {showOwnerMenu ? (
+          <Pressable
+            style={styles.navRightButton}
+            onPress={openOwnerMenu}
+            hitSlop={8}
+            accessibilityLabel="出品の管理"
+            accessibilityRole="button"
+          >
+            <Ionicons
+              name="ellipsis-horizontal"
+              size={22}
+              color={colors.textPrimary}
+            />
+          </Pressable>
+        ) : (
+          <View style={styles.navRight} />
+        )}
       </View>
 
       <ScrollView
@@ -1005,6 +1138,13 @@ const styles = StyleSheet.create({
   },
   navRight: {
     width: 32,
+  },
+  // ② 右上「…」ボタン。navBar の spacer と同じ幅で、アイコンを右寄せ中央に。
+  navRightButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
 
   // ── loading / error ──────────────────────

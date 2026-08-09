@@ -991,7 +991,19 @@ export default function VenueHomeScreen() {
                       )}
                     </View>
                   )}
-                  <View style={styles.supplyCardRow}>
+                  {/* ⑥-2: 画像 + 譲/求の領域だけをタップ可にし出品詳細へ遷移。
+                      「交換を提案」ボタン (下部) はこの Pressable の外に維持し誤タップを避ける。 */}
+                  <Pressable
+                    style={styles.supplyCardRow}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/venue/supply/[postId]',
+                        params: { postId: post.id },
+                      } as never)
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel="出品の詳細を見る"
+                  >
                     {post.image_url != null ? (
                       <Image
                         source={{ uri: post.image_url }}
@@ -1047,7 +1059,7 @@ export default function VenueHomeScreen() {
                         </Text>
                       )}
                     </View>
-                  </View>
+                  </Pressable>
 
                   {/* meta: 投稿者 + Trust チップ + 残り時間 */}
                   <View style={styles.supplyCardMetaRow}>

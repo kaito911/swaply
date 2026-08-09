@@ -2897,6 +2897,46 @@ export async function fetchSupplyPosts(
   })())
 }
 
+// ⑥-2: 会場供給板カードの単体取得 (詳細画面 app/venue/supply/[postId] 用)。
+//   fetchSupplyPosts と異なり status / expires_at で絞らない (取り下げ済み・held・期限切れも
+//   直リンクで詳細を開けるようにし、「交換を提案」の可否は画面側で判定する)。
+//   行が無い / RLS 不可視の場合は null を返し、画面は「見つかりませんでした」を表示する。
+//   poster は fetchSupplyPosts と同方式で profiles を別クエリ join する
+//   (取れなくても本体は返し、名前は呼出側で 'ユーザー' fallback / tombstone 扱い)。
+export async function fetchSupplyPostById(
+  postId: string
+): Promise<VenueSupplyPost | null> {
+  const { data, error } = await supabase
+    .from('venue_supply_posts')
+    .select('*')
+    .eq('id', postId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[fetchSupplyPostById]', error)
+    throw error
+  }
+  if (data == null) return null
+
+  const post = data as VenueSupplyPost
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, handle, display_name, trade_count, ship_rate, trouble_count')
+    .eq('id', post.user_id)
+    .maybeSingle()
+
+  if (profileError) {
+    console.error('[fetchSupplyPostById] profile', profileError)
+    return post
+  }
+
+  return {
+    ...post,
+    poster: profile == null ? undefined : (profile as VenueSupplyPost['poster']),
+  }
+}
+
 export async function addSupplyPost(params: {
   venueId: string
   userId: string

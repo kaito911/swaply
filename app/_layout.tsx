@@ -242,6 +242,10 @@ function RootNavigator() {
           options={{ headerShown: false }} // 画面内 ScreenHeader 統一 (3.5a 規約)
         />
         <Stack.Screen
+          name="venue/supply/[postId]"
+          options={{ headerShown: false }} // 画面内 ScreenHeader (会場出品の詳細・⑥-2)
+        />
+        <Stack.Screen
           name="legal"
           options={{ headerShown: false }}
         />

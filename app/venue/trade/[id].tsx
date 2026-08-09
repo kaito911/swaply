@@ -22,6 +22,7 @@
 //   - completed + 48h 送信猶予 (P0.5/P1)
 
 import { ScreenHeader } from '@/components/ScreenHeader'
+import { UserActionsMenu } from '@/components/UserActionsMenu'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import {
   confirmVenueTradeCancel,
@@ -338,6 +339,14 @@ export default function VenueTradeDMScreen() {
   const offeredImage = snapshotImageUrl(trade.offered_snapshot)
   const wantedImage = snapshotImageUrl(trade.wanted_snapshot)
   const sendWindowOpen = canSendInWindow(trade.status)
+  // ⑥-1: 相手 (proposer/receiver のうち自分でない側) の user_id。reload の counterpartId
+  //   算出 (proposer_id === userId ? receiver_id : proposer_id) と同一ロジック。
+  const counterpartId =
+    trade.proposer_id === userId ? trade.receiver_id : trade.proposer_id
+  // ⑥-1: 相手プロフィール/Trust 導線・通報/ブロックの表示ガード。
+  //   tombstone (counterpart==null) と 自分自身 (counterpartId===userId) は非表示。
+  const showCounterpartLinks =
+    counterpart != null && counterpartId != null && counterpartId !== userId
   const isMine = (m: VenueTradeMessage) =>
     m.kind === 'user' && m.sender_id != null && m.sender_id === userId
 
@@ -445,7 +454,17 @@ export default function VenueTradeDMScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title={counterpartLabel(counterpart)} />
+      <ScreenHeader
+        title={counterpartLabel(counterpart)}
+        rightActions={
+          showCounterpartLinks ? (
+            <UserActionsMenu
+              userId={counterpartId}
+              userLabel={counterpartLabel(counterpart)}
+            />
+          ) : undefined
+        }
+      />
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -477,6 +496,27 @@ export default function VenueTradeDMScreen() {
           ]}
           keyboardShouldPersistTaps="handled"
         >
+          {/* ⑥-1: 相手の身元 + Trust への導線 (会場は対面で会うため相手情報が重要)。
+              ScreenHeader の title はタップ不可のため画面内に導線を置く (案A)。
+              tombstone / 自分自身 のときは非表示 (showCounterpartLinks)。
+              trust/[id] は引数が user_id なので counterpartId をそのまま渡す。 */}
+          {showCounterpartLinks && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.counterpartLink,
+                pressed && styles.counterpartLinkPressed,
+              ]}
+              onPress={() => router.push(`/trust/${counterpartId}` as never)}
+              accessibilityRole="button"
+              accessibilityLabel="相手の情報とTrustを見る"
+            >
+              <Text style={styles.counterpartLinkText}>
+                相手の情報とTrustを見る
+              </Text>
+              <Text style={styles.counterpartLinkChevron}>›</Text>
+            </Pressable>
+          )}
+
           {/* snapshot カード */}
           <View style={styles.snapshotCard}>
             <View style={styles.snapshotRow}>
@@ -787,6 +827,30 @@ const styles = StyleSheet.create({
     padding: spacing.base,
     paddingBottom: spacing.lg,
     gap: spacing.md,
+  },
+  // ⑥-1: 相手プロフィール/Trust 導線行 (案A)。snapshotCard と同じカードトーン
+  //   (backgroundCard + border + radius.lg) に揃え、遷移は trade 画面慣習の '›' chevron。
+  counterpartLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.backgroundCard,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.md,
+  },
+  counterpartLinkPressed: { opacity: 0.7 },
+  counterpartLinkText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
+  },
+  counterpartLinkChevron: {
+    fontSize: 20,
+    fontWeight: fontWeight.semibold,
+    color: colors.textTertiary,
   },
   snapshotCard: {
     backgroundColor: colors.backgroundCard,

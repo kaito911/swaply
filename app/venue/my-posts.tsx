@@ -13,6 +13,7 @@
 import {
   fetchHoldCountsForSupplyPosts,
   fetchMySupplyPosts,
+  reactivateSupplyPost,
   withdrawSupplyPost,
 } from '@/lib/supabase'
 import { SupplyPostStatus, VenueSupplyPost } from '@/lib/types'
@@ -67,6 +68,8 @@ export default function VenueMyPostsScreen() {
   // A1: 主 fetch 失敗時の再試行フラグ。失敗を「0件(空)」に倒さず再試行UIを出す (holds/home と同手法)。
   const [loadFailed, setLoadFailed] = useState(false)
   const [withdrawing, setWithdrawing] = useState<string | null>(null)
+  // ② 再出品中の postId (二重押下抑止)。withdraw と別 flag (別ボタンで同時表示されうる)。
+  const [reactivating, setReactivating] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     if (venueId == null || userId == null) return
@@ -124,6 +127,30 @@ export default function VenueMyPostsScreen() {
     ])
   }
 
+  // ② 再出品 (withdrawn → active)。可逆操作なので確認ダイアログは出さない (通常側と統一)。
+  //   期限切れは呼出前にガード済 (ボタン自体を出さず理由テキストを表示)。楽観更新 + 失敗時 revert。
+  const handleReactivate = async (postId: string) => {
+    const prev = posts
+    setReactivating(postId)
+    // 楽観更新: 先に active へ反映し、押下が即座に画面へ出るようにする。
+    setPosts((cur) =>
+      cur.map((p) =>
+        p.id === postId
+          ? ({ ...p, status: 'active' as SupplyPostStatus } as VenueSupplyPost)
+          : p
+      )
+    )
+    try {
+      await reactivateSupplyPost(postId)
+    } catch (error) {
+      console.error('[VenueMyPosts][handleReactivate]', error)
+      setPosts(prev) // 失敗したら元の状態に戻す
+      Alert.alert('エラー', '再出品に失敗しました')
+    } finally {
+      setReactivating(null)
+    }
+  }
+
   const handleOpenReceivedHolds = () => {
     if (venueId == null) return
     router.push({
@@ -174,6 +201,13 @@ export default function VenueMyPostsScreen() {
             const count = holdCounts[post.id] ?? 0
             const isWithdrawing = withdrawing === post.id
             const canWithdraw = status === 'active'
+            // ② 再出品: withdrawn のみ対象。期限切れは復活しても板に出ないため不可
+            //   (ボタンを出さず理由テキストを表示・通常側と統一)。
+            const isReactivating = reactivating === post.id
+            const canReactivate =
+              post.status === 'withdrawn' && !isVenueExpired(post.expires_at)
+            const reactivateBlocked =
+              post.status === 'withdrawn' && isVenueExpired(post.expires_at)
 
             return (
               <View key={post.id} style={styles.postCard}>
@@ -267,6 +301,32 @@ export default function VenueMyPostsScreen() {
                       <Text style={styles.withdrawButtonText}>取り下げる</Text>
                     )}
                   </Pressable>
+                )}
+
+                {canReactivate && (
+                  <Pressable
+                    style={[
+                      styles.withdrawButton,
+                      isReactivating && styles.buttonDisabled,
+                    ]}
+                    onPress={() => handleReactivate(post.id)}
+                    disabled={isReactivating}
+                  >
+                    {isReactivating ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={colors.textSecondary}
+                      />
+                    ) : (
+                      <Text style={styles.withdrawButtonText}>再出品する</Text>
+                    )}
+                  </Pressable>
+                )}
+
+                {reactivateBlocked && (
+                  <Text style={styles.reactivateBlockedText}>
+                    期限切れのため再出品できません
+                  </Text>
                 )}
               </View>
             )
@@ -423,4 +483,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   buttonDisabled: { opacity: 0.6 },
+  // ② 再出品不可 (期限切れ) の理由テキスト (控えめ・非押下)。
+  reactivateBlockedText: {
+    fontSize: fontSize.xs,
+    color: colors.textTertiary,
+    marginTop: spacing.xs,
+    textAlign: 'center',
+  },
 })

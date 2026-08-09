@@ -590,6 +590,29 @@ export async function fetchUserCards(
   return (data ?? []) as Card[]
 }
 
+// ② 出品の取り下げ / 再出品 (通常出品 cards)。
+//   RLS cards_update_own (USING/WITH CHECK ともに auth.uid() = owner_user_id) により
+//   自分の出品のみ status を更新でき、DB 変更は不要。
+//   取り下げ = 'inactive' (feed 系は .eq('status','active') なので一覧・検索・マイページの
+//   通常経路から消える)、再出品 = 'active'。
+//   ガード (reserved/traded 不可・pending offer あり不可・会場 expired 不可等) は呼出側 UI で
+//   判定する (ここでは状態遷移のみ責務)。
+export async function withdrawCard(cardId: string): Promise<void> {
+  const { error } = await supabase
+    .from('cards')
+    .update({ status: 'inactive' })
+    .eq('id', cardId)
+  if (error) throw error
+}
+
+export async function reactivateCard(cardId: string): Promise<void> {
+  const { error } = await supabase
+    .from('cards')
+    .update({ status: 'active' })
+    .eq('id', cardId)
+  if (error) throw error
+}
+
 // ─────────────────────────────────────────
 // Likes (UI 上は「いいね」、♡ ボタン専用、DB: liked_cards)
 //
@@ -3002,6 +3025,21 @@ export async function withdrawSupplyPost(postId: string): Promise<void> {
   const { error } = await supabase
     .from('venue_supply_posts')
     .update({ status: 'withdrawn' })
+    .eq('id', postId)
+
+  if (error) {
+    throw error
+  }
+}
+
+// ② 会場出品の再出品 (withdrawn → active)。withdrawSupplyPost の対。
+//   RLS「Users can manage their own supply posts」(ALL / auth.uid() = user_id) で
+//   自分の投稿のみ更新でき DB 変更は不要。expires_at を過ぎた投稿は再出品しても板に
+//   出ないため、呼出側 (my-posts) が isVenueExpired で事前に弾く責務を持つ。
+export async function reactivateSupplyPost(postId: string): Promise<void> {
+  const { error } = await supabase
+    .from('venue_supply_posts')
+    .update({ status: 'active' })
     .eq('id', postId)
 
   if (error) {

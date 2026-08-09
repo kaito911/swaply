@@ -19,7 +19,9 @@ import {
   fetchUserCards,
   fetchUserTrust,
   isOperator,
+  reactivateCard,
   supabase,
+  withdrawCard,
 } from '@/lib/supabase'
 import { Card, Offer, Profile, trustDisplayStrings, UserTrust } from '@/lib/types'
 import { TroubleDot } from '@/components/TroubleDot'
@@ -81,6 +83,13 @@ export default function MyPageScreen() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [cards, setCards] = useState<Card[]>([])
   const [historyOffers, setHistoryOffers] = useState<Offer[]>([])
+  // ② 自分の出品のうち pending 提案が届いているカード id 集合。取り下げ不可の判定に使う。
+  //   既にロード済の fetchMyOffers から派生 (追加 fetch なし)。
+  const [pendingOfferCardIds, setPendingOfferCardIds] = useState<Set<string>>(
+    new Set()
+  )
+  // ② 取り下げ/再出品の操作中カード id (二重押下抑止)。
+  const [mutatingCardId, setMutatingCardId] = useState<string | null>(null)
   // 自分の Trust 数値: get_user_trust RPC (profiles の死列を使わず都度算出)。
   // partner_count / trade_count / ship_median_hours / last_active_at / trouble_stage。
   const [trust, setTrust] = useState<UserTrust | null>(null)
@@ -98,7 +107,9 @@ export default function MyPageScreen() {
     setLoadFailed(false)
     Promise.all([
       fetchProfile(userId),
-      fetchUserCards(userId, 'active'),
+      // ② マイページのみ 'all' で inactive/reserved も取得 (再出品導線に必要)。
+      //   home/list/trust の呼び出しは 'active' のまま変更しない。
+      fetchUserCards(userId, 'all'),
       fetchMyOffers(userId),
       // Trust 数値 RPC。失敗しても他データ表示を止めないよう個別に握り潰す (null fallback)。
       fetchUserTrust(userId).catch(() => null),
@@ -109,6 +120,16 @@ export default function MyPageScreen() {
       setCards(c)
       setTrust(t)
       setOperator(op)
+      // ② 自分の出品に届いた pending 提案のカード id を集約 (target_card_id 基準)。
+      //   fetchMyOffers は proposer/receiver 両方返すが、自分の出品を target とする
+      //   pending offer = 受信中の未応答提案。これがあるカードは取り下げ不可にする。
+      setPendingOfferCardIds(
+        new Set(
+          offers
+            .filter((o) => o.status === 'pending')
+            .map((o) => o.target_card_id)
+        )
+      )
       setHistoryOffers(
         offers.filter(
           (o) =>
@@ -182,6 +203,59 @@ export default function MyPageScreen() {
     ])
   }
 
+  // ② 通常出品の取り下げ (active → inactive)。取り下げ時のみ確認ダイアログ (可逆と明記)。
+  //   楽観更新 + 失敗時 revert (押しても変わらない/画面が壊れるを回避)。reserved/traded/
+  //   pending offer のガードは renderListings 側でリンクを出し分けて担保する。
+  const handleWithdrawCard = (cardId: string) => {
+    Alert.alert(
+      '出品を取り下げますか？',
+      '一覧・検索から見えなくなります。あとから再出品できます。',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: '取り下げる',
+          style: 'destructive',
+          onPress: async () => {
+            const prev = cards
+            setMutatingCardId(cardId)
+            setCards((cur) =>
+              cur.map((c) =>
+                c.id === cardId ? ({ ...c, status: 'inactive' } as Card) : c
+              )
+            )
+            try {
+              await withdrawCard(cardId)
+            } catch (error) {
+              console.error('[MyPage][handleWithdrawCard]', error)
+              setCards(prev)
+              Alert.alert('エラー', '取り下げに失敗しました')
+            } finally {
+              setMutatingCardId(null)
+            }
+          },
+        },
+      ]
+    )
+  }
+
+  // ② 通常出品の再出品 (inactive → active)。可逆なのでダイアログなし。楽観更新 + 失敗時 revert。
+  const handleReactivateCard = async (cardId: string) => {
+    const prev = cards
+    setMutatingCardId(cardId)
+    setCards((cur) =>
+      cur.map((c) => (c.id === cardId ? ({ ...c, status: 'active' } as Card) : c))
+    )
+    try {
+      await reactivateCard(cardId)
+    } catch (error) {
+      console.error('[MyPage][handleReactivateCard]', error)
+      setCards(prev)
+      Alert.alert('エラー', '再出品に失敗しました')
+    } finally {
+      setMutatingCardId(null)
+    }
+  }
+
   // ── derive ──
   const handle = profile?.handle ?? null
   const displayName = profile?.display_name ?? null
@@ -203,7 +277,10 @@ export default function MyPageScreen() {
     if (dataLoading) {
       return <ActivityIndicator color={colors.primary} style={styles.loader} />
     }
-    if (cards.length === 0) {
+    // ② traded (交換済) は「出品」ではなく履歴の概念なので一覧から除外。
+    //   active/inactive/reserved のみ表示する。
+    const visibleCards = cards.filter((c) => c.status !== 'traded')
+    if (visibleCards.length === 0) {
       return (
         <View style={styles.emptyBox}>
           <Text style={styles.emptyText}>まだ出品がありません</Text>
@@ -217,25 +294,72 @@ export default function MyPageScreen() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.hScrollContent}
       >
-        {cards.map((card) => (
-          <Pressable
-            key={card.id}
-            style={styles.hCard}
-            onPress={() => router.push({ pathname: '/listing/[id]', params: { id: card.id } } as never)}
-          >
-            {card.image_url != null ? (
-              <Image source={{ uri: card.image_url }} style={styles.hCardImage} resizeMode="cover" />
-            ) : (
-              <View style={[styles.hCardImage, styles.hCardImageEmpty]} />
-            )}
-            <Text style={styles.hCardName} numberOfLines={1}>{card.name}</Text>
-            {(card.series != null || card.member_name != null) && (
-              <Text style={styles.hCardSub} numberOfLines={1}>
-                {[card.series, card.member_name].filter(Boolean).join(' · ')}
-              </Text>
-            )}
-          </Pressable>
-        ))}
+        {visibleCards.map((card) => {
+          // ② 状態バッジ: 異常/特殊時のみ印を出す (active は無印・Trust の設計思想と統一)。
+          const statusLabel =
+            card.status === 'inactive'
+              ? '出品停止中'
+              : card.status === 'reserved'
+              ? '取引中'
+              : null
+          const hasPendingOffer = pendingOfferCardIds.has(card.id)
+          const isMutating = mutatingCardId === card.id
+          return (
+            // ★守3: リンクは Pressable(タイル) の入れ子にせず兄弟に置き、
+            //   リンク押下が /listing/[id] 遷移に伝播しないようにする。
+            <View key={card.id} style={styles.hCard}>
+              <Pressable
+                onPress={() =>
+                  router.push({ pathname: '/listing/[id]', params: { id: card.id } } as never)
+                }
+              >
+                {card.image_url != null ? (
+                  <Image source={{ uri: card.image_url }} style={styles.hCardImage} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.hCardImage, styles.hCardImageEmpty]} />
+                )}
+                {statusLabel != null && (
+                  <Text style={styles.hCardStatus} numberOfLines={1}>
+                    {statusLabel}
+                  </Text>
+                )}
+                <Text style={styles.hCardName} numberOfLines={1}>{card.name}</Text>
+                {(card.series != null || card.member_name != null) && (
+                  <Text style={styles.hCardSub} numberOfLines={1}>
+                    {[card.series, card.member_name].filter(Boolean).join(' · ')}
+                  </Text>
+                )}
+              </Pressable>
+
+              {/* ② 取り下げ / 再出品 の小リンク (兄弟要素・グレー下線)。
+                  reserved(取引中) は導線を出さない。active + pending offer は
+                  リンクを出さず理由テキストで不可を伝える (押す前に理由が分かる)。 */}
+              {card.status === 'active' ? (
+                hasPendingOffer ? (
+                  <Text style={styles.hCardActionBlocked} numberOfLines={2}>
+                    提案が届いているため取り下げできません
+                  </Text>
+                ) : (
+                  <Pressable
+                    onPress={() => handleWithdrawCard(card.id)}
+                    disabled={isMutating}
+                    hitSlop={6}
+                  >
+                    <Text style={styles.hCardActionLink}>取り下げる</Text>
+                  </Pressable>
+                )
+              ) : card.status === 'inactive' ? (
+                <Pressable
+                  onPress={() => handleReactivateCard(card.id)}
+                  disabled={isMutating}
+                  hitSlop={6}
+                >
+                  <Text style={styles.hCardActionLink}>再出品する</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )
+        })}
       </ScrollView>
     )
   }
@@ -730,6 +854,27 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textTertiary,
     marginTop: 1,
+  },
+  // ② 状態バッジ (出品停止中 / 取引中)。異常/特殊時のみ画像下に控えめ表示。
+  hCardStatus: {
+    fontSize: 10,
+    fontWeight: fontWeight.bold,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  // ② 取り下げ / 再出品 の小リンク (グレー下線・ボタンにしない)。
+  hCardActionLink: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    textDecorationLine: 'underline',
+    marginTop: spacing.xs,
+  },
+  // ② 取り下げ不可の理由テキスト (非押下・控えめ)。
+  hCardActionBlocked: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    marginTop: spacing.xs,
+    lineHeight: 14,
   },
 
   // ── shared row ──

@@ -29,6 +29,7 @@ import { Venue, VenueSupplyPost } from '@/lib/types'
 import type { MasterCharacter } from '@/lib/types'
 import {
   formatStructuredWantFields,
+  getCharacterSuggestions,
   getCharacterSuggestionsAcrossWorks,
   getItemTypeById,
   getWorkById,
@@ -833,7 +834,18 @@ export default function VenueHomeScreen() {
               <MultiSelectAutocomplete<MasterCharacter>
                 selected={searchCharacters}
                 onChange={setSearchCharacters}
-                fetchSuggestions={(input) => getCharacterSuggestionsAcrossWorks(input)}
+                fetchSuggestions={(input) => {
+                  // ④積み残し: 候補を会場 work_id で固定 (post.tsx:79-94 と同型)。
+                  //   venue 未読込 (venue==null) や work_id 無し/空文字の会場 (複数
+                  //   グループイベント) は従来どおり作品横断にフォールバック。
+                  const workId =
+                    venue?.work_id != null && venue.work_id !== ''
+                      ? venue.work_id
+                      : null
+                  return workId == null
+                    ? getCharacterSuggestionsAcrossWorks(input)
+                    : getCharacterSuggestions(input, { workId })
+                }}
                 getKey={(c) => c.id}
                 renderOption={(c) => (
                   <View>

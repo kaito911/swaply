@@ -2,7 +2,7 @@
   "expo": {
     "name": "Swaply",
     "slug": "swaply",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "swaply",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.swaply.jp",
-      "buildNumber": "17",
+      "buildNumber": "19",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "出品するグッズやカードの写真を撮影するためにカメラを使用します。",

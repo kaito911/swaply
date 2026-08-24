@@ -2692,8 +2692,11 @@ export async function fetchVenues(): Promise<Venue[]> {
   //   「うまく読み込めませんでした [再試行]」を表示する。
   //   network 以外のエラーは既存通り console.error + 空配列 silent fallback。
   return withVenueTimeout('fetchVenues', (async () => {
-    const today = new Date().toISOString().split('T')[0]
-    const twoWeeksLater = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+    // ★today は JST (UTC+9) 基準。UTC 算出だと JST 深夜 0-9 時に「前日」扱いになり境界が 1 日ずれる。
+    const jstNow = Date.now() + 9 * 60 * 60 * 1000
+    const today = new Date(jstNow).toISOString().split('T')[0]
+    // 表示範囲を 14 日 → 60 日 に拡大 (先の会場も登録時点から一覧に出す)。下限 (today 以降) は維持。
+    const sixtyDaysLater = new Date(jstNow + 60 * 24 * 60 * 60 * 1000)
       .toISOString()
       .split('T')[0]
 
@@ -2701,7 +2704,7 @@ export async function fetchVenues(): Promise<Venue[]> {
       .from('venues')
       .select('*')
       .gte('event_date', today)
-      .lte('event_date', twoWeeksLater)
+      .lte('event_date', sixtyDaysLater)
       .order('event_date', { ascending: true })
 
     if (error) {

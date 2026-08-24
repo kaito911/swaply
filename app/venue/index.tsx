@@ -29,13 +29,18 @@ import {
   Alert,
   Animated,
   Easing,
+  Linking,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { getVenuePhase, formatVenueDateJa, filterVenues, groupVenuesByDate } from '@/lib/venueSearch'
+import { VENUE_REQUEST_MAILTO, SUPPORT_EMAIL, VENUE_REQUEST_SUBJECT } from '@/constants/contact'
 
 // 会場モード「暗地×光源」v1 (VENUE IGNITION)。紫版は docs/venue_color_backup.md。
 // 背景=ほぼ黒のディープネイビー (下地)。会場カードは白=「光の島」として暗地に浮かす。
@@ -44,15 +49,6 @@ const VENUE_BG_LOCATIONS = [0, 0.5, 1] as const
 // 上部から漏れる光源 (coral→orange→透明の縦グラデを上 ~35% に重ねる)。radial/blur 不使用。
 const VENUE_GLOW_COLORS = ['rgba(255,107,139,0.20)', 'rgba(255,159,92,0.06)', 'transparent'] as const
 const VENUE_GLOW_LOCATIONS = [0, 0.22, 0.42] as const
-
-function formatEventDate(dateStr: string): string {
-  const today = new Date().toISOString().split('T')[0]
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]
-  if (dateStr === today) return '今日'
-  if (dateStr === tomorrow) return '明日'
-  const d = new Date(dateStr)
-  return `${d.getMonth() + 1}/${d.getDate()}`
-}
 
 export default function VenueListScreen() {
   const { session } = useAuthContext()
@@ -67,6 +63,12 @@ export default function VenueListScreen() {
   const [pulseSignals, setPulseSignals] = useState<Record<string, number>>({})
   const [myCheckins, setMyCheckins] = useState<Record<string, boolean>>({})
   const [checkingIn, setCheckingIn] = useState<string | null>(null)
+  // 会場検索 (取得済みデータへのクライアント側フィルタ) の入力。
+  const [searchQuery, setSearchQuery] = useState('')
+  // 会場リクエスト mailto 起動失敗時のフォールバックモーダル (null=非表示)。
+  //   mypage.tsx の実装と同挙動 (Alert ではなく Modal + <Text selectable> で宛先提示)。
+  //   ※共通化は mypage を次に触る回に行う方針のため、本画面ではローカルに複製する。
+  const [mailFallback, setMailFallback] = useState<{ email: string; subject: string } | null>(null)
 
   // SWAPLY LIVE SIGNAL: 会場タブを開いた瞬間の入場アニメ (マウント時1回・瞬間のみ)。
   const entrance = useRef(new Animated.Value(0)).current
@@ -178,6 +180,90 @@ export default function VenueListScreen() {
     router.push({ pathname: '/venue/[id]', params: { id: venue.id } } as never)
   }
 
+  // 検索 0 件時「この会場をリクエスト」導線。canOpenURL は信頼しないため常に openURL を試行し、
+  //   失敗したらフォールバックモーダル (宛先を長押しコピー可能に提示) を開く。
+  const requestVenueByMail = async () => {
+    try {
+      await Linking.openURL(VENUE_REQUEST_MAILTO)
+    } catch (err) {
+      console.error('[VenueList][requestVenueByMail]', err)
+      setMailFallback({ email: SUPPORT_EMAIL, subject: VENUE_REQUEST_SUBJECT })
+    }
+  }
+
+  // 会場カード 1 枚。開催状態は getVenuePhase に一本化 (status 直接参照を廃止)。
+  //   ★開催中カードにも必ず開催日を表示する (従来は open 時に日付が隠れていた)。
+  const renderVenueCard = (venue: Venue) => {
+    const phase = getVenuePhase(venue)
+    const isOpen = phase === 'open'
+    const count = checkinCounts[venue.id] ?? 0
+    const supply = supplyCounts[venue.id] ?? 0
+    const isCheckingIn = checkingIn === venue.id
+    // 暗地×光源: 点火状態 (checkin+supply)。open のみ熱量リング/点火ラベルを出す。
+    const ig = computeIgnition(count, supply)
+    const pulse = pulseSignals[venue.id] ?? 0
+
+    return (
+      <View key={venue.id} style={styles.venueCardWrap}>
+        {/* #1 熱量リング (背面・open のみ)。平時静的グロー、Realtime で脈打つ。 */}
+        {isOpen && (
+          <HeatRing intensity={ig.intensity} color={ig.glowColor} pulseSignal={pulse} radius={16} />
+        )}
+        <View style={[styles.venueCard, isOpen && styles.venueCardOpen]}>
+          <View style={styles.venueTop}>
+            <View style={styles.venueMeta}>
+              {/* 開催中でも必ず開催日を表示: open は LIVE + 日付、それ以外は日付のみ。 */}
+              <View style={styles.venueStatusRow}>
+                {isOpen && <LiveBadge />}
+                <View style={styles.statusBadgeUpcoming}>
+                  <Text style={styles.statusBadgeUpcomingText}>
+                    {formatVenueDateJa(venue.event_date)}
+                  </Text>
+                </View>
+              </View>
+              {/* #5 開演前カウントダウン (upcoming + starts_at 有り時のみ表示)。 */}
+              {phase === 'upcoming' && <ShowtimeClock startsAt={venue.starts_at} />}
+              <Text style={styles.venueTitle}>{venue.title}</Text>
+              <Text style={styles.venueName}>{venue.venue_name}</Text>
+            </View>
+
+            {isOpen && (
+              <View style={styles.venueStats}>
+                <VenueAvatarStack count={count} />
+                <Text style={styles.venueStatNum}>{count}</Text>
+                <Text style={styles.venueStatLabel}>参加中</Text>
+              </View>
+            )}
+          </View>
+
+          {/* ③ 入場1タップ: 未入場でも入場済でも同じ「入場する」。押下時に
+              未入場なら venue_checkins へ記録 (density維持)、入場済なら即遷移。 */}
+          {isOpen && (
+            <Pressable
+              style={[styles.checkinButton, isCheckingIn && styles.buttonDisabled]}
+              onPress={() => handleEnter(venue)}
+              disabled={isCheckingIn}
+            >
+              {isCheckingIn ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.checkinButtonText}>入場する</Text>
+              )}
+            </Pressable>
+          )}
+
+          {phase === 'upcoming' && (
+            <View style={styles.upcomingNote}>
+              <Text style={styles.upcomingNoteText}>
+                {formatVenueDateJa(venue.event_date)}に開催予定
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    )
+  }
+
   // B(a): 会場タブを開いた瞬間の入場アニメ (マウント時1回・以後静止)。
   useEffect(() => {
     const anim = Animated.timing(entrance, {
@@ -216,7 +302,7 @@ export default function VenueListScreen() {
     let people = 0
     let supply = 0
     for (const v of venues) {
-      if (v.status !== 'open') continue
+      if (getVenuePhase(v) !== 'open') continue
       people += checkinCounts[v.id] ?? 0
       supply += supplyCounts[v.id] ?? 0
     }
@@ -342,6 +428,20 @@ export default function VenueListScreen() {
         >
         <Text style={styles.sectionLabel}>今日・近日の会場</Text>
 
+        {/* 会場検索: 取得済みデータへのクライアント側フィルタ
+            (グループ名/略称/ライブ名/会場名/日付。DB 変更なし)。 */}
+        <TextInput
+          style={styles.searchInput}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="グループ・ライブ・会場・日付で検索"
+          placeholderTextColor="rgba(255,255,255,0.5)"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+        />
+
         {/* PR-V2: 状態優先順位 loading > venuesLoadFailed > venues.length===0 > データ表示。
             loading は本 return より上の if (loading) で早期 return 済 (L101)、ここでは
             failed > empty > データ の 3 分岐のみ評価。 */}
@@ -369,81 +469,69 @@ export default function VenueListScreen() {
             </Text>
           </View>
         ) : (
-          venues.map((venue) => {
-            const isOpen = venue.status === 'open'
-            const count = checkinCounts[venue.id] ?? 0
-            const supply = supplyCounts[venue.id] ?? 0
-            const isCheckingIn = checkingIn === venue.id
-            // 暗地×光源: 点火状態 (checkin+supply)。open のみ熱量リング/点火ラベルを出す。
-            const ig = computeIgnition(count, supply)
-            const pulse = pulseSignals[venue.id] ?? 0
-
-            return (
-              <View key={venue.id} style={styles.venueCardWrap}>
-                {/* #1 熱量リング (背面・open のみ)。平時静的グロー、Realtime で脈打つ。 */}
-                {isOpen && (
-                  <HeatRing intensity={ig.intensity} color={ig.glowColor} pulseSignal={pulse} radius={16} />
-                )}
-                <View style={[styles.venueCard, isOpen && styles.venueCardOpen]}>
-                <View style={styles.venueTop}>
-                  <View style={styles.venueMeta}>
-                    <View style={styles.venueStatusRow}>
-                      {isOpen ? (
-                        // #2 点火は色/強度(熱量リング)で表現。テキストラベルは K 指定で撤去。
-                        <LiveBadge />
-                      ) : (
-                        <View style={styles.statusBadgeUpcoming}>
-                          <Text style={styles.statusBadgeUpcomingText}>
-                            {formatEventDate(venue.event_date)}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    {/* #5 開演前カウントダウン (upcoming + starts_at 有り時のみ表示)。 */}
-                    {!isOpen && <ShowtimeClock startsAt={venue.starts_at} />}
-                    <Text style={styles.venueTitle}>{venue.title}</Text>
-                    <Text style={styles.venueName}>{venue.venue_name}</Text>
-                  </View>
-
-                  {isOpen && (
-                    <View style={styles.venueStats}>
-                      <VenueAvatarStack count={count} />
-                      <Text style={styles.venueStatNum}>{count}</Text>
-                      <Text style={styles.venueStatLabel}>参加中</Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* ③ 入場1タップ: 未入場でも入場済でも同じ「入場する」。押下時に
-                    未入場なら venue_checkins へ記録 (density維持)、入場済なら即遷移。 */}
-                {isOpen && (
+          (() => {
+            // 取得済み venues を検索クエリで絞り込み → 日付でグループ化して区切り表示。
+            const filtered = filterVenues(venues, searchQuery)
+            if (filtered.length === 0) {
+              // 検索ヒット 0 件: リクエスト導線 (mailto、失敗時はフォールバックモーダル)。
+              return (
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyText}>該当する会場が見つかりませんでした。</Text>
                   <Pressable
-                    style={[styles.checkinButton, isCheckingIn && styles.buttonDisabled]}
-                    onPress={() => handleEnter(venue)}
-                    disabled={isCheckingIn}
+                    style={styles.requestButton}
+                    onPress={requestVenueByMail}
+                    accessibilityLabel="この会場をリクエスト"
                   >
-                    {isCheckingIn ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <Text style={styles.checkinButtonText}>入場する</Text>
-                    )}
+                    <Text style={styles.requestButtonText}>この会場をリクエスト</Text>
                   </Pressable>
-                )}
-
-                {venue.status === 'upcoming' && (
-                  <View style={styles.upcomingNote}>
-                    <Text style={styles.upcomingNoteText}>
-                      {formatEventDate(venue.event_date)}に開催予定
-                    </Text>
-                  </View>
-                )}
                 </View>
+              )
+            }
+            return groupVenuesByDate(filtered).map((group) => (
+              <View key={group.date}>
+                {/* 日付が変わる位置の薄い区切り線 + 日付ラベル (線色は既存 colors.borderLight)。 */}
+                <View style={styles.dateSeparator}>
+                  <View style={styles.dateSeparatorLine} />
+                  <Text style={styles.dateSeparatorLabel}>{group.label}</Text>
+                  <View style={styles.dateSeparatorLine} />
+                </View>
+                {group.venues.map((venue) => renderVenueCard(venue))}
               </View>
-            )
-          })
+            ))
+          })()
         )}
 
         </ScrollView>
+
+        {/* 会場リクエスト mailto 失敗時のフォールバック (mypage.tsx と同挙動)。
+            iOS の Alert 本文は選択/コピー不可のため、Modal + <Text selectable> で
+            宛先・件名を長押しコピー可能に提示する。 */}
+        <Modal
+          visible={mailFallback !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMailFallback(null)}
+        >
+          <View style={styles.mailModalOverlay}>
+            <View style={styles.mailModalCard}>
+              <Text style={styles.mailModalTitle}>メールアプリが開けませんでした</Text>
+              <Text style={styles.mailModalBody}>
+                お手数ですが、以下の宛先までメールをお送りください。長押しでコピーできます。
+              </Text>
+              <Text style={styles.mailModalLabel}>宛先</Text>
+              <Text style={styles.mailModalValue} selectable>
+                {mailFallback?.email}
+              </Text>
+              <Text style={styles.mailModalLabel}>件名</Text>
+              <Text style={styles.mailModalValue} selectable>
+                {mailFallback?.subject}
+              </Text>
+              <Pressable style={styles.mailModalClose} onPress={() => setMailFallback(null)}>
+                <Text style={styles.mailModalCloseText}>閉じる</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </View>
   )
@@ -518,6 +606,95 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.8)',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  // ── 会場検索 ──
+  searchInput: {
+    height: 44,
+    borderRadius: radius.lg,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    paddingHorizontal: spacing.base,
+    color: '#FFFFFF',
+    fontSize: fontSize.sm,
+  },
+  requestButton: {
+    marginTop: spacing.md,
+    height: 44,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  requestButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
+  },
+  // ── 日付区切り (線色は既存 colors.borderLight = 最も薄い border トークン) ──
+  dateSeparator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  dateSeparatorLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.borderLight,
+  },
+  dateSeparatorLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  // ── 会場リクエスト mailto フォールバックモーダル (mypage.tsx と同構成) ──
+  mailModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  mailModalCard: {
+    backgroundColor: colors.backgroundCard,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+  },
+  mailModalTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  mailModalBody: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+  },
+  mailModalLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
+  },
+  mailModalValue: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
+  },
+  mailModalClose: {
+    alignSelf: 'flex-end',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
+  },
+  mailModalCloseText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
   },
   // PR-V2: 通信失敗時の「うまく読み込めませんでした [再試行]」表示。
   //   会場詳細画面の inline 実装と同形 (共通 component 化は V3 cleanup タスクで予定)。

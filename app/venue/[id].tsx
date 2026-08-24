@@ -35,6 +35,7 @@ import {
   getWorkById,
 } from '@/lib/master'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
+import { getVenuePhase } from '@/lib/venueSearch'
 import { StatusBar } from 'expo-status-bar'
 import { LinearGradient } from 'expo-linear-gradient'
 import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
@@ -525,7 +526,7 @@ export default function VenueHomeScreen() {
           人数連動は廃止し固定密度。SafeAreaView の前 (背面) + pointerEvents none で
           UI/文字/カードには絶対かぶせない (下部の余白・カード間から覗く)。
           #1 熱量: 新出品/Hold の瞬間だけ海が一度脈打つ (heatPulse)。 */}
-      {venue?.status === 'open' && (
+      {venue != null && getVenuePhase(venue) === 'open' && (
         <View pointerEvents="none" style={styles.galaxyBand}>
           {/* #1 熱量: 密度(ignition)で発光強度、新出品/Hold の瞬間だけ脈打つ。 */}
           <HeatRing
@@ -581,7 +582,7 @@ export default function VenueHomeScreen() {
             {venue.venue_name} · {formatJaEventDate(venue.event_date)}
           </Text>
           <View style={styles.venueContextStatusRow}>
-            {venue.status === 'open' ? (
+            {getVenuePhase(venue) === 'open' ? (
               <>
                 <LiveBadge />
                 {/* #2 点火は色/強度(熱量リング)で表現。テキストラベルは K 指定で撤去。 */}
@@ -592,14 +593,14 @@ export default function VenueHomeScreen() {
                   <VenueAvatarStack count={checkinCount} size={24} />
                 )}
               </>
-            ) : venue.status === 'upcoming' ? (
+            ) : getVenuePhase(venue) === 'upcoming' ? (
               <Text style={styles.venueContextHint}>まもなく開催</Text>
             ) : (
               <Text style={styles.venueContextHint}>終了</Text>
             )}
           </View>
           {/* #5 開演前カウントダウン (upcoming + starts_at 有り時のみ)。 */}
-          {venue.status === 'upcoming' && <ShowtimeClock startsAt={venue.starts_at} />}
+          {getVenuePhase(venue) === 'upcoming' && <ShowtimeClock startsAt={venue.starts_at} />}
         </Animated.View>
       )}
 

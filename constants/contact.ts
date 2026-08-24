@@ -27,3 +27,9 @@ export const SUPPORT_MAILTO = `mailto:${SUPPORT_EMAIL}?subject=${encodeURICompon
 export const LEGAL_MAILTO = `mailto:${LEGAL_EMAIL}?subject=${encodeURIComponent(
   LEGAL_SUBJECT,
 )}`
+
+// 会場リクエスト: 会場一覧の検索 0 件時「この会場をリクエスト」導線の宛先 (お問い合わせと同一窓口)。
+export const VENUE_REQUEST_SUBJECT = 'Swaply 会場リクエスト'
+export const VENUE_REQUEST_MAILTO = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
+  VENUE_REQUEST_SUBJECT,
+)}`

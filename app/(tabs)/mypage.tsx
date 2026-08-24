@@ -25,6 +25,8 @@ import { Card, Offer, Profile, trustDisplayStrings, UserTrust } from '@/lib/type
 import { TroubleDot } from '@/components/TroubleDot'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { SUPPORT_MAILTO, LEGAL_MAILTO } from '@/constants/contact'
+// mailto 失敗時フォールバックモーダルで宛先/件名を個別表示するため email/subject も取得。
+import { SUPPORT_EMAIL, SUPPORT_SUBJECT, LEGAL_EMAIL, LEGAL_SUBJECT } from '@/constants/contact'
 import { isSentryDsnConfigured, sendSentrySmokeTest } from '@/lib/sentry'
 import { Ionicons } from '@expo/vector-icons'
 import * as Application from 'expo-application'
@@ -35,6 +37,7 @@ import {
   Alert,
   Image,
   Linking,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -49,6 +52,13 @@ import { useBadge } from '@/providers/BadgeProvider'
 // 出品中は専用一覧画面が未整備のため上限を設けず全件横スクロール表示 (β1 は件数少)。
 const HISTORY_PREVIEW_LIMIT = 5
 
+// mailto 起動失敗時にフォールバックモーダルへ渡す宛先/件名を url から解決する。
+// (canOpenURL は Mail 削除端末でも true を返すため信頼せず、openURL の throw を捕捉して表示する)
+const MAILTO_FALLBACK: Record<string, { email: string; subject: string }> = {
+  [SUPPORT_MAILTO]: { email: SUPPORT_EMAIL, subject: SUPPORT_SUBJECT },
+  [LEGAL_MAILTO]: { email: LEGAL_EMAIL, subject: LEGAL_SUBJECT },
+}
+
 // ─────────────────────────────────────────
 // screen
 // ─────────────────────────────────────────
@@ -57,6 +67,8 @@ export default function MyPageScreen() {
   const { session } = useAuthContext()
   const { refreshBadge } = useBadge()
   const [logoutLoading, setLogoutLoading] = useState(false)
+  // mailto 起動失敗 / 「メールが開けない場合」用フォールバックモーダル (null=非表示)。
+  const [mailFallback, setMailFallback] = useState<{ email: string; subject: string } | null>(null)
 
   const userId = useMemo(() => session?.user?.id ?? null, [session])
 
@@ -134,19 +146,13 @@ export default function MyPageScreen() {
   )
 
   const openMailto = async (url: string) => {
+    // canOpenURL は Mail 削除端末でも true を返し信頼できないため使わず、常に openURL を試行。
+    // 失敗経路は 1 本 (catch → フォールバックモーダル) に集約する。
     try {
-      const supported = await Linking.canOpenURL(url)
-      if (!supported) {
-        Alert.alert(
-          'メーラーが開けません',
-          'メールアプリが見つかりませんでした。端末のメール設定をご確認ください。',
-        )
-        return
-      }
       await Linking.openURL(url)
     } catch (err) {
       console.error('[MyPage][openMailto]', err)
-      Alert.alert('エラー', 'メーラーの起動に失敗しました。')
+      setMailFallback(MAILTO_FALLBACK[url] ?? { email: SUPPORT_EMAIL, subject: SUPPORT_SUBJECT })
     }
   }
 
@@ -552,6 +558,15 @@ export default function MyPageScreen() {
             <Text style={styles.settingLabel}>権利侵害の申立</Text>
             <Ionicons name="open-outline" size={16} color={colors.primary} />
           </Pressable>
+          {/* メールアプリが開けない端末でも必ず宛先へ到達できるよう、常時開けるフォールバック導線。
+              openURL が throw しない (何も起きない) ケースの保険 (権利侵害の申立の直下)。 */}
+          <Pressable
+            style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: colors.borderLight }]}
+            onPress={() => setMailFallback({ email: SUPPORT_EMAIL, subject: SUPPORT_SUBJECT })}
+          >
+            <Text style={styles.settingLabel}>メールが開けない場合</Text>
+            <Ionicons name="mail-outline" size={16} color={colors.primary} />
+          </Pressable>
         </View>
 
         <Pressable
@@ -584,6 +599,36 @@ export default function MyPageScreen() {
           </Text>
         </Pressable>
       </ScrollView>
+
+      {/* mailto 起動失敗 / 「メールが開けない場合」用フォールバック。
+          iOS の Alert 本文はテキスト選択/コピー不可のため、Modal + <Text selectable> で
+          宛先・件名を長押しコピー可能な形で提示する。 */}
+      <Modal
+        visible={mailFallback !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMailFallback(null)}
+      >
+        <View style={styles.mailModalOverlay}>
+          <View style={styles.mailModalCard}>
+            <Text style={styles.mailModalTitle}>メールアプリが開けませんでした</Text>
+            <Text style={styles.mailModalBody}>
+              お手数ですが、以下の宛先までメールをお送りください。長押しでコピーできます。
+            </Text>
+            <Text style={styles.mailModalLabel}>宛先</Text>
+            <Text style={styles.mailModalValue} selectable>
+              {mailFallback?.email}
+            </Text>
+            <Text style={styles.mailModalLabel}>件名</Text>
+            <Text style={styles.mailModalValue} selectable>
+              {mailFallback?.subject}
+            </Text>
+            <Pressable style={styles.mailModalClose} onPress={() => setMailFallback(null)}>
+              <Text style={styles.mailModalCloseText}>閉じる</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -865,6 +910,53 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
     color: colors.textPrimary,
+  },
+
+  // ── mailto フォールバックモーダル ──
+  mailModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  mailModalCard: {
+    backgroundColor: colors.backgroundCard,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+  },
+  mailModalTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  mailModalBody: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+  },
+  mailModalLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
+  },
+  mailModalValue: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
+  },
+  mailModalClose: {
+    alignSelf: 'flex-end',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
+  },
+  mailModalCloseText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
   },
 
   // ── dev section ──

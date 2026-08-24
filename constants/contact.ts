@@ -15,11 +15,15 @@ export const SUPPORT_EMAIL = 'support@swaply-app.jp'
 export const LEGAL_EMAIL = 'support@swaply-app.jp'
 export const APP_DOMAIN = 'swaply-app.jp'
 
+// mailto: 件名 (mailto URL とフォールバックモーダル表示の二重管理を避けるため定数化)
+export const SUPPORT_SUBJECT = 'Swaply お問い合わせ'
+export const LEGAL_SUBJECT = 'Swaply 権利侵害申立'
+
 // mailto: link 用ヘルパー (件名 prefix の統一)
 export const SUPPORT_MAILTO = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
-  'Swaply お問い合わせ',
+  SUPPORT_SUBJECT,
 )}`
 
 export const LEGAL_MAILTO = `mailto:${LEGAL_EMAIL}?subject=${encodeURIComponent(
-  'Swaply 権利侵害申立',
+  LEGAL_SUBJECT,
 )}`

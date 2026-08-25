@@ -1,8 +1,11 @@
 // components/venue/ShowtimeClock.tsx
 //
-// 開演前カウントダウン (#5 SHOWTIME CLOCK)。「DOORS OPEN IN HH:MM:SS」。
-// ★K指定: ライブ「前」のみ。開場中/終演後の演出は無し。
-// ★starts_at が NULL の間は非表示で先行実装 (自動投入で埋まれば自動表示)。
+// 開演カウントダウン (#5 SHOWTIME CLOCK)。「開演まで HH:MM:SS」。
+// starts_at (= ライブ公演の開演時刻) までの残り時間を表示する。
+// ★前日でも当日でも表示する (呼出側の phase ゲートは撤廃済)。開演時刻を過ぎたら非表示。
+// ★会場ページの利用可否 (getVenuePhase) とは非連動: カウントダウンが 0 になっても
+//   会場ページは開催日 23:59 まで利用できる (時刻は利用可否判定に使わない)。
+// ★starts_at が NULL の会場では何も表示しない。
 //
 // 表示条件: startsAt != null かつ 残り時間 > 0。それ以外は null (何も出さない)。
 import { colors, fontWeight } from '@/constants/theme'
@@ -13,7 +16,7 @@ import { StyleSheet, Text, View } from 'react-native'
 interface ShowtimeClockProps {
   /** venues.starts_at (ISO文字列) or null。 */
   startsAt: string | null | undefined
-  /** ラベル文言 (既定 "DOORS OPEN IN")。 */
+  /** ラベル文言 (既定 "開演まで")。 */
   label?: string
 }
 
@@ -26,7 +29,7 @@ function fmt(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`
 }
 
-export function ShowtimeClock({ startsAt, label = 'DOORS OPEN IN' }: ShowtimeClockProps) {
+export function ShowtimeClock({ startsAt, label = '開演まで' }: ShowtimeClockProps) {
   const target = startsAt != null ? new Date(startsAt).getTime() : null
   const [remaining, setRemaining] = useState<number>(() =>
     target != null ? target - Date.now() : -1,

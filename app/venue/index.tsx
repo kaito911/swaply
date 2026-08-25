@@ -221,8 +221,10 @@ export default function VenueListScreen() {
                   </Text>
                 </View>
               </View>
-              {/* #5 開演前カウントダウン (upcoming + starts_at 有り時のみ表示)。 */}
-              {phase === 'upcoming' && <ShowtimeClock startsAt={venue.starts_at} />}
+              {/* #5 開演カウントダウン (starts_at までの残り時間)。前日・当日とも表示。
+                  ShowtimeClock 側が starts_at NULL / 開演済で null を返すため phase ゲート不要。
+                  会場の利用可否 (getVenuePhase) とは非連動。 */}
+              <ShowtimeClock startsAt={venue.starts_at} />
               <Text style={styles.venueTitle}>{venue.title}</Text>
               <Text style={styles.venueName}>{venue.venue_name}</Text>
             </View>
@@ -427,6 +429,9 @@ export default function VenueListScreen() {
           showsVerticalScrollIndicator={false}
         >
         <Text style={styles.sectionLabel}>今日・近日の会場</Text>
+        {/* 利用可能時間の明示: 会場ページは開催日の 0:00〜23:59 の間だけ利用できる
+            (getVenuePhase が event_date==JSTの今日 で判定)。開演カウントダウンとは非連動。 */}
+        <Text style={styles.sectionNote}>※ 会場ページは開催日の0:00〜23:59まで利用できます</Text>
 
         {/* 会場検索: 取得済みデータへのクライアント側フィルタ
             (グループ名/略称/ライブ名/会場名/日付。DB 変更なし)。 */}
@@ -582,6 +587,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     letterSpacing: 1,
     textTransform: 'uppercase',
+  },
+  // 利用可能時間の注記 (暗地上のミュート白。theme.ts に色は足さず既存パターンのインライン rgba)。
+  sectionNote: {
+    fontSize: fontSize.xs,
+    color: 'rgba(255,255,255,0.6)',
+    lineHeight: 16,
   },
   // item1: 白箱/ガラスをやめ、紫グラデ直置きの白文字 (世界観に溶かす)。
   banner: {

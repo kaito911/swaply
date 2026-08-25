@@ -599,8 +599,10 @@ export default function VenueHomeScreen() {
               <Text style={styles.venueContextHint}>終了</Text>
             )}
           </View>
-          {/* #5 開演前カウントダウン (upcoming + starts_at 有り時のみ)。 */}
-          {getVenuePhase(venue) === 'upcoming' && <ShowtimeClock startsAt={venue.starts_at} />}
+          {/* #5 開演カウントダウン (starts_at までの残り時間)。前日・当日とも表示。
+              ShowtimeClock 側が starts_at NULL / 開演済で null を返すため phase ゲート不要。
+              会場の利用可否 (getVenuePhase) とは非連動。 */}
+          <ShowtimeClock startsAt={venue.starts_at} />
         </Animated.View>
       )}
 

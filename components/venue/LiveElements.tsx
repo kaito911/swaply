@@ -7,7 +7,7 @@ import React, { useEffect, useRef } from 'react'
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native'
 
 // LIVE バッジ: 90deg #E11D48→#BE185D + 白脈打ちドット (opacity 1↔0.4, 700ms×2, native driver)。
-export function LiveBadge({ label = 'LIVE 開催中' }: { label?: string }) {
+export function LiveBadge({ label = '本日開催' }: { label?: string }) {
   const dot = useRef(new Animated.Value(1)).current
   useEffect(() => {
     const loop = Animated.loop(

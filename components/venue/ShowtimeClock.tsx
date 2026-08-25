@@ -16,7 +16,7 @@ import { StyleSheet, Text, View } from 'react-native'
 interface ShowtimeClockProps {
   /** venues.starts_at (ISO文字列) or null。 */
   startsAt: string | null | undefined
-  /** ラベル文言 (既定 "開演まで")。 */
+  /** ラベル文言 (既定 "LIVE開催まで")。 */
   label?: string
 }
 
@@ -40,7 +40,7 @@ function fmtCountdown(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`
 }
 
-export function ShowtimeClock({ startsAt, label = '開演まで' }: ShowtimeClockProps) {
+export function ShowtimeClock({ startsAt, label = 'LIVE開催まで' }: ShowtimeClockProps) {
   const target = startsAt != null ? new Date(startsAt).getTime() : null
   const [remaining, setRemaining] = useState<number>(() =>
     target != null ? target - Date.now() : -1,

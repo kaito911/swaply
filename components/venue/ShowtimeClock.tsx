@@ -20,9 +20,20 @@ interface ShowtimeClockProps {
   label?: string
 }
 
-function fmt(ms: number): string {
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// 残り 24h 以上は「N日」(端数の時間は切り捨て)、24h 未満は HH:MM:SS。
+// ★24h 未満では h は必ず 0〜23 → 常に 2 桁。従来の Math.floor(total/3600) が 60 日表示で
+//   「100:33:22」と 3 桁破綻していた事象の根絶。
+// ★閾値付近の挙動 (意図した仕様): 残り 24h を切った瞬間に表示形式が「4日」→「23:59:xx」へ
+//   切り替わる。日単位から秒単位へ粒度が上がるためで、バグではない (誤認防止のため明記)。
+function fmtCountdown(ms: number): string {
+  if (ms >= DAY_MS) {
+    const days = Math.floor(ms / DAY_MS)
+    return `${days}日` // ラベル「開演まで」と合わせて「開演まで 4日」
+  }
   const total = Math.floor(ms / 1000)
-  const h = Math.floor(total / 3600)
+  const h = Math.floor(total / 3600) // ms < DAY_MS のため 0〜23
   const m = Math.floor((total % 3600) / 60)
   const s = total % 60
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -35,13 +46,32 @@ export function ShowtimeClock({ startsAt, label = '開演まで' }: ShowtimeCloc
     target != null ? target - Date.now() : -1,
   )
 
+  // target のみに依存する自己スケジュール方式。★24h 以上は毎秒 setInterval を回さない
+  //   (48 カードの毎秒再描画による一覧スクロール性能・バッテリー影響を回避)。
+  //   24h を切る瞬間に 1 度だけ起きて per-second モードへ切り替える。
+  //   remaining を依存に含めないため exhaustive-deps 警告も出さない。
   useEffect(() => {
     if (target == null) return
-    // 1 秒ごとに更新。残り 0 以下になったら停止 (以後 remaining<=0 で非表示)。
-    const tick = () => setRemaining(target - Date.now())
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
+    let id: ReturnType<typeof setTimeout> | undefined
+    const schedule = () => {
+      const rem = target - Date.now()
+      setRemaining(rem)
+      if (rem <= 0) return // 開演済: 以後更新しない (下の判定で null 表示)
+      if (rem >= DAY_MS) {
+        // 24h 以上: 毎秒更新せず、24h を切る瞬間 (+500ms 余裕) に 1 度だけ再スケジュール。
+        id = setTimeout(schedule, rem - DAY_MS + 500)
+      } else {
+        // 24h 未満: 従来どおり毎秒更新。
+        id = setInterval(schedule, 1000)
+      }
+    }
+    schedule()
+    return () => {
+      if (id !== undefined) {
+        clearTimeout(id)
+        clearInterval(id)
+      }
+    }
   }, [target])
 
   // starts_at 無し / 不正 / 開演済 は非表示 (開場中・終演後の演出を出さない)。
@@ -50,7 +80,7 @@ export function ShowtimeClock({ startsAt, label = '開演まで' }: ShowtimeCloc
   return (
     <View style={styles.wrap}>
       <Text style={styles.label}>{label}</Text>
-      <Text style={styles.time}>{fmt(remaining)}</Text>
+      <Text style={styles.time}>{fmtCountdown(remaining)}</Text>
     </View>
   )
 }

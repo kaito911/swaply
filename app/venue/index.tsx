@@ -493,7 +493,9 @@ export default function VenueListScreen() {
               )
             }
             return groupVenuesByDate(filtered).map((group) => (
-              <View key={group.date}>
+              // ★dateGroup の gap: content の flex gap はグループ View 内側のカードには効かないため
+              //   (grouping wrapper が gap の継承を遮断)、グループ内カード間隔をここで復活させる。
+              <View key={group.date} style={styles.dateGroup}>
                 {/* 日付が変わる位置の薄い区切り線 + 日付ラベル (線色は既存 colors.borderLight)。 */}
                 <View style={styles.dateSeparator}>
                   <View style={styles.dateSeparatorLine} />
@@ -643,6 +645,8 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.bold,
     color: '#FFFFFF',
   },
+  // 日付グループ内のカード間隔 (content の flex gap がグループ View 内側に効かないぶんを補う)。
+  dateGroup: { gap: spacing.md },
   // ── 日付区切り (線色は既存 colors.borderLight = 最も薄い border トークン) ──
   dateSeparator: {
     flexDirection: 'row',

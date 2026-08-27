@@ -1073,6 +1073,12 @@ export default function VenueHomeScreen() {
                           指定なし
                         </Text>
                       )}
+                      {/* PR-2: 求の詳細 (自由記述)。あるときのみ 2 行省略で表示。 */}
+                      {post.want_detail != null && post.want_detail.trim() !== '' && (
+                        <Text style={styles.supplyCardWantDetail} numberOfLines={2}>
+                          {post.want_detail}
+                        </Text>
+                      )}
                     </View>
                   </Pressable>
 
@@ -1616,6 +1622,14 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.regular,
     color: VENUE_COLORS.hint,
     lineHeight: 20,
+  },
+  // PR-2: 求の詳細 (自由記述)。求ラインより一段控えめ (小さめ + hint 寄り) で 2 行省略。
+  supplyCardWantDetail: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.regular,
+    color: VENUE_COLORS.hint,
+    lineHeight: 18,
+    marginTop: 2,
   },
   // meta 行: 投稿者 + Trust チップ / 残り時間
   supplyCardMetaRow: {

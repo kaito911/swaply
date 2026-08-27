@@ -257,6 +257,12 @@ export default function VenueMyPostsScreen() {
                           求：{post.want_card}
                         </Text>
                       )}
+                      {/* PR-2: 求の詳細 (自由記述)。編集UIが無いため自分の管理画面でも確認できるよう表示。 */}
+                      {post.want_detail != null && post.want_detail.trim() !== '' && (
+                        <Text style={styles.subText} numberOfLines={2}>
+                          求の詳細：{post.want_detail}
+                        </Text>
+                      )}
                     </View>
                   </View>
                 ) : (
@@ -267,6 +273,12 @@ export default function VenueMyPostsScreen() {
                     )}
                     {post.want_card != null && (
                       <Text style={styles.wantText}>求: {post.want_card}</Text>
+                    )}
+                    {/* PR-2: 求の詳細 (自由記述)。編集UIが無いため自分の管理画面でも確認できるよう表示。 */}
+                    {post.want_detail != null && post.want_detail.trim() !== '' && (
+                      <Text style={styles.subText} numberOfLines={2}>
+                        求の詳細: {post.want_detail}
+                      </Text>
                     )}
                   </>
                 )}

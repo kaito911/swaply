@@ -220,6 +220,14 @@ export default function VenueSupplyDetailScreen() {
           </Text>
         </View>
 
+        {/* PR-2: 求の詳細 (自由記述)。あるときのみ全文表示 (null/空は項目ごと非表示)。 */}
+        {post.want_detail != null && post.want_detail.trim() !== '' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>求の詳細</Text>
+            <Text style={styles.sectionBody}>{post.want_detail}</Text>
+          </View>
+        )}
+
         {/* 残り時間 */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>有効期限</Text>

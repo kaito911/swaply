@@ -413,6 +413,10 @@ export interface VenueSupplyPost {
   card_name: string
   group_name: string | null
   want_card: string | null
+  // PR-2 で追加: 求の自由記述 (任意、200 文字上限は DB CHECK 済)。
+  //   構造化 want (want_characters/want_item_types) では表せない条件 (版/衣装/ツアー等) の補足。
+  //   migration 未適用環境では fetchSupplyPosts(.select('*')) の戻り値に含まれないため optional。
+  want_detail?: string | null
   status: SupplyPostStatus
   expires_at: string
   created_at: string

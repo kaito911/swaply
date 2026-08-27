@@ -2969,6 +2969,8 @@ export async function addSupplyPost(params: {
   cardName: string
   groupName: string | null
   wantCard: string | null
+  // PR-2: 求の自由記述 (任意)。空文字/空白のみは null に正規化して保存する (本関数が権威)。
+  wantDetail?: string | null
   // PR3: 会場投稿の画像 publicUrl (任意)。事前に uploadCardImage で上げて
   // 戻り値の publicUrl を渡す想定。
   imageUrl?: string | null
@@ -2996,12 +2998,19 @@ export async function addSupplyPost(params: {
   // 未指定 (undefined) なら payload に key 自体を入れず、DB の default に委ねる。
   // (migration 未適用環境で payload に未知の列を送ると PostgREST が
   //  'column ... does not exist' エラーを返すため、明示的に指定された場合のみ送る)
+  // PR-2: 求の自由記述。空文字/空白のみは null に正規化 (DB に空文字を入れない)。
+  const wantDetailNormalized =
+    params.wantDetail != null && params.wantDetail.trim() !== ''
+      ? params.wantDetail.trim()
+      : null
+
   const payload: Record<string, unknown> = {
     venue_id: params.venueId,
     user_id: params.userId,
     card_name: params.cardName,
     group_name: params.groupName,
     want_card: params.wantCard,
+    want_detail: wantDetailNormalized,
     image_url: params.imageUrl ?? null,
     expires_at: expiresAt,
   }

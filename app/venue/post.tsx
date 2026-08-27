@@ -58,6 +58,8 @@ export default function VenuePostScreen() {
   const [postWantCharacterFreeTexts, setPostWantCharacterFreeTexts] = useState<string[]>([])
   const [postWantItemTypes, setPostWantItemTypes] = useState<MasterItemType[]>([])
   const [postWantItemTypeFreeTexts, setPostWantItemTypeFreeTexts] = useState<string[]>([])
+  // PR-2: 求の自由記述 (任意、200 文字上限)。未入力は null で送る (下の handleSubmitPost で正規化)。
+  const [postWantDetail, setPostWantDetail] = useState('')
 
   // 譲 (メンバー/キャラ + 種別) から商品名を自動生成。dirty 後は手編集を尊重 (現行式踏襲)。
   useEffect(() => {
@@ -157,6 +159,8 @@ export default function VenuePostScreen() {
           ...postWantItemTypes.map((t) => t.id),
           ...postWantItemTypeFreeTexts,
         ],
+        // PR-2: 未入力 (空/空白) は null で送る。addSupplyPost 側でも同様に正規化する (二層)。
+        wantDetail: postWantDetail.trim() === '' ? null : postWantDetail.trim(),
       })
       // 会場ホームは useFocusEffect(reloadAll) で戻り時に供給板を再取得する。
       router.back()
@@ -319,6 +323,21 @@ export default function VenuePostScreen() {
           }
         />
       </View>
+
+      {/* PR-2: 求の詳細 (任意)。構造化 want で表せない条件 (版/衣装/ツアー等) の自由記述。 */}
+      <View style={styles.fieldBlock}>
+        <Text style={styles.fieldLabel}>求の詳細（任意）</Text>
+        <TextInput
+          style={styles.wantDetailInput}
+          placeholder="例：第2弾のトレカ / 黒衣装のみ / ○○ツアーのもの"
+          value={postWantDetail}
+          onChangeText={setPostWantDetail}
+          multiline
+          maxLength={200}
+          textAlignVertical="top"
+          autoCorrect={false}
+        />
+      </View>
     </VenueComposerScreen>
   )
 }
@@ -372,6 +391,18 @@ const styles = StyleSheet.create({
     fontSize: fontSize.base,
     color: colors.textPrimary,
     backgroundColor: colors.backgroundCard,
+  },
+  // PR-2: 求の詳細 (複数行入力)。単行 input とは役割が異なるため専用スタイル。
+  wantDetailInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+    backgroundColor: colors.backgroundCard,
+    minHeight: 72,
   },
   // section tag
   sectionTag: {

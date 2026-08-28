@@ -21,9 +21,10 @@ import { TroubleDot } from '@/components/TroubleDot'
 import { TrustFactPanel } from '@/components/TrustFactPanel'
 import { UserActionsMenu } from '@/components/UserActionsMenu'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
-import { fetchSupplyPostById, fetchUserTrust } from '@/lib/supabase'
+import { fetchSupplyPostById, fetchUserTrust, fetchVenue } from '@/lib/supabase'
 import { formatStructuredWantFields, getWorkById } from '@/lib/master'
 import { formatVenueTimeLeft, isVenueExpired } from '@/lib/venueExpiry'
+import { getVenuePostWindow } from '@/lib/venueSearch'
 import { VenueSupplyPost, UserTrust } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { Ionicons } from '@expo/vector-icons'
@@ -53,6 +54,10 @@ export default function VenueSupplyDetailScreen() {
 
   const [post, setPost] = useState<VenueSupplyPost | null>(null)
   const [trust, setTrust] = useState<UserTrust | null>(null)
+  // PR-3: 交換提案の D-7 ウィンドウ判定に会場の event_date が必要。
+  //   supply_post は event_date を持たないため venue を別 fetch して保持する
+  //   (expires_at からの逆算は本番データの生成規約が不一致のため採らない)。
+  const [venueEventDate, setVenueEventDate] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   // loadFailed = 取得エラー (再試行)。post==null (not-found) とは分けて表示する。
   const [loadFailed, setLoadFailed] = useState(false)
@@ -73,6 +78,9 @@ export default function VenueSupplyDetailScreen() {
         return
       }
       setPost(fetched)
+      // PR-3: D-7 ウィンドウ判定用に会場の event_date を取得 (失敗時は null=提案不可側に倒す)。
+      const v = await fetchVenue(fetched.venue_id).catch(() => null)
+      setVenueEventDate(v?.event_date ?? null)
       // 出品者 Trust (失敗しても本体表示は止めない・null=「—」)。
       const t = await fetchUserTrust(fetched.user_id).catch(() => null)
       setTrust(t)
@@ -153,8 +161,14 @@ export default function VenueSupplyDetailScreen() {
   const isTombstone = post.poster == null
   const isOwn = userId != null && post.user_id === userId
   const expired = isVenueExpired(post.expires_at)
-  // 交換を提案: 自分以外 & active & 未期限切れ のみ (withdrawn/held/期限切れは不可)。
-  const canPropose = !isOwn && post.status === 'active' && !expired
+  // 交換を提案: 自分以外 & active & 未期限切れ、かつ PR-3 の D-7 ウィンドウ内 (event_date-7〜当日) のみ。
+  //   event_date 未取得 (venue fetch 失敗) は提案不可側に倒す (DB の create_venue_hold も同窓で拒否)。
+  const canPropose =
+    !isOwn &&
+    post.status === 'active' &&
+    !expired &&
+    venueEventDate != null &&
+    getVenuePostWindow(venueEventDate) === 'open'
   // 通報・ブロック: tombstone / 自分自身 では出さない。
   const showActions = !isTombstone && !isOwn
 

@@ -2,9 +2,6 @@
 // 会場一覧画面
 import { HeaderActions } from '@/components/HeaderActions'
 import {
-  checkInVenue,
-  fetchMyCheckin,
-  fetchVenueCheckinCount,
   fetchVenueSupplyCount,
   fetchVenues,
   isVenueLoadFailure,
@@ -19,7 +16,7 @@ import { Venue } from '@/lib/types'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { LinearGradient } from 'expo-linear-gradient'
-import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
+import { LiveBadge } from '@/components/venue/LiveElements'
 import { StatusBar } from 'expo-status-bar'
 import * as Haptics from 'expo-haptics'
 import { router, useFocusEffect } from 'expo-router'
@@ -56,13 +53,11 @@ export default function VenueListScreen() {
 
   const [venues, setVenues] = useState<Venue[]>([])
   const [loading, setLoading] = useState(true)
-  const [checkinCounts, setCheckinCounts] = useState<Record<string, number>>({})
-  // 暗地×光源: 会場ごとの active 出品数 (熱量/点火の集計元)。RPC 未適用時は 0 でグレースフル。
+  // 会場ごとの交換募集件数 (active 出品数)。熱量/点火の集計元。RPC 未適用時は 0 でグレースフル。
+  //   PR-3: 会場は入場管理を廃止し「交換市場」化したため checkin 系集計は撤去し supply に一本化。
   const [supplyCounts, setSupplyCounts] = useState<Record<string, number>>({})
   // 熱量リングの脈打ちトリガ (venue_id → カウンタ、Realtime で increment)。
   const [pulseSignals, setPulseSignals] = useState<Record<string, number>>({})
-  const [myCheckins, setMyCheckins] = useState<Record<string, boolean>>({})
-  const [checkingIn, setCheckingIn] = useState<string | null>(null)
   // 会場検索 (取得済みデータへのクライアント側フィルタ) の入力。
   const [searchQuery, setSearchQuery] = useState('')
   // 会場リクエスト mailto 起動失敗時のフォールバックモーダル (null=非表示)。
@@ -107,28 +102,15 @@ export default function VenueListScreen() {
       setVenues(venueList)
 
       if (userId != null) {
-        const counts: Record<string, number> = {}
         const supplies: Record<string, number> = {}
-        const checkins: Record<string, boolean> = {}
-        // PR-V2: 付随 fetch の部分失敗を許容するため Promise.allSettled に変更。
-        //   個別 venue で fetch が timeout しても全体は止めず、その venue だけ fallback で続行。
-        //   暗地×光源: supply count も併せて取得 (熱量/点火の集計元、失敗時 0)。
+        // PR-V2/PR-3: 付随 fetch の部分失敗を許容するため Promise.allSettled。
+        //   会場ごとの交換募集件数 (supply count) のみ取得 (checkin 系は PR-3 で撤去、失敗時 0)。
         await Promise.allSettled(
           venueList.map(async (v) => {
-            const [countResult, supplyResult, checkinResult] = await Promise.allSettled([
-              fetchVenueCheckinCount(v.id),
-              fetchVenueSupplyCount(v.id),
-              fetchMyCheckin(v.id, userId),
-            ])
-            counts[v.id] = countResult.status === 'fulfilled' ? countResult.value : 0
-            supplies[v.id] = supplyResult.status === 'fulfilled' ? supplyResult.value : 0
-            checkins[v.id] =
-              checkinResult.status === 'fulfilled' && checkinResult.value != null
+            supplies[v.id] = await fetchVenueSupplyCount(v.id)
           })
         )
-        setCheckinCounts(counts)
         setSupplyCounts(supplies)
-        setMyCheckins(checkins)
       }
     } catch (err) {
       // PR-V2-fix: タイムアウトに加え、機内モード/圏外で発生する
@@ -152,31 +134,15 @@ export default function VenueListScreen() {
     }, [load])
   )
 
-  // ③ 入場1タップ化: 「チェックイン」という語と2段操作を廃し「入場する」に統一。
-  //   未入場なら venue_checkins に記録 (density の N人母数を維持) してから入場、
-  //   入場済なら記録をスキップして即入場。記録失敗は入場を妨げない (density は
-  //   best-effort、二重挿入は UNIQUE(venue_id,user_id) が弾く)。
-  const handleEnter = async (venue: Venue) => {
+  // PR-3: 会場は入場管理を廃止し「交換市場」化。checkInVenue() の呼び出しを止め、
+  //   会場ページへ遷移するだけにする (checkin テーブル/RPC/関数定義は温存)。
+  const handleEnter = (venue: Venue) => {
     if (userId == null) {
       Alert.alert('エラー', 'ログインが必要です')
       return
     }
-    // 暗地×光源 v1: 入場の「点火」触覚。Light・瞬間のみ (頻繁な出入りでうざくならない強度)。
+    // 会場に入る瞬間の Light 触覚 (瞬間のみ)。
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-
-    if (!myCheckins[venue.id]) {
-      try {
-        setCheckingIn(venue.id)
-        await checkInVenue(venue.id, userId)
-        setMyCheckins((prev) => ({ ...prev, [venue.id]: true }))
-        setCheckinCounts((prev) => ({ ...prev, [venue.id]: (prev[venue.id] ?? 0) + 1 }))
-      } catch (error) {
-        // 記録失敗でも入場は続行 (density のみ best-effort)。
-        console.error('[VenueList][handleEnter][checkin]', error)
-      } finally {
-        setCheckingIn(null)
-      }
-    }
     router.push({ pathname: '/venue/[id]', params: { id: venue.id } } as never)
   }
 
@@ -196,11 +162,9 @@ export default function VenueListScreen() {
   const renderVenueCard = (venue: Venue) => {
     const phase = getVenuePhase(venue)
     const isOpen = phase === 'open'
-    const count = checkinCounts[venue.id] ?? 0
     const supply = supplyCounts[venue.id] ?? 0
-    const isCheckingIn = checkingIn === venue.id
-    // 暗地×光源: 点火状態 (checkin+supply)。open のみ熱量リング/点火ラベルを出す。
-    const ig = computeIgnition(count, supply)
+    // PR-3: 点火は交換募集件数のみで算出 (checkin 撤去)。computeIgnition は第1引数 0 で SPARK 側に安全劣化。
+    const ig = computeIgnition(0, supply)
     const pulse = pulseSignals[venue.id] ?? 0
 
     return (
@@ -229,30 +193,22 @@ export default function VenueListScreen() {
               <Text style={styles.venueName}>{venue.venue_name}</Text>
             </View>
 
-            {isOpen && (
+            {/* PR-3: 「参加中 N」→「交換募集 N件」(supply ベース)。0 件は行ごと非表示。 */}
+            {supply > 0 && (
               <View style={styles.venueStats}>
-                <VenueAvatarStack count={count} />
-                <Text style={styles.venueStatNum}>{count}</Text>
-                <Text style={styles.venueStatLabel}>参加中</Text>
+                <Text style={styles.venueStatNum}>{supply}</Text>
+                <Text style={styles.venueStatLabel}>件の交換募集</Text>
               </View>
             )}
           </View>
 
-          {/* ③ 入場1タップ: 未入場でも入場済でも同じ「入場する」。押下時に
-              未入場なら venue_checkins へ記録 (density維持)、入場済なら即遷移。 */}
-          {isOpen && (
-            <Pressable
-              style={[styles.checkinButton, isCheckingIn && styles.buttonDisabled]}
-              onPress={() => handleEnter(venue)}
-              disabled={isCheckingIn}
-            >
-              {isCheckingIn ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.checkinButtonText}>入場する</Text>
-              )}
-            </Pressable>
-          )}
+          {/* PR-3: 開催前でも会場ページへ遷移可 (入場管理を廃止)。isOpen ゲート撤廃で常時表示。 */}
+          <Pressable
+            style={styles.checkinButton}
+            onPress={() => handleEnter(venue)}
+          >
+            <Text style={styles.checkinButtonText}>会場の交換を見る</Text>
+          </Pressable>
 
           {phase === 'upcoming' && (
             <View style={styles.upcomingNote}>
@@ -301,15 +257,13 @@ export default function VenueListScreen() {
 
   // H2: 集約 density (open 会場のみ合計)。0 でも会場カードは消さず、集約行だけ促し文に。
   const density = useMemo(() => {
-    let people = 0
     let supply = 0
     for (const v of venues) {
       if (getVenuePhase(v) !== 'open') continue
-      people += checkinCounts[v.id] ?? 0
       supply += supplyCounts[v.id] ?? 0
     }
-    return { people, supply, active: people > 0 || supply > 0 }
-  }, [venues, checkinCounts, supplyCounts])
+    return { supply, active: supply > 0 }
+  }, [venues, supplyCounts])
 
   // 入場アニメの補間 (ヒーロー: opacity + 迫り上がり / 光源: opacity + 微 scale)。
   const heroRise = entrance.interpolate({ inputRange: [0, 1], outputRange: [14, 0] })
@@ -346,7 +300,6 @@ export default function VenueListScreen() {
       )
     }
     const parts: string[] = []
-    if (density.people > 0) parts.push(`${density.people}人が交換中`)
     if (density.supply > 0) parts.push(`${density.supply}件出ています`)
     return (
       <View style={styles.densityRow}>

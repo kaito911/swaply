@@ -68,6 +68,38 @@ export function getVenuePhase(venue: Pick<Venue, 'event_date' | 'status'>): Venu
 }
 
 // ─────────────────────────────────────────
+// D-7 出品/交換提案ウィンドウ (getVenuePhase とは独立の別判定)
+// ─────────────────────────────────────────
+
+// event_date ('YYYY-MM-DD') を UTC 正午アンカーで days 日ずらした 'YYYY-MM-DD' を返す。
+//   純日付演算 (端末 TZ / DST 非依存)。
+function addDaysISO(dateStr: string, days: number): string {
+  const t = Date.parse(`${dateStr}T00:00:00Z`)
+  return new Date(t + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+}
+
+export type VenuePostWindow = 'too_early' | 'open' | 'ended'
+
+/**
+ * 出品 / 交換提案の可否ウィンドウ。DB の INSERT RLS / create_venue_hold の D-7 窓と一致:
+ *   event_date - 7 <= JST今日 <= event_date のとき 'open'。
+ *   それより前 = 'too_early' (まだ募集開始前)、event_date を過ぎたら 'ended'。
+ * ★getVenuePhase とは別判定 (閲覧は常時可、出品/提案のみこのウィンドウで制限)。
+ */
+export function getVenuePostWindow(eventDate: string): VenuePostWindow {
+  const today = jstToday()
+  const opens = addDaysISO(eventDate, -7)
+  if (today < opens) return 'too_early'
+  if (today > eventDate) return 'ended'
+  return 'open'
+}
+
+/** 出品/提案が開く日 (event_date - 7) を 'YYYY-MM-DD' で返す。「◯月◯日から出品できます」用。 */
+export function venuePostOpensDate(eventDate: string): string {
+  return addDaysISO(eventDate, -7)
+}
+
+// ─────────────────────────────────────────
 // 検索 (取得済みデータへのクライアント側フィルタ)
 // ─────────────────────────────────────────
 

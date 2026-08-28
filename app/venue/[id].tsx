@@ -21,7 +21,6 @@ import {
   fetchReceivedHoldCount,
   fetchSupplyPosts,
   fetchVenue,
-  fetchVenueCheckinCount,
   fetchVenueSupplyCount,
   isVenueLoadFailure,
 } from '@/lib/supabase'
@@ -35,10 +34,10 @@ import {
   getWorkById,
 } from '@/lib/master'
 import { formatVenueTimeLeft } from '@/lib/venueExpiry'
-import { getVenuePhase } from '@/lib/venueSearch'
+import { getVenuePhase, getVenuePostWindow, venuePostOpensDate, formatVenueDateJa } from '@/lib/venueSearch'
 import { StatusBar } from 'expo-status-bar'
 import { LinearGradient } from 'expo-linear-gradient'
-import { LiveBadge, VenueAvatarStack } from '@/components/venue/LiveElements'
+import { LiveBadge } from '@/components/venue/LiveElements'
 import { HeatRing } from '@/components/venue/HeatRing'
 import { LightstickGalaxy } from '@/components/venue/LightstickGalaxy'
 import { ShowtimeClock } from '@/components/venue/ShowtimeClock'
@@ -137,17 +136,13 @@ export default function VenueHomeScreen() {
   // PR-2: 会場文脈ヘッダー用。venues は RLS 上 SELECT 全員可。
   // fetch 失敗時 (venue=null) はヘッダー非表示にフォールバック。
   const [venue, setVenue] = useState<Venue | null>(null)
-  const [checkinCount, setCheckinCount] = useState(0)
-  // 暗地×光源: この会場の active 出品数 (熱量/点火の集計元)。RPC 未適用時 0 でグレースフル。
+  // 暗地×光源: この会場の交換募集件数 (active 出品数、熱量/点火の集計元)。RPC 未適用時 0。
+  //   PR-3: checkin 系 (checkinCount/checkinCountFailed) は入場管理廃止に伴い撤去。
   const [supplyCount, setSupplyCount] = useState(0)
   // #1 熱量リング脈打ちトリガ (Realtime で increment)。
   const [heatPulse, setHeatPulse] = useState(0)
   // #3 EXCHANGE DROP: 直近に Realtime で滑り込んだ post id (数秒で自動解除)。
   const [recentlyDropped, setRecentlyDropped] = useState<Set<string>>(new Set())
-  // PR-V1: checkinCount だけ「取得失敗」と「0 件」を区別したい (venue 取得は成功し
-  // 会場名は出ているのに、人数だけ取れなかった状態を「— 人参加中」で表現)。
-  // venue 自体の失敗判定は既存の venue==null fallback で代用 (V2 で venueFailed 追加余地)。
-  const [checkinCountFailed, setCheckinCountFailed] = useState(false)
   // PR-V2: 当日供給板 (fetchSupplyPosts) の失敗フラグ。
   //   初期 false、正常 fetch で false 維持、VenueFetchTimeoutError 時のみ true。
   //   状態優先順位: loadingSupply > supplyLoadFailed > 検索 0 件 > 全件 0 件 > データ表示。
@@ -338,15 +333,13 @@ export default function VenueHomeScreen() {
     }
   }, [venueId, userId])
 
-  // PR-2 → PR-V1: venue 行 + チェックイン数を並列取得。
-  //   Promise.all で両方 fallback だと「checkinCount 失敗で会場名まで消える」最悪状態。
-  //   PR-V1 では Promise.allSettled で並列維持 + 個別判定し、venue が取れれば会場名を出す。
-  //   checkinCount だけが失敗した場合は checkinCountFailed=true で UI 側が「— 人参加中」表示。
+  // PR-2 → PR-V1 → PR-3: venue 行 + 交換募集件数 (supply) を並列取得。
+  //   PR-3 で checkin 数取得は撤去 (入場管理廃止)。Promise.allSettled で個別判定し、
+  //   venue が取れれば会場名を出す (supply 失敗は既存値維持で熱量が控えめになるだけ)。
   const loadVenueContext = useCallback(async () => {
     if (venueId == null) return
-    const [vResult, cResult, sResult] = await Promise.allSettled([
+    const [vResult, sResult] = await Promise.allSettled([
       fetchVenue(venueId),
-      fetchVenueCheckinCount(venueId),
       fetchVenueSupplyCount(venueId),
     ])
     // 暗地×光源: supply count は熱量/点火の集計元。失敗時は既存値維持 (熱量が控えめになるだけ)。
@@ -354,7 +347,6 @@ export default function VenueHomeScreen() {
 
     // venue: 成功 → setVenue / 失敗 (timeout 等) → null fallback (会場文脈ヘッダー非表示)。
     //   既存の null 判定 (venue != null && ...) と同じ挙動を維持。
-    //   V2 で venueFailed state を追加するなら本 catch 内でセットする余地。
     if (vResult.status === 'fulfilled') {
       setVenue(vResult.value)
     } else {
@@ -366,21 +358,6 @@ export default function VenueHomeScreen() {
         console.error('[VenueHome][loadVenueContext] venue', vResult.reason)
       }
       setVenue(null)
-    }
-
-    // checkinCount: 成功 → setCheckinCount + Failed=false / 失敗 → Failed=true。
-    //   既存値は保持して画面ちらつきを抑制 (UI 側で Failed=true なら「—」表示)。
-    if (cResult.status === 'fulfilled') {
-      setCheckinCount(cResult.value)
-      setCheckinCountFailed(false)
-    } else {
-      // PR-V2-fix: 同上、ネットワーク起因は warn / 本物のバグは error。
-      if (isVenueLoadFailure(cResult.reason)) {
-        console.warn('[VenueHome][loadVenueContext] checkinCount', cResult.reason instanceof Error ? cResult.reason.message : String(cResult.reason))
-      } else {
-        console.error('[VenueHome][loadVenueContext] checkinCount', cResult.reason)
-      }
-      setCheckinCountFailed(true)
     }
   }, [venueId])
 
@@ -436,8 +413,12 @@ export default function VenueHomeScreen() {
     inputRange: [0, 1],
     outputRange: [0.92, 1],
   })
-  // 点火状態 (checkin+supply)。看板の点火ラベル・熱量リング・光の海の色に使う。
-  const ignition = computeIgnition(checkinCount, supplyCount)
+  // 点火状態。看板の点火ラベル・熱量リング・光の海の色に使う。
+  //   PR-3: checkin 撤去のため交換募集件数のみで算出 (第1引数 0)。0 は SPARK 側に安全劣化。
+  const ignition = computeIgnition(0, supplyCount)
+  // PR-3: 出品/交換提案の D-7 ウィンドウ (event_date-7 <= JST今日 <= event_date で 'open')。DB の窓と一致。
+  const postWindow = venue != null ? getVenuePostWindow(venue.event_date) : null
+  const canPostNow = postWindow === 'open'
 
   // PR-V2-fix3: 会場詳細の主要データを一括再取得するエントリ。
   //   useFocusEffect (画面入り直し) と「うまく読み込めませんでした」再試行ボタンの
@@ -582,17 +563,9 @@ export default function VenueHomeScreen() {
             {venue.venue_name} · {formatJaEventDate(venue.event_date)}
           </Text>
           <View style={styles.venueContextStatusRow}>
+            {/* PR-3: 「N人がこの会場にいます」+ アバターは入場管理廃止に伴い撤去。状態表示のみ。 */}
             {getVenuePhase(venue) === 'open' ? (
-              <>
-                <LiveBadge />
-                {/* #2 点火は色/強度(熱量リング)で表現。テキストラベルは K 指定で撤去。 */}
-                <Text style={styles.venueContextCheckin}>
-                  {checkinCountFailed ? '—' : checkinCount}人がこの会場にいます
-                </Text>
-                {!checkinCountFailed && checkinCount > 0 && (
-                  <VenueAvatarStack count={checkinCount} size={24} />
-                )}
-              </>
+              <LiveBadge />
             ) : getVenuePhase(venue) === 'upcoming' ? (
               <Text style={styles.venueContextHint}>まもなく開催</Text>
             ) : (
@@ -690,7 +663,7 @@ export default function VenueHomeScreen() {
           {/* PR-6: 双方向マッチレーン (横スクロール、accent 色強調)。
               mutualPairs.length === 0 のときレーンごと非表示 (供給板だけ見せる)。
               検索バーで絞り込み中でもこのレーンは消えない (マッチ計算は supplyPosts 全件) */}
-          {mutualPairs.length > 0 && (
+          {mutualPairs.length > 0 && canPostNow && (
             <View style={styles.matchLane}>
               <Text style={styles.matchLaneTitle}>◎ 今すぐ交換できる</Text>
               <ScrollView
@@ -1099,17 +1072,21 @@ export default function VenueHomeScreen() {
                   </View>
 
                   {/* β1 主 CTA: brand 色「Holdする」 */}
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.holdCta,
-                      pressed && styles.holdCtaPressed,
-                    ]}
-                    onPress={() => handleHoldRequest(post)}
-                    accessibilityRole="button"
-                    accessibilityLabel="交換を提案"
-                  >
-                    <Text style={styles.holdCtaText}>交換を提案</Text>
-                  </Pressable>
+                  {/* PR-3: D-7 ウィンドウ (canPostNow) のときのみ「交換を提案」を表示。
+                      D-8 以上先はこのボタンを出さない (DB の create_venue_hold も同窓で拒否)。 */}
+                  {canPostNow && (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.holdCta,
+                        pressed && styles.holdCtaPressed,
+                      ]}
+                      onPress={() => handleHoldRequest(post)}
+                      accessibilityRole="button"
+                      accessibilityLabel="交換を提案"
+                    >
+                      <Text style={styles.holdCtaText}>交換を提案</Text>
+                    </Pressable>
+                  )}
                 </View>
               )
             })
@@ -1121,13 +1098,24 @@ export default function VenueHomeScreen() {
           会場詳細は (tabs) の外で通常 FAB が表示されないため本画面専用に配置。
           β1: 出品 form を開く動線はこの FAB のみに一本化 (inline 「＋」ボタンは廃止)。
           出品/Hold はフル画面ルート化したため overlay 競合はなく、FAB は常時表示。 */}
-      <SubmitFab
-        label="この会場で出す"
-        onPress={handleOpenVenuePostForm}
-        hasTabBar={false}
-        backgroundColor={colors.primary}
-        accessibilityLabel="この会場の当日供給板に出品"
-      />
+      {/* PR-3: 出品導線は D-7 ウィンドウ内 (canPostNow) のみ FAB を表示。
+          D-8 以上先 (too_early) は FAB を出さず「◯月◯日から出品できます」を案内する
+          (◯ = event_date の 7 日前)。それ以外 (ended) はどちらも出さない。 */}
+      {canPostNow ? (
+        <SubmitFab
+          label="この会場で出す"
+          onPress={handleOpenVenuePostForm}
+          hasTabBar={false}
+          backgroundColor={colors.primary}
+          accessibilityLabel="この会場の当日供給板に出品"
+        />
+      ) : postWindow === 'too_early' && venue != null ? (
+        <View style={styles.postWindowNote} pointerEvents="none">
+          <Text style={styles.postWindowNoteText}>
+            {formatVenueDateJa(venuePostOpensDate(venue.event_date))}から出品できます
+          </Text>
+        </View>
+      ) : null}
 
       </SafeAreaView>
     </View>
@@ -1671,6 +1659,23 @@ const styles = StyleSheet.create({
   holdCtaText: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
+  },
+  // PR-3: D-8 以上先の会場で FAB の代わりに出す「◯月◯日から出品できます」バナー (画面下部)。
+  postWindowNote: {
+    position: 'absolute',
+    left: spacing.base,
+    right: spacing.base,
+    bottom: spacing.lg,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: radius.full,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.base,
+    alignItems: 'center',
+  },
+  postWindowNoteText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
     color: '#FFFFFF',
   },
   // Hold 申請モーダル内 ScrollView 用 contentContainer。

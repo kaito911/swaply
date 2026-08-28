@@ -340,6 +340,12 @@ export default function VenueMyPostsScreen() {
                     期限切れのため再出品できません
                   </Text>
                 )}
+                {/* PR-3: held は取り下げボタンを出さない (canWithdraw=false) ため、理由を明示する。 */}
+                {status === 'held' && (
+                  <Text style={styles.reactivateBlockedText}>
+                    交換が成立しているため取り下げできません
+                  </Text>
+                )}
               </View>
             )
           })

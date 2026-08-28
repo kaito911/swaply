@@ -159,7 +159,22 @@ export default function VenueHoldScreen() {
       ])
     } catch (error) {
       console.error('[VenueHold][submit]', error)
-      Alert.alert('エラー', '提案の送信に失敗しました')
+      // PR-3: create_venue_hold は D-7 窓外で VENUE_TOO_EARLY / VENUE_ENDED を raise。日本語化して提示。
+      const rawMessage =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'object' &&
+            error != null &&
+            'message' in error &&
+            typeof (error as { message?: unknown }).message === 'string'
+          ? (error as { message: string }).message
+          : ''
+      const jp = rawMessage.includes('VENUE_TOO_EARLY')
+        ? 'この公演の交換募集はまだ開始していません'
+        : rawMessage.includes('VENUE_ENDED')
+        ? 'この公演は終了しました'
+        : '提案の送信に失敗しました'
+      Alert.alert('エラー', jp)
     } finally {
       setSubmittingHold(false)
     }

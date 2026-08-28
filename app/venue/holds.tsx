@@ -401,7 +401,22 @@ export default function VenueHoldsScreen() {
               )
             } catch (error) {
               console.error('[VenueHolds][handleConfirmTrade]', error)
-              Alert.alert('エラー', '確認に失敗しました')
+              // PR-3: confirm_venue_trade は当日以外 VENUE_NOT_TODAY を raise。日本語化して提示。
+              const rawMessage =
+                error instanceof Error
+                  ? error.message
+                  : typeof error === 'object' &&
+                    error != null &&
+                    'message' in error &&
+                    typeof (error as { message?: unknown }).message === 'string'
+                  ? (error as { message: string }).message
+                  : ''
+              Alert.alert(
+                'エラー',
+                rawMessage.includes('VENUE_NOT_TODAY')
+                  ? '完了の確認は公演当日のみ行えます'
+                  : '確認に失敗しました',
+              )
             } finally {
               setActingId(null)
             }

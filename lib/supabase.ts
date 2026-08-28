@@ -2851,6 +2851,36 @@ export async function fetchVenueSupplyCount(venueId: string): Promise<number> {
   })())
 }
 
+// 会場一覧の N+1 解消: 複数 venue の交換募集件数 (active かつ expires_at > now()) を 1 RPC で取得。
+//   get_venue_supply_counts(p_venue_ids uuid[]) は cnt>0 の行のみ返す (GROUP BY) ため、
+//   ★呼び出し側 id を 0 で初期化してから上書きし、返ってこなかった venue_id は 0 で埋める。
+//   エラー扱いは単数形 fetchVenueSupplyCount と同一 (ネットワーク起因は throw、DB エラーは空で劣化)。
+export async function fetchVenueSupplyCounts(
+  venueIds: string[],
+): Promise<Record<string, number>> {
+  if (venueIds.length === 0) return {} // 空配列は RPC を呼ばず {} を返す
+  return withVenueTimeout('fetchVenueSupplyCounts', (async () => {
+    const { data, error } = await supabase.rpc('get_venue_supply_counts', {
+      p_venue_ids: venueIds,
+    })
+
+    if (error) {
+      if (isNetworkErrorObject(error)) {
+        throw new VenueNetworkError('fetchVenueSupplyCounts', error)
+      }
+      console.error('[fetchVenueSupplyCounts]', error)
+      return {}
+    }
+
+    const counts: Record<string, number> = {}
+    for (const id of venueIds) counts[id] = 0
+    for (const row of (data ?? []) as { venue_id: string; cnt: number }[]) {
+      counts[row.venue_id] = row.cnt ?? 0
+    }
+    return counts
+  })())
+}
+
 /**
  * 当日掲示板 (Live Supply Board) に表示する supply_post を取得。
  *

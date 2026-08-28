@@ -2,7 +2,7 @@
 // 会場一覧画面
 import { HeaderActions } from '@/components/HeaderActions'
 import {
-  fetchVenueSupplyCount,
+  fetchVenueSupplyCounts,
   fetchVenues,
   isVenueLoadFailure,
 } from '@/lib/supabase'
@@ -102,14 +102,14 @@ export default function VenueListScreen() {
       setVenues(venueList)
 
       if (userId != null) {
-        const supplies: Record<string, number> = {}
-        // PR-V2/PR-3: 付随 fetch の部分失敗を許容するため Promise.allSettled。
-        //   会場ごとの交換募集件数 (supply count) のみ取得 (checkin 系は PR-3 で撤去、失敗時 0)。
-        await Promise.allSettled(
-          venueList.map(async (v) => {
-            supplies[v.id] = await fetchVenueSupplyCount(v.id)
-          })
-        )
+        // PR: N+1 解消。会場ごとの件数取得 (最大 69 本の同時 RPC) を 1 本の一括 RPC に集約。
+        //   件数取得の失敗は一覧を止めない (旧 Promise.allSettled の best-effort を .catch で維持)。
+        const supplies = await fetchVenueSupplyCounts(
+          venueList.map((v) => v.id),
+        ).catch((e) => {
+          console.warn('[VenueList][load] supplyCounts', e instanceof Error ? e.message : String(e))
+          return {} as Record<string, number>
+        })
         setSupplyCounts(supplies)
       }
     } catch (err) {

@@ -48,7 +48,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -59,6 +58,8 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+// PR: 会場リモート画像を expo-image 化 (ダウンサンプリング + memory-disk キャッシュ、依存追加なし)。
+import { Image } from 'expo-image'
 
 const STATUS_LABELS: Record<VenueTradeStatus, string> = {
   pending: '進行中',
@@ -526,7 +527,8 @@ export default function VenueTradeDMScreen() {
                   <Image
                     source={{ uri: wantedImage }}
                     style={styles.snapshotImage}
-                    resizeMode="cover"
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
                   />
                 )}
                 <Text style={styles.snapshotCard_name}>
@@ -556,7 +558,8 @@ export default function VenueTradeDMScreen() {
                   <Image
                     source={{ uri: offeredImage }}
                     style={styles.snapshotImage}
-                    resizeMode="cover"
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
                   />
                 )}
                 <Text style={styles.snapshotCard_name}>

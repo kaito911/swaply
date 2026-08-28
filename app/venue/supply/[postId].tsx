@@ -32,13 +32,15 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native'
+// PR: メモリ圧解消のため会場リモート画像を expo-image に置換 (原寸フルデコード → 表示サイズに
+//   ダウンサンプリング + memory-disk キャッシュ)。expo-image は既存依存 (fingerprint 不変)。
+import { Image } from 'expo-image'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 // 供給板 ([id].tsx:94-97) と同じ投稿者名の解決規約 (handle → display_name → 'ユーザー')。
@@ -204,7 +206,8 @@ export default function VenueSupplyDetailScreen() {
           <Image
             source={{ uri: post.image_url as string }}
             style={styles.photo}
-            resizeMode="contain"
+            contentFit="contain"
+            cachePolicy="memory-disk"
           />
         ) : (
           <View style={[styles.photo, styles.photoEmpty]}>

@@ -25,7 +25,6 @@ import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -33,6 +32,8 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+// PR: 会場リモート画像を expo-image 化 (ダウンサンプリング + memory-disk キャッシュ、依存追加なし)。
+import { Image } from 'expo-image'
 
 type DisplayStatus = 'active' | 'withdrawn' | 'held' | 'expired'
 
@@ -235,7 +236,8 @@ export default function VenueMyPostsScreen() {
                     <Image
                       source={{ uri: post.image_url }}
                       style={styles.postThumb}
-                      resizeMode="cover"
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
                     />
                     {/* 右詳細: venue/[id].tsx 当日供給板と同じ思想で「譲：name →
                         group → 求：want」順に並べる。自分の投稿一覧なので Hold

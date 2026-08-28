@@ -33,7 +33,6 @@ import React, { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -41,6 +40,8 @@ import {
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+// PR: 会場リモート画像を expo-image 化 (ダウンサンプリング + memory-disk キャッシュ、依存追加なし)。
+import { Image } from 'expo-image'
 
 type Tab = 'received' | 'sent' | 'converted'
 
@@ -622,7 +623,8 @@ export default function VenueHoldsScreen() {
                   <Image
                     source={{ uri: hold.proposer_image_url }}
                     style={styles.snapshotImage}
-                    resizeMode="cover"
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
                   />
                 )}
 
@@ -639,7 +641,8 @@ export default function VenueHoldsScreen() {
                     <Image
                       source={{ uri: wantedImageUrl }}
                       style={styles.snapshotImage}
-                      resizeMode="cover"
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
                     />
                   )
                 })()}

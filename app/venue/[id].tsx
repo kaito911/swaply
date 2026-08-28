@@ -55,7 +55,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -64,6 +63,8 @@ import {
   Text,
   View,
 } from 'react-native'
+// PR: 会場リモート画像を expo-image 化 (ダウンサンプリング + memory-disk キャッシュ、依存追加なし)。
+import { Image } from 'expo-image'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 // β1 会場ホーム ローカル color palette。
@@ -685,7 +686,8 @@ export default function VenueHomeScreen() {
                         <Image
                           source={{ uri: pair.theirPost.image_url }}
                           style={styles.matchCardThumb}
-                          resizeMode="cover"
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
                         />
                       ) : (
                         <View
@@ -731,7 +733,8 @@ export default function VenueHomeScreen() {
                         <Image
                           source={{ uri: pair.myPost.image_url }}
                           style={styles.matchCardThumb}
-                          resizeMode="cover"
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
                         />
                       ) : (
                         <View
@@ -996,7 +999,8 @@ export default function VenueHomeScreen() {
                       <Image
                         source={{ uri: post.image_url }}
                         style={styles.supplyCardThumb}
-                        resizeMode="cover"
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
                       />
                     ) : (
                       <View

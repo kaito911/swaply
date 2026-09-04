@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import {
   Animated,
   Image,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { PrimaryCTA } from '@/components/PrimaryCTA'
+import { OshiPicker } from '@/components/OshiPicker'
 import { useAuthContext } from '@/providers/AuthProvider'
 import { checkHandleAvailable, updateProfile } from '@/lib/supabase'
 
@@ -24,7 +26,7 @@ export async function resetOnboardingForDebug(): Promise<void> {
   await AsyncStorage.removeItem(ONBOARDING_DONE_KEY)
 }
 
-type Step = 'welcome' | 'handle' | 'promise'
+type Step = 'welcome' | 'handle' | 'oshi' | 'promise'
 
 type Props = {
   onComplete: () => void
@@ -56,7 +58,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
         return
       }
       await updateProfile({ userId, handle: trimmed, displayName: null })
-      setStep('promise')
+      setStep('oshi')
     } catch (error) {
       console.error('[Onboarding] handleHandleSubmit', error)
       setHandleError('エラーが発生しました。もう一度お試しください。')
@@ -138,7 +140,45 @@ export default function OnboardingScreen({ onComplete }: Props) {
     )
   }
 
-  // ── STEP 3: Swaplyの約束 (世界観のみ・案内やリンクは入れない) ──────────────
+  // ── STEP 3: 推し登録 (任意)。1件登録で次へ / 「あとで設定する」でスキップ ──────────────
+  //   選択UI・保存・キーボード被り対策は共有 <OshiPicker> を再利用 (推し編集画面と同一)。
+  if (step === 'oshi') {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.oshiContainer}>
+          <View style={styles.oshiHeaderPad}>
+            <View style={styles.wantsHeader}>
+              <Text style={styles.wantsTitle}>推しを登録しますか？</Text>
+              <Text style={styles.wantsSub}>
+                登録すると、あなたの推しの出品がホームにまとまって表示されます。あとからでも設定できます。
+              </Text>
+            </View>
+          </View>
+
+          <OshiPicker
+            userId={userId}
+            initiallyOpen
+            showCollapseToggle={false}
+            submitLabel="登録して次へ"
+            onAdded={() => setStep('promise')}
+          />
+
+          <View style={styles.oshiHeaderPad}>
+            <Pressable
+              style={styles.skipButton}
+              onPress={() => setStep('promise')}
+              accessibilityRole="button"
+              accessibilityLabel="あとで設定する"
+            >
+              <Text style={styles.skipButtonText}>あとで設定する</Text>
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  // ── STEP 4: Swaplyの約束 (世界観のみ・案内やリンクは入れない) ──────────────
   return <PromiseStep onStart={handleComplete} />
 }
 
@@ -226,6 +266,25 @@ const styles = StyleSheet.create({
     fontSize: fontSize.lg,
     color: colors.textSecondary,
     marginTop: spacing.xs,
+  },
+  // 推し登録ステップ: ヘッダー(固定) + OshiPicker(flex:1 スクロール) + スキップ(固定) の縦積み。
+  oshiContainer: {
+    flex: 1,
+    paddingTop: spacing.xl,
+  },
+  oshiHeaderPad: {
+    paddingHorizontal: spacing.base,
+  },
+  skipButton: {
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.xs,
+  },
+  skipButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.textTertiary,
   },
   wantsHeader: {
     marginBottom: spacing.xl,

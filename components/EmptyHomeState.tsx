@@ -1,26 +1,19 @@
 // components/EmptyHomeState.tsx
+//
+// 自分の公開出品が 0 件のとき、ホームのレーン群の最上部に出す出品誘導カード。
+//   ★全画面の空表示ではなく、他レーン (成立しやすい交換 / すべての交換) と同居する compact な
+//     カードにする (home.tsx が ownActiveCount===0 のとき最上部に描画する)。
 import { PrimaryCTA } from '@/components/PrimaryCTA'
-import { colors, fontWeight, spacing } from '@/constants/theme'
+import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { router } from 'expo-router'
 import React from 'react'
-import { Image, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 
 export function EmptyHomeState() {
   return (
     <View style={styles.wrap}>
-      {/* ブランドロゴ画像に統合 (旧コーラル文字ロゴ)。読み上げ用 label 明示。 */}
-      <Image
-        source={require('../assets/images/splash-icon.png')}
-        style={styles.logo}
-        resizeMode="contain"
-        accessible
-        accessibilityRole="image"
-        accessibilityLabel="Swaply"
-      />
-      <Text style={styles.main}>まだ交換できるカードがありません</Text>
-      <Text style={styles.sub}>
-        {'このアプリは\n「出品」と「いいね」から\n交換が生まれます'}
-      </Text>
+      <Text style={styles.main}>あなたの出品はまだありません</Text>
+      <Text style={styles.sub}>交換は、あなたが1件出すところから始まります</Text>
       <View style={styles.ctaWrap}>
         <PrimaryCTA
           label="カードを出品する"
@@ -33,37 +26,29 @@ export function EmptyHomeState() {
 }
 
 const styles = StyleSheet.create({
+  // compact カード (レーンより上に同居)。
   wrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing['4xl'],
-    paddingBottom: spacing['4xl'],
-  },
-  // ブランドロゴ画像。864:254 の実数指定 (h30 → w102、旧 28pt 文字相当)。
-  //   ★aspectRatio は幅主軸に解決され巨大化するため width/height を実数指定。
-  logo: {
-    width: 102,
-    height: 30,
-    marginBottom: spacing.lg,
+    backgroundColor: colors.backgroundCard,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginHorizontal: spacing.base,
+    marginBottom: spacing.md,
+    padding: spacing.lg,
+    gap: spacing.sm,
   },
   main: {
     fontSize: 16,
     fontWeight: fontWeight.bold,
     color: colors.textPrimary,
-    textAlign: 'center',
-    marginBottom: spacing.md,
   },
   sub: {
     fontSize: 13,
     color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: spacing['2xl'],
+    lineHeight: 20,
   },
   ctaWrap: {
     width: '100%',
-    gap: spacing.sm,
+    marginTop: spacing.xs,
   },
 })

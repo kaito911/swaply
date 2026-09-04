@@ -94,6 +94,9 @@ export default function HomeScreen() {
   const [gridCards, setGridCards] = useState<Card[]>([])
   const [gridEnd, setGridEnd] = useState(false)
   const [gridLoadingMore, setGridLoadingMore] = useState(false)
+  // ★自分の公開出品 (active) 件数。0 のとき出品誘導 (EmptyHomeState) を最上部に出す。
+  //   null=未確定 (誘導を出さない)。load 内で myCards.length からセットする。
+  const [ownActiveCount, setOwnActiveCount] = useState<number | null>(null)
   // 多重ロード防止 + 最新の blocked ids を pager から参照するための ref。
   const gridLoadingRef = useRef(false)
   const blockedIdsRef = useRef<string[]>([])
@@ -189,6 +192,8 @@ export default function HomeScreen() {
         let matchLane: Card[] = []
         if (user != null) {
           const myCards = (await fetchUserCards(user.id, 'active')).slice(0, MATCH_LANE_CARD_CAP)
+          // ★出品誘導の判定用: 自分の公開出品が 0 件か (slice で 0/>0 は保存される)。
+          setOwnActiveCount(myCards.length)
           const perCard = await Promise.all(
             myCards.map((c) =>
               searchDirectMatch({
@@ -440,14 +445,12 @@ export default function HomeScreen() {
               <Text style={styles.retryButtonText}>再試行</Text>
             </Pressable>
           </View>
-        ) : matchCards.length === 0 &&
-          oshiMatchCards.length === 0 &&
-          easyCards.length === 0 &&
-          likedCards.length === 0 &&
-          gridCards.length === 0 ? (
-          <EmptyHomeState />
         ) : (
           <>
+            {/* ★出品誘導: 自分の公開出品が 0 件のとき最上部に (他レーンと同居)。
+                原因1 対応: 従来「5レーン全0」条件では公開7件で永久非表示だった。 */}
+            {ownActiveCount === 0 && <EmptyHomeState />}
+
             {/* Lane 1: マッチ率が高い交換 — 双方向マッチ (PR-2c、最上部)。0 件で非表示。 */}
             {matchCards.length > 0 && (
               <>

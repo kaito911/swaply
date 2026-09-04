@@ -69,7 +69,7 @@ const SECTION_TITLES: Record<Section, string> = {
   new: '新着の交換',
   easy: '成立しやすい交換',
   liked: 'いいねした交換',
-  'my-listings': '出品中',
+  'my-listings': '自分の出品',
   'search-offer': '譲を探す結果',
   'search-want': '求を探す結果',
   'search-match': 'マッチ結果',
@@ -125,6 +125,10 @@ export default function ListSectionScreen() {
   // A1: 読み込み失敗フラグ。catch で立て、再試行UIを出す (false-empty 是正・home/wants と同手法)。
   const [loadFailed, setLoadFailed] = useState(false)
 
+  // ★自分の出品 (my-listings) の状態タブ (内容軸の絞込検索シートとは別軸)。
+  //   すべて / 出品中(active) / 出品停止中(inactive) / 取引中(reserved)。他 section では未使用。
+  const [statusTab, setStatusTab] = useState<'all' | 'active' | 'inactive' | 'reserved'>('all')
+
   // 絞込 (クライアント側): グループ + メンバー + 種類 の 3 軸。空なら全件。
   const [filterWorks, setFilterWorks] = useState<MasterWork[]>([])
   const [filterChars, setFilterChars] = useState<MasterCharacter[]>([])
@@ -141,7 +145,9 @@ export default function ListSectionScreen() {
     try {
       let result: Card[] = []
       if (section === 'my-listings') {
-        if (userId != null) result = await fetchUserCards(userId, 'active')
+        // ★自分の出品は全状態を取得 (active/inactive/reserved)。traded のみ UI 側で除外する
+        //   (マイページ横並び mypage.tsx:216 と同規則)。状態タブでの絞り込みは displayCards で行う。
+        if (userId != null) result = await fetchUserCards(userId, 'all')
       } else if (section === 'liked') {
         if (userId != null) result = await fetchLikedCards(userId)
       } else {
@@ -259,11 +265,19 @@ export default function ListSectionScreen() {
   // クライアント側フィルタ (card.work_id / characters[] / item_types[] と選択 master ID の overlap)。
   // グループは card.work_id (単一) を直照合。DB 追加クエリなし、master cache 常駐前提。
   const displayCards = useMemo(() => {
+    // ★my-listings: 先に状態軸を適用。traded (交換済=履歴) は常に除外し、状態タブで絞る。
+    //   内容軸 (絞込検索シート) はこの base に対して AND 合成する。
+    const base =
+      section === 'my-listings'
+        ? cards.filter(
+            (c) => c.status !== 'traded' && (statusTab === 'all' || c.status === statusTab),
+          )
+        : cards
     const workIds = new Set(filterWorks.map((w) => w.id))
     const charIds = new Set(filterChars.map((c) => c.id))
     const itemIds = new Set(filterItems.map((t) => t.id))
-    if (workIds.size === 0 && charIds.size === 0 && itemIds.size === 0) return cards
-    return cards.filter((c) => {
+    if (workIds.size === 0 && charIds.size === 0 && itemIds.size === 0) return base
+    return base.filter((c) => {
       const okWork =
         workIds.size === 0 || (c.work_id != null && workIds.has(c.work_id))
       const okChar =
@@ -272,7 +286,7 @@ export default function ListSectionScreen() {
         itemIds.size === 0 || (c.item_types ?? []).some((id) => itemIds.has(id))
       return okWork && okChar && okItem
     })
-  }, [cards, filterWorks, filterChars, filterItems])
+  }, [cards, section, statusTab, filterWorks, filterChars, filterItems])
 
   const filterCount = filterWorks.length + filterChars.length + filterItems.length
   const title = section != null ? SECTION_TITLES[section] : '一覧'
@@ -302,6 +316,32 @@ export default function ListSectionScreen() {
               </Pressable>
             </View>
           )}
+        </View>
+      )}
+
+      {/* ★自分の出品の状態タブ (my-listings のみ)。trades.tsx のタブ意匠を同値で複製。
+          内容軸の絞込検索シートとは別軸で AND 合成される。初期は「すべて」。 */}
+      {section === 'my-listings' && (
+        <View style={styles.statusTabs}>
+          {([
+            ['all', 'すべて'],
+            ['active', '出品中'],
+            ['inactive', '出品停止中'],
+            ['reserved', '取引中'],
+          ] as const).map(([key, label]) => {
+            const active = statusTab === key
+            return (
+              <Pressable
+                key={key}
+                style={[styles.statusTab, active && styles.statusTabActive]}
+                onPress={() => setStatusTab(key)}
+              >
+                <Text style={[styles.statusTabText, active && styles.statusTabTextActive]}>
+                  {label}
+                </Text>
+              </Pressable>
+            )
+          })}
         </View>
       )}
 
@@ -342,6 +382,7 @@ export default function ListSectionScreen() {
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
             const isOwn = userId != null && item.owner_user_id === userId
+            const isMyListings = section === 'my-listings'
             return (
               <FeedGridCard
                 card={item}
@@ -349,6 +390,17 @@ export default function ListSectionScreen() {
                 isOwn={isOwn}
                 isLiked={likedIds.has(item.id)}
                 onToggleLike={isOwn ? undefined : () => toggleLike(item.id)}
+                // ★自分の出品一覧: 左上「自分の出品」は情報量ゼロなので抑制、右上に状態ラベル。
+                hideOwnBadge={isMyListings}
+                statusBadge={
+                  isMyListings
+                    ? item.status === 'inactive'
+                      ? '出品停止中'
+                      : item.status === 'reserved'
+                      ? '取引中'
+                      : null
+                    : undefined
+                }
               />
             )
           }}
@@ -442,6 +494,36 @@ export default function ListSectionScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
+  // ★状態タブ (my-listings)。trades.tsx:1047-1075 の tabs/tab/activeTab/tabText/activeTabText と同値。
+  statusTabs: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  statusTab: {
+    flex: 1,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusTabActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  statusTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#52525B',
+  },
+  statusTabTextActive: {
+    color: '#FFFFFF',
+  },
   toolbar: {
     paddingHorizontal: spacing.base,
     paddingVertical: spacing.sm,

@@ -23,6 +23,11 @@ interface FeedGridCardProps {
   isOwn?: boolean
   isLiked?: boolean
   onToggleLike?: () => void
+  /** 右上に出す状態ラベル (例「出品停止中」「取引中」)。null/未指定で非表示。
+   *  自分の出品一覧 (list/[section] my-listings) で active 以外を区別する用途。 */
+  statusBadge?: string | null
+  /** 左上「自分の出品」バッジを抑制する。自分の出品だけを並べる一覧で情報量ゼロのため。 */
+  hideOwnBadge?: boolean
 }
 
 export function FeedGridCard({
@@ -31,6 +36,8 @@ export function FeedGridCard({
   isOwn = false,
   isLiked = false,
   onToggleLike,
+  statusBadge = null,
+  hideOwnBadge = false,
 }: FeedGridCardProps) {
   const handlePress = () => {
     router.push({ pathname: '/listing/[id]', params: { id: card.id } })
@@ -58,9 +65,16 @@ export function FeedGridCard({
           </View>
         )}
 
-        {isOwn && (
+        {isOwn && !hideOwnBadge && (
           <View style={styles.ownBadge}>
             <Text style={styles.ownBadgeText}>自分の出品</Text>
+          </View>
+        )}
+        {statusBadge != null && (
+          <View style={styles.statusBadge}>
+            <Text style={styles.statusBadgeText} numberOfLines={1}>
+              {statusBadge}
+            </Text>
           </View>
         )}
         {!isOwn && onToggleLike != null && (
@@ -130,6 +144,21 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: fontWeight.bold,
     color: colors.textInverse,
+  },
+  // 右上の状態ラベル (出品停止中 / 取引中)。暗地チップで写真上でも可読。
+  statusBadge: {
+    position: 'absolute',
+    top: spacing.xs,
+    right: spacing.xs,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: radius.full,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: fontWeight.bold,
+    color: '#FFFFFF',
   },
   likeOverlay: {
     position: 'absolute',

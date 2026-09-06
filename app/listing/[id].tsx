@@ -24,6 +24,7 @@ import {
 import {
   getCharacterById,
   getItemTypeById,
+  getMemberLabel,
   getWorkById,
 } from '@/lib/master'
 import { Card, CardWantedLinkWithWantedCard, Profile, UserTrust, WantedCard, WantMatchScore } from '@/lib/types'
@@ -348,9 +349,22 @@ export default function ListingDetailScreen() {
   const isNonActive = card.status !== 'active'
   const hasDescription = card.description != null && card.description.trim() !== ''
 
-  const memberSeries = [card.member_name, card.series]
-    .filter((v): v is string => v != null && v !== '')
-    .join(' · ')
+  // 譲の属性リスト用に master 解決 (求タブ :902/919/936 と同じ getXById 経路)。
+  //   slug は出さず、解決できないものは '' → filter で除去。複数は読点「、」で 1 行に連結。
+  const attrGroup =
+    card.work_id != null ? getWorkById(card.work_id)?.display_name_ja ?? '' : ''
+  const attrMembers = (card.characters ?? [])
+    .map((id) => getCharacterById(id)?.display_name_ja ?? '')
+    .filter((s) => s !== '')
+    .join('、')
+  const attrTypes = (card.item_types ?? [])
+    .map((id) => getItemTypeById(id)?.display_name_ja ?? '')
+    .filter((s) => s !== '')
+    .join('、')
+  const attrSeries =
+    card.series != null && card.series.trim() !== '' ? card.series.trim() : ''
+  // メンバー/キャラの表記はカテゴリ由来 (出品フォームと同じ単一情報源 getMemberLabel)。
+  const attrMemberLabel = getMemberLabel(card.category)
 
   const pushReason = getPushReason(card, owner, bestMatchScore)
 
@@ -744,8 +758,33 @@ export default function ListingDetailScreen() {
                 <Text style={styles.groupName}>{card.group_name}</Text>
               )}
               <Text style={styles.cardName}>{card.name}</Text>
-              {memberSeries !== '' && (
-                <Text style={styles.memberSeries}>{memberSeries}</Text>
+
+              {/* タイトル直下: 薄い区切り線 + 属性リスト (グループ / メンバー・キャラ / 種別 / シリーズ)。
+                  値が空の行は出さない。複数は読点「、」で 1 行に (メンバーを縦積みにしない)。 */}
+              <View style={styles.attrDivider} />
+              {attrGroup !== '' && (
+                <View style={styles.attrRow}>
+                  <Text style={styles.attrLabel}>グループ：</Text>
+                  <Text style={styles.attrValue}>{attrGroup}</Text>
+                </View>
+              )}
+              {attrMembers !== '' && (
+                <View style={styles.attrRow}>
+                  <Text style={styles.attrLabel}>{attrMemberLabel}：</Text>
+                  <Text style={styles.attrValue}>{attrMembers}</Text>
+                </View>
+              )}
+              {attrTypes !== '' && (
+                <View style={styles.attrRow}>
+                  <Text style={styles.attrLabel}>種別：</Text>
+                  <Text style={styles.attrValue}>{attrTypes}</Text>
+                </View>
+              )}
+              {attrSeries !== '' && (
+                <View style={styles.attrRow}>
+                  <Text style={styles.attrLabel}>シリーズ：</Text>
+                  <Text style={styles.attrValue}>{attrSeries}</Text>
+                </View>
               )}
 
               {isLiked && !isOwn && (
@@ -1276,10 +1315,28 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
     marginTop: spacing.xs,
   },
-  memberSeries: {
+  // タイトル直下の属性リスト (グループ/メンバー・キャラ/種別/シリーズ)。
+  attrDivider: {
+    height: 1,
+    backgroundColor: colors.borderLight,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  attrRow: {
+    flexDirection: 'row',
+    paddingVertical: 3,
+    gap: spacing.xs,
+  },
+  attrLabel: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
-    marginTop: spacing.xs,
+    fontWeight: fontWeight.semibold,
+    width: 68,
+  },
+  attrValue: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
   },
 
   // ── section label ─────────────────────────

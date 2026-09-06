@@ -75,6 +75,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -89,6 +90,7 @@ type Action =
   | { type: 'SET_WORK'; value: WorkSectionValue }
   | { type: 'SET_CHARACTERS'; value: CharactersSectionValue }
   | { type: 'SET_ITEMS'; value: ItemsSectionValue }
+  | { type: 'SET_SERIES'; value: string }
   | { type: 'SET_CONDITION'; value: ConditionSectionValue }
   | { type: 'SET_WANT'; value: WantMasterValue }
 
@@ -104,6 +106,8 @@ function reducer(state: ListingFormState, action: Action): ListingFormState {
       return { ...state, characters: action.value }
     case 'SET_ITEMS':
       return { ...state, itemTypes: action.value }
+    case 'SET_SERIES':
+      return { ...state, series: action.value }
     case 'SET_CONDITION':
       return { ...state, condition: action.value }
     case 'SET_WANT':
@@ -363,10 +367,11 @@ export default function ListingNewSinglePageScreen() {
         want_works: state.want.works,
         want_characters: state.want.characters,
         want_item_types: state.want.itemTypes,
+        // シリーズ・公演名 (任意・自由入力)。空文字/空白のみは null に正規化。
+        series: state.series.trim() === '' ? null : state.series.trim(),
         // legacy K-POP 列
         group_name: null,
         member_name: null,
-        series: null,
       }
 
       // 求は cards.want_* に含めて 1 回の INSERT で完結
@@ -474,6 +479,12 @@ export default function ListingNewSinglePageScreen() {
             <Text style={styles.confirmLabel}>グッズ種類</Text>
             <Text style={styles.confirmValue}>{typeText !== '' ? typeText : '—'}</Text>
           </View>
+          {state.series.trim() !== '' && (
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>シリーズ・公演名</Text>
+              <Text style={styles.confirmValue}>{state.series.trim()}</Text>
+            </View>
+          )}
           {noteText !== '' && (
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>補足</Text>
@@ -591,9 +602,27 @@ export default function ListingNewSinglePageScreen() {
 
           <View style={styles.sectionDivider} />
 
-          {/* ⑤ 求 (求の詳細より前。ConditionSection の「前のセクションで選んだ求に補足」と整合) */}
+          {/* ⑤ シリーズ・公演名 (任意・譲側情報。種別の直後・求の前にまとめる) */}
           <SectionHeader
             index={5}
+            title="シリーズ・公演名"
+            done={state.series.trim() !== ''}
+            optional
+          />
+          <TextInput
+            style={styles.seriesInput}
+            placeholder="例：CHOOM TOUR、2026 TOUR ○○、一番くじ○○"
+            value={state.series}
+            onChangeText={(v) => dispatch({ type: 'SET_SERIES', value: v })}
+            maxLength={100}
+            autoCorrect={false}
+          />
+
+          <View style={styles.sectionDivider} />
+
+          {/* ⑥ 求 (求の詳細より前。ConditionSection の「前のセクションで選んだ求に補足」と整合) */}
+          <SectionHeader
+            index={6}
             title="求"
             done={isWantDone(state.want)}
           />
@@ -607,9 +636,9 @@ export default function ListingNewSinglePageScreen() {
 
           <View style={styles.sectionDivider} />
 
-          {/* ⑥ 求の詳細 (最後・任意)。調整金 UI はフラグ死蔵のため見出しから「・調整金」を外す */}
+          {/* ⑦ 求の詳細 (最後・任意)。調整金 UI はフラグ死蔵のため見出しから「・調整金」を外す */}
           <SectionHeader
-            index={6}
+            index={7}
             title="求の詳細"
             done={isConditionDone()}
             optional
@@ -735,6 +764,17 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.borderLight,
     marginVertical: spacing.xl,
+  },
+  // シリーズ・公演名 (任意) の自由入力欄。
+  seriesInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+    backgroundColor: colors.backgroundCard,
   },
   submitWrap: {
     marginTop: spacing.xl,

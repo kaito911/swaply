@@ -131,6 +131,8 @@ export type ListingFormState = {
   work: WorkSectionValue
   characters: CharactersSectionValue
   itemTypes: ItemsSectionValue
+  /** シリーズ・公演名 (任意・自由入力)。cards.series に保存。空文字は保存時に null 正規化。 */
+  series: string
   want: WantMasterValue
   condition: ConditionSectionValue
 }
@@ -141,6 +143,7 @@ export const INITIAL_LISTING_FORM_STATE: ListingFormState = {
   work: null,
   characters: [],
   itemTypes: [],
+  series: '',
   want: { works: [], characters: [], itemTypes: [], sameSeriesAsOffer: false },
   condition: {
     want_description: '',

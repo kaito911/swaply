@@ -231,6 +231,9 @@ export default function ListingNewBulkScreen() {
     itemTypes: [],
     sameSeriesAsOffer: false,
   })
+  // シリーズ・公演名: N 商品共通の自由入力 (1 枚 = 同じ弾/ツアー前提)。bulkWant と同じ「共通値」
+  //   パターンで、全 cards の series に同一保存 (per-point 上書きなし)。空文字は保存時 null 正規化。
+  const [bulkSeries, setBulkSeries] = useState('')
   // タップ属性入力を完了したか (作品 → タップ → 求 → 確認 の進行管理、PR-B)。
   const [attrsDone, setAttrsDone] = useState(false)
   const [points, setPoints] = useState<TapPoint[]>([])
@@ -438,6 +441,8 @@ export default function ListingNewBulkScreen() {
       //   bbox_x/y = 元画像基準のタップ割合 (contain 変換済)。bbox_w/h・image_url_cropped は NULL。
       //   求は per-card override (pt.want) があればそれを、無ければ共通 bulkWant を解決して
       //   各 card の want_* に保存 (PR-1b-1 / 1b-2)。
+      // シリーズ・公演名 (共通)。空文字/空白のみは null に正規化し、全 row に同一代入。
+      const bulkSeriesNorm = bulkSeries.trim() === '' ? null : bulkSeries.trim()
       const rows = points.map((pt) => {
         // 同シリーズは常に work.workId(共通work) と pt.itemTypes(そのcard譲種別) を使う。
         const w = pt.want ?? bulkWant
@@ -470,7 +475,7 @@ export default function ListingNewBulkScreen() {
         want_item_types: w.sameSeriesAsOffer ? pt.itemTypes : w.itemTypes,
         group_name: null,
         member_name: null,
-        series: null,
+        series: bulkSeriesNorm,
         bbox_x: pt.xPct,
         bbox_y: pt.yPct,
         bbox_w: null,
@@ -644,6 +649,19 @@ export default function ListingNewBulkScreen() {
             この写真から出品するすべてのグッズに共通の求です。
             「同シリーズ」を選ぶと、各グッズと同じ作品・種別で他メンバーを集められます。
           </Text>
+          {/* シリーズ・公演名 (任意・譲側の共通情報)。求の直上に置き single-page の
+              「種別→シリーズ→求」順と揃える。全 cards に同一値を保存 (共通値パターン)。 */}
+          <View style={styles.seriesBlock}>
+            <Text style={styles.seriesLabel}>シリーズ・公演名（任意）</Text>
+            <TextInput
+              style={styles.seriesInput}
+              placeholder="例：CHOOM TOUR、2026 TOUR ○○、一番くじ○○"
+              value={bulkSeries}
+              onChangeText={setBulkSeries}
+              maxLength={100}
+              autoCorrect={false}
+            />
+          </View>
           <View style={{ marginTop: spacing.lg }}>
             <WantMasterSection
               value={bulkWant}
@@ -1150,6 +1168,26 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 19,
     marginBottom: spacing.sm,
+  },
+  // シリーズ・公演名 (任意・STEP3.5 の求の直上)。
+  seriesBlock: {
+    marginTop: spacing.lg,
+    gap: 4,
+  },
+  seriesLabel: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.textSecondary,
+  },
+  seriesInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+    backgroundColor: colors.backgroundCard,
   },
   wantIntro: {
     paddingHorizontal: spacing.base,

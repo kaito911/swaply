@@ -64,7 +64,9 @@ const TAG = '[detect-bbox]'
 // ★Vision API のエンドポイントはコードに固定。env で上書きさせない (監査:中)。
 //   env に置くのは API キーのみ。設定ミス/経路侵害で任意 URL に資格情報を送らせない。
 const VISION_API_URL = 'https://api.anthropic.com/v1/messages'
-const VISION_MODEL = 'claude-opus-4-8'
+// ★位置特定 (指定点の外接矩形) は高度な推論を要さないため Sonnet で十分。
+//   バージョン接尾辞は付けない。精度が出なければ 'claude-opus-5' 等に変更する。
+const VISION_MODEL = 'claude-sonnet-5'
 const ANTHROPIC_VERSION = '2023-06-01'
 
 // single: 1 リクエストで受け付ける cards 上限 (一括出品の上限 12 点に合わせる)。
@@ -115,7 +117,15 @@ type BoxPx = { left: number; top: number; width: number; height: number }
 // 割合に変換後の矩形
 type BoxFrac = { left: number; top: number; w: number; h: number }
 
-type ProcessResult = { updated: number; skipped: number }
+// ★Anthropic Messages API が受け付ける画像 media_type (= 対応形式)。HEIC 等は対象外。
+type AllowedMedia = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+
+// skippedUnsupported = 非対応 Content-Type (HEIC 等) でスキップした件数 (skipped の内数)。
+type ProcessResult = {
+  updated: number
+  skipped: number
+  skippedUnsupported: number
+}
 
 // ─────────────────────────────────────────
 // entrypoint
@@ -258,18 +268,25 @@ async function handleSingle(
   const groups = groupByImage(owned)
   let updated = 0
   let skipped = skippedNotOwnedOrDone
+  let skippedUnsupported = 0
   for (const [imageUrl, points] of groups) {
     const res = await processImage(admin, imageUrl, points)
     updated += res.updated
     skipped += res.skipped
+    skippedUnsupported += res.skippedUnsupported
   }
 
   console.log(
     TAG,
     'single summary',
-    JSON.stringify({ requested: ids.length, updated, skipped }),
+    JSON.stringify({ requested: ids.length, updated, skipped, skippedUnsupported }),
   )
-  return jsonResponse(200, { ok: true, updated, skipped })
+  return jsonResponse(200, {
+    ok: true,
+    updated,
+    skipped,
+    skipped_unsupported: skippedUnsupported,
+  })
 }
 
 // ─────────────────────────────────────────
@@ -332,11 +349,13 @@ async function handleBackfill(
   // 4. 画像単位で逐次処理 (画像 9 枚規模なら逐次で十分)。
   let updated = 0
   let skipped = 0
+  let skippedUnsupported = 0
   let processedImages = 0
   for (const [imageUrl, points] of groups) {
     const res = await processImage(admin, imageUrl, points)
     updated += res.updated
     skipped += res.skipped
+    skippedUnsupported += res.skippedUnsupported
     processedImages += 1
   }
 
@@ -344,13 +363,21 @@ async function handleBackfill(
   console.log(
     TAG,
     'backfill summary',
-    JSON.stringify({ totalImages, processedImages, updated, skipped, remaining }),
+    JSON.stringify({
+      totalImages,
+      processedImages,
+      updated,
+      skipped,
+      skippedUnsupported,
+      remaining,
+    }),
   )
   return jsonResponse(200, {
     ok: true,
     processed_images: processedImages,
     updated,
     skipped,
+    skipped_unsupported: skippedUnsupported,
     remaining,
     done: remaining === 0,
   })
@@ -372,11 +399,13 @@ async function processImage(
   // a. ★SSRF 検証: 自プロジェクトドメイン + /card-images/ パスのみ許可。
   if (!isAllowedImageUrl(imageUrl)) {
     console.warn(TAG, 'skip: image_url not allowed', shortPath)
-    return { updated: 0, skipped: points.length }
+    return { updated: 0, skipped: points.length, skippedUnsupported: 0 }
   }
 
-  // b. 画像取得 (タイムアウト付き)
+  // b. 画像取得 (タイムアウト付き) + ★対応形式判定は fetch 時の Content-Type で行う
+  //    (拡張子は信用しない)。JPEG/PNG/GIF/WebP のみ対象。HEIC 等は media=null。
   let bytes: Uint8Array
+  let media: AllowedMedia | null
   try {
     const resp = await fetchWithTimeout(
       imageUrl,
@@ -385,20 +414,32 @@ async function processImage(
     )
     if (!resp.ok) {
       console.warn(TAG, 'skip: image fetch non-OK', resp.status, shortPath)
-      return { updated: 0, skipped: points.length }
+      return { updated: 0, skipped: points.length, skippedUnsupported: 0 }
     }
+    media = mediaTypeFromContentType(resp.headers.get('content-type'))
     bytes = new Uint8Array(await resp.arrayBuffer())
   } catch (err) {
     // AbortError (タイムアウト) 含む → 失敗扱い、据え置き。
     console.warn(TAG, 'skip: image fetch threw/timeout', shortPath, String(err))
-    return { updated: 0, skipped: points.length }
+    return { updated: 0, skipped: points.length, skippedUnsupported: 0 }
   }
 
-  // c. 元画像 px + EXIF orientation を画像バイトから取得 (③)。
-  const dims = parseJpeg(bytes)
+  // ★非対応形式 (HEIC 等) は処理せずスキップ (エラーにせず 4 列 null 据え置き)。
+  //   HEIC 対応 (アップロード時 JPEG 変換) は別課題。この Function では扱わない。
+  if (media == null) {
+    console.warn(TAG, 'skip: unsupported content-type', shortPath)
+    return {
+      updated: 0,
+      skipped: points.length,
+      skippedUnsupported: points.length,
+    }
+  }
+
+  // c. 元画像 px を画像バイトから取得 (③)。EXIF orientation は JPEG のみ。
+  const dims = readImageDimensions(bytes, media)
   if (dims == null || dims.displayW <= 0 || dims.displayH <= 0) {
-    console.warn(TAG, 'skip: cannot read image dimensions', shortPath)
-    return { updated: 0, skipped: points.length }
+    console.warn(TAG, 'skip: cannot read image dimensions', shortPath, media)
+    return { updated: 0, skipped: points.length, skippedUnsupported: 0 }
   }
   const { displayW: W, displayH: H, rawW, rawH, orientation } = dims
   // ★段階2 の EXIF 検証を支援するログ (見た目と食い違わないか確認できるよう必ず残す)。
@@ -418,10 +459,10 @@ async function processImage(
   // e. Vision 呼び出し (タイムアウト付き)。失敗時は全点据え置き。
   let boxesById: Map<string, BoxPx | null>
   try {
-    boxesById = await callVision(bytes, W, H, promptPoints)
+    boxesById = await callVision(bytes, W, H, promptPoints, media)
   } catch (err) {
     console.warn(TAG, 'skip: vision call failed/timeout', shortPath, String(err))
-    return { updated: 0, skipped: points.length }
+    return { updated: 0, skipped: points.length, skippedUnsupported: 0 }
   }
 
   // f/g/h. 点ごとに 復路変換 → 検証 → UPDATE。
@@ -462,7 +503,7 @@ async function processImage(
     else skipped += 1 // 競合等で 0 行 → 据え置き扱い
   }
 
-  return { updated, skipped }
+  return { updated, skipped, skippedUnsupported: 0 }
 }
 
 // ─────────────────────────────────────────
@@ -475,6 +516,7 @@ async function callVision(
   W: number,
   H: number,
   points: { id: string; px_x: number; px_y: number }[],
+  mediaType: AllowedMedia,
 ): Promise<Map<string, BoxPx | null>> {
   if (VISION_API_KEY == null || VISION_API_KEY === '') {
     throw new Error('VISION_API_KEY not set')
@@ -508,7 +550,8 @@ async function callVision(
         content: [
           {
             type: 'image',
-            source: { type: 'base64', media_type: 'image/jpeg', data: b64 },
+            // ★source.media_type は fetch 時の Content-Type から決定 (拡張子ではない)。
+            source: { type: 'base64', media_type: mediaType, data: b64 },
           },
           { type: 'text', text: prompt },
         ],
@@ -634,6 +677,122 @@ function validateBox(f: BoxFrac, bbox_x: number, bbox_y: number): boolean {
   // ⑤ 全体被覆でない
   if (f.w * f.h >= AREA_MAX) return false
   return true
+}
+
+// ─────────────────────────────────────────
+// 対応形式判定・寸法取得 (依存追加なし)
+// ─────────────────────────────────────────
+
+// ★fetch 時の Content-Type → Anthropic media_type。対応外 (HEIC 等) は null。
+//   ★判定は拡張子ではなく Content-Type で行う (拡張子は信用しない)。
+function mediaTypeFromContentType(ct: string | null): AllowedMedia | null {
+  if (ct == null) return null
+  const base = ct.split(';')[0].trim().toLowerCase()
+  switch (base) {
+    case 'image/jpeg':
+    case 'image/jpg':
+      return 'image/jpeg'
+    case 'image/png':
+      return 'image/png'
+    case 'image/gif':
+      return 'image/gif'
+    case 'image/webp':
+      return 'image/webp'
+    default:
+      return null // image/heic, image/heif その他は対象外
+  }
+}
+
+// media 種別に応じて寸法を取得。EXIF orientation は JPEG のみ扱う (他は 1 = display=raw)。
+function readImageDimensions(
+  bytes: Uint8Array,
+  media: AllowedMedia,
+): JpegDims | null {
+  if (media === 'image/jpeg') return parseJpeg(bytes)
+
+  let wh: { w: number; h: number } | null = null
+  if (media === 'image/png') wh = parsePng(bytes)
+  else if (media === 'image/gif') wh = parseGif(bytes)
+  else if (media === 'image/webp') wh = parseWebp(bytes)
+
+  if (wh == null || wh.w <= 0 || wh.h <= 0) return null
+  return {
+    rawW: wh.w,
+    rawH: wh.h,
+    orientation: 1,
+    displayW: wh.w,
+    displayH: wh.h,
+  }
+}
+
+// PNG: シグネチャ(8) + IHDR(len4+type4) → width(4 BE)@16, height(4 BE)@20。
+function parsePng(b: Uint8Array): { w: number; h: number } | null {
+  try {
+    if (b.length < 24) return null
+    if (b[0] !== 0x89 || b[1] !== 0x50 || b[2] !== 0x4e || b[3] !== 0x47) {
+      return null
+    }
+    const w = ((b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19]) >>> 0
+    const h = ((b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23]) >>> 0
+    return { w, h }
+  } catch {
+    return null
+  }
+}
+
+// GIF: 'GIF87a'/'GIF89a' + logical screen descriptor width(2 LE)@6, height(2 LE)@8。
+function parseGif(b: Uint8Array): { w: number; h: number } | null {
+  try {
+    if (b.length < 10) return null
+    if (b[0] !== 0x47 || b[1] !== 0x49 || b[2] !== 0x46) return null // 'GIF'
+    const w = b[6] | (b[7] << 8)
+    const h = b[8] | (b[9] << 8)
+    return { w, h }
+  } catch {
+    return null
+  }
+}
+
+// WebP (RIFF....WEBP): VP8 (lossy) / VP8L (lossless) / VP8X (extended) の 3 形式。
+function parseWebp(b: Uint8Array): { w: number; h: number } | null {
+  try {
+    if (b.length < 30) return null
+    // 'RIFF' @0, 'WEBP' @8
+    if (
+      b[0] !== 0x52 || b[1] !== 0x49 || b[2] !== 0x46 || b[3] !== 0x46 ||
+      b[8] !== 0x57 || b[9] !== 0x45 || b[10] !== 0x42 || b[11] !== 0x50
+    ) {
+      return null
+    }
+    // chunk fourCC @12
+    const c0 = b[12], c1 = b[13], c2 = b[14], c3 = b[15]
+    const is = (s: string) =>
+      c0 === s.charCodeAt(0) && c1 === s.charCodeAt(1) &&
+      c2 === s.charCodeAt(2) && c3 === s.charCodeAt(3)
+
+    if (is('VP8 ')) {
+      // lossy: key frame の start code 0x9d 0x01 0x2a @23-25、以降 width/height(14bit LE)。
+      const w = ((b[27] << 8) | b[26]) & 0x3fff
+      const h = ((b[29] << 8) | b[28]) & 0x3fff
+      return { w, h }
+    }
+    if (is('VP8L')) {
+      // lossless: signature 0x2f @20、続く 4 バイトに 14bit-1 の width/height。
+      const b1 = b[21], b2 = b[22], b3 = b[23], b4 = b[24]
+      const w = 1 + (((b2 & 0x3f) << 8) | b1)
+      const h = 1 + (((b4 & 0x0f) << 10) | (b3 << 2) | ((b2 & 0xc0) >> 6))
+      return { w, h }
+    }
+    if (is('VP8X')) {
+      // extended: canvas width-1 (3 byte LE) @24、height-1 (3 byte LE) @27。
+      const w = 1 + (b[24] | (b[25] << 8) | (b[26] << 16))
+      const h = 1 + (b[27] | (b[28] << 8) | (b[29] << 16))
+      return { w, h }
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
 // ─────────────────────────────────────────

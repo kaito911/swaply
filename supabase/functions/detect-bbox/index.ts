@@ -402,10 +402,11 @@ async function processImage(
     return { updated: 0, skipped: points.length, skippedUnsupported: 0 }
   }
 
-  // b. 画像取得 (タイムアウト付き) + ★対応形式判定は fetch 時の Content-Type で行う
-  //    (拡張子は信用しない)。JPEG/PNG/GIF/WebP のみ対象。HEIC 等は media=null。
+  // b. 画像取得 (タイムアウト付き)。
+  //    ★画像全体を取得する (Range ヘッダ無しの GET + arrayBuffer())。
+  //      Vision には全体を base64 で渡すため部分取得はしない。
+  //      よってマジックバイト判定 (先頭 12B) / PNG IHDR (先頭 24B) は常に充足する。
   let bytes: Uint8Array
-  let media: AllowedMedia | null
   try {
     const resp = await fetchWithTimeout(
       imageUrl,
@@ -416,7 +417,6 @@ async function processImage(
       console.warn(TAG, 'skip: image fetch non-OK', resp.status, shortPath)
       return { updated: 0, skipped: points.length, skippedUnsupported: 0 }
     }
-    media = mediaTypeFromContentType(resp.headers.get('content-type'))
     bytes = new Uint8Array(await resp.arrayBuffer())
   } catch (err) {
     // AbortError (タイムアウト) 含む → 失敗扱い、据え置き。
@@ -424,10 +424,17 @@ async function processImage(
     return { updated: 0, skipped: points.length, skippedUnsupported: 0 }
   }
 
-  // ★非対応形式 (HEIC 等) は処理せずスキップ (エラーにせず 4 列 null 据え置き)。
+  // ★形式判定は Content-Type でも拡張子でもなく「実体のマジックバイト」で行う。
+  //   本番の Supabase Storage は拡張子に関係なく Content-Type: image/jpeg を返すため
+  //   Content-Type 判定は機能しない (PNG/HEIC も image/jpeg と申告される)。
+  const format = detectImageFormat(bytes)
+  const media = formatToMedia(format)
+
+  // ★非対応形式 (HEIC / GIF/WebP 未対応時 / unknown) は処理せずスキップ。
+  //   エラーにせず 4 列 null 据え置き。件数を skippedUnsupported に加算し可視化する。
   //   HEIC 対応 (アップロード時 JPEG 変換) は別課題。この Function では扱わない。
   if (media == null) {
-    console.warn(TAG, 'skip: unsupported content-type', shortPath)
+    console.warn(TAG, `skip: unsupported format (${format})`, shortPath)
     return {
       updated: 0,
       skipped: points.length,
@@ -435,10 +442,11 @@ async function processImage(
     }
   }
 
-  // c. 元画像 px を画像バイトから取得 (③)。EXIF orientation は JPEG のみ。
+  // c. 元画像 px を画像バイトから取得 (③)。EXIF orientation は JPEG のみ (他は 1)。
   const dims = readImageDimensions(bytes, media)
   if (dims == null || dims.displayW <= 0 || dims.displayH <= 0) {
-    console.warn(TAG, 'skip: cannot read image dimensions', shortPath, media)
+    // 形式は判定できたがヘッダが壊れている等 (非対応とは区別する)。
+    console.warn(TAG, `skip: cannot read dimensions (${format})`, shortPath)
     return { updated: 0, skipped: points.length, skippedUnsupported: 0 }
   }
   const { displayW: W, displayH: H, rawW, rawH, orientation } = dims
@@ -683,23 +691,60 @@ function validateBox(f: BoxFrac, bbox_x: number, bbox_y: number): boolean {
 // 対応形式判定・寸法取得 (依存追加なし)
 // ─────────────────────────────────────────
 
-// ★fetch 時の Content-Type → Anthropic media_type。対応外 (HEIC 等) は null。
-//   ★判定は拡張子ではなく Content-Type で行う (拡張子は信用しない)。
-function mediaTypeFromContentType(ct: string | null): AllowedMedia | null {
-  if (ct == null) return null
-  const base = ct.split(';')[0].trim().toLowerCase()
-  switch (base) {
-    case 'image/jpeg':
-    case 'image/jpg':
+// 実体形式 (マジックバイトで判定した結果)。
+type ImageFormat = 'jpeg' | 'png' | 'gif' | 'webp' | 'heic' | 'unknown'
+
+// ★ファイル先頭のマジックバイトで実体形式を判定する (Content-Type/拡張子は信用しない)。
+//   本番 Storage は全ファイルに Content-Type: image/jpeg を返すため Content-Type 判定は不可。
+//   マジックバイト定義:
+//     JPEG : FF D8 FF                                    (b[0..2])
+//     PNG  : 89 50 4E 47 0D 0A 1A 0A                      (b[0..7])
+//     GIF  : 47 49 46 38  ('GIF8'、87a/89a 共通)          (b[0..3])
+//     WebP : 52 49 46 46 ('RIFF') … 57 45 42 50 ('WEBP')  (b[0..3] & b[8..11])
+//     HEIC : b[4..7] = 66 74 79 70 ('ftyp')               (ISO-BMFF、heic/heix/hevc/mif1 等を包含)
+//   判定順は個別シグネチャを先に、ftyp (HEIC 系) を後に置く (位置が異なり衝突しない)。
+function detectImageFormat(b: Uint8Array): ImageFormat {
+  if (b.length < 12) return 'unknown'
+  // JPEG: FF D8 FF
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpeg'
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 &&
+    b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a
+  ) {
+    return 'png'
+  }
+  // GIF: 'GIF8'
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) {
+    return 'gif'
+  }
+  // WebP: 'RIFF' .... 'WEBP'
+  if (
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50
+  ) {
+    return 'webp'
+  }
+  // HEIC/HEIF 系: b[4..7] = 'ftyp' (ISO base media file format)。
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+    return 'heic'
+  }
+  return 'unknown'
+}
+
+// 実体形式 → Anthropic media_type。対応外 (heic / unknown) は null (=スキップ)。
+function formatToMedia(format: ImageFormat): AllowedMedia | null {
+  switch (format) {
+    case 'jpeg':
       return 'image/jpeg'
-    case 'image/png':
+    case 'png':
       return 'image/png'
-    case 'image/gif':
+    case 'gif':
       return 'image/gif'
-    case 'image/webp':
+    case 'webp':
       return 'image/webp'
     default:
-      return null // image/heic, image/heif その他は対象外
+      return null // heic / unknown
   }
 }
 

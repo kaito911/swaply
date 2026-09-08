@@ -35,6 +35,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image as RNImage,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -64,6 +65,41 @@ function getDiffInfo(card: Card): DiffInfo {
   }
   return { text: '調整金相談可', bgColor: colors.tagInfoBg, textColor: colors.tagInfoText }
 }
+
+// ─────────────────────────────────────────
+// bbox 位置マーカー用ヘルパー
+//
+// ★出品詳細の譲写真は contentFit="contain" 固定 (styles.image)。
+//   cards.bbox_x / bbox_y は「元画像基準 (レターボックス除外) の 0〜1 割合」で、
+//   一括出品のタップ時に app/listing/new/bulk.tsx が contain 変換して保存している。
+//   したがって表示側でも同じ contain 矩形を復元し、その矩形内の割合として配置する必要がある。
+//   単純に「割合 × View 全体」で置くと、元画像が正方形でない限りレターボックス分ズレる。
+//   ※ contentFit を将来 cover 等に変えるとこの計算は成立しなくなる (contain 前提)。
+//
+// computeContainRect は bulk.tsx の同名関数と同一ロジック。スコープを本ファイル 1 つに
+// 限定するため共有化はせず意図的にインラインで複製する (共有化は別 PR)。
+type BboxImageRect = { x: number; y: number; w: number; h: number }
+
+function computeContainRect(
+  containerW: number,
+  containerH: number,
+  imgW: number,
+  imgH: number,
+): BboxImageRect {
+  if (containerW <= 0 || containerH <= 0) return { x: 0, y: 0, w: 0, h: 0 }
+  if (imgW <= 0 || imgH <= 0) {
+    return { x: 0, y: 0, w: containerW, h: containerH }
+  }
+  const scale = Math.min(containerW / imgW, containerH / imgH)
+  const w = imgW * scale
+  const h = imgH * scale
+  const x = (containerW - w) / 2
+  const y = (containerH - h) / 2
+  return { x, y, w, h }
+}
+
+/** 位置マーカーの直径 (px)。表示専用・タップ不可。 */
+const BBOX_MARKER_SIZE = 24
 
 function getCtaConfig(
   card: Card,
@@ -160,6 +196,12 @@ export default function ListingDetailScreen() {
   const [isLiked, setIsLiked] = useState(false)
   const [bestMatchScore, setBestMatchScore] = useState<WantMatchScore>('none')
   const [imageSide, setImageSide] = useState<'front' | 'back'>('front')
+  // bbox 位置マーカー用: 写真コンテナの実寸 (onLayout) と 表面元画像の naturalサイズ。
+  // どちらも取得できるまでマーカーは非表示 (間違った位置に出すより遅れて出す方が良い)。
+  const [imageContainerSize, setImageContainerSize] = useState<{ w: number; h: number } | null>(
+    null,
+  )
+  const [frontNaturalSize, setFrontNaturalSize] = useState<{ w: number; h: number } | null>(null)
   // 譲 / 求 タブ: 初期表示は譲 (まず相手が何を出しているかを見せる)
   const [activeTab, setActiveTab] = useState<ListingDetailTab>('offer')
   // Phase 0 PR-C: 出品者のブロック状態 (画面 mount 時に取得、トグル時に optimistic 更新)
@@ -265,6 +307,30 @@ export default function ListingDetailScreen() {
       setImageSide('front')
     }
   }, [card?.image_back_url])
+
+  // bbox マーカー用: 表面元画像の naturalサイズを取得する。
+  //   1) 表示中 Image の onLoad (expo-image) を第一手段とする (下の JSX 参照)。
+  //   2) フォールバックとして RN Image.getSize を試み、onLoad が未取得のときだけ採用する
+  //      (setState の prev ?? で onLoad 値を優先)。表面 URL が変わったら一旦リセット。
+  useEffect(() => {
+    const frontUri = card?.image_url
+    setFrontNaturalSize(null)
+    if (frontUri == null) return
+    let cancelled = false
+    RNImage.getSize(
+      frontUri,
+      (w, h) => {
+        if (cancelled) return
+        if (w > 0 && h > 0) setFrontNaturalSize((prev) => prev ?? { w, h })
+      },
+      () => {
+        // 取得失敗時は onLoad 側の取得に委ねる (何もしない)
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [card?.image_url])
 
   // 出品者の Trust を取得 (get_user_trust・失敗時は null=全項目「—」表示)。
   useEffect(() => {
@@ -577,6 +643,28 @@ export default function ListingDetailScreen() {
       ? card.image_back_url
       : card.image_url
 
+  // bbox 位置マーカー: bbox_x/y が両方あり (=一括出品) かつ 表面表示中 かつ
+  //   コンテナ実寸・元画像サイズが揃ったときのみ表示。裏面には bbox がないため出さない。
+  const showBboxMarker =
+    imageSide === 'front' &&
+    card.bbox_x != null &&
+    card.bbox_y != null &&
+    imageContainerSize != null &&
+    frontNaturalSize != null
+  let bboxMarkerLeft = 0
+  let bboxMarkerTop = 0
+  if (showBboxMarker && imageContainerSize != null && frontNaturalSize != null) {
+    const rect = computeContainRect(
+      imageContainerSize.w,
+      imageContainerSize.h,
+      frontNaturalSize.w,
+      frontNaturalSize.h,
+    )
+    // 中心をタップ座標に合わせる (bulk.tsx のバッジ配置式と同一)。
+    bboxMarkerLeft = rect.x + (card.bbox_x ?? 0) * rect.w - BBOX_MARKER_SIZE / 2
+    bboxMarkerTop = rect.y + (card.bbox_y ?? 0) * rect.h - BBOX_MARKER_SIZE / 2
+  }
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       {/* NavBar */}
@@ -657,7 +745,13 @@ export default function ListingDetailScreen() {
           <>
             {/* 出品画像 + overlay (差額 / Like / 表裏切替)
                 Trust 表示は下部「出品者 / Trust」共通エリアに集約済 — 画像 overlay には載せない */}
-            <View style={styles.imageWrap}>
+            <View
+              style={styles.imageWrap}
+              onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout
+                setImageContainerSize({ w: width, h: height })
+              }}
+            >
               {displayImageUrl != null ? (
                 <Image
                   source={{ uri: displayImageUrl }}
@@ -665,12 +759,33 @@ export default function ListingDetailScreen() {
                   contentFit="contain"
                   transition={200}
                   cachePolicy="memory-disk"
+                  onLoad={(e) => {
+                    // 表面表示中のみ元画像サイズを採用 (裏面には bbox が無いため)。
+                    if (imageSide !== 'front') return
+                    const w = e?.source?.width
+                    const h = e?.source?.height
+                    if (typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0) {
+                      setFrontNaturalSize({ w, h })
+                    }
+                  }}
                 />
               ) : (
                 <View style={[styles.image, styles.imageFallback]}>
                   <Ionicons name="image-outline" size={40} color={colors.border} />
                   <Text style={styles.imageFallbackText}>写真未登録</Text>
                 </View>
+              )}
+
+              {/* bbox 位置マーカー: 一括出品でカード位置が保存されている出品のみ、
+                  表面写真上の該当位置に円マーカーを表示 (表示専用・タップ不可)。 */}
+              {showBboxMarker && (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.bboxMarker,
+                    { left: bboxMarkerLeft, top: bboxMarkerTop },
+                  ]}
+                />
               )}
 
               {/* 表/裏切替: 裏面ありのときのみ */}
@@ -1227,6 +1342,16 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  // bbox 位置マーカー: 円形・白縁取り＋濃い塗り (colors.primary)。写真上のカード位置を指す。
+  bboxMarker: {
+    position: 'absolute',
+    width: BBOX_MARKER_SIZE,
+    height: BBOX_MARKER_SIZE,
+    borderRadius: BBOX_MARKER_SIZE / 2,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.textInverse,
   },
   imageFallback: {
     alignItems: 'center',

@@ -196,7 +196,7 @@ async function pickFromCamera(): Promise<PickedImage | null> {
   if (!(await ensureMediaPermission('camera'))) return null
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes: ['images'],
-    quality: 0.8,
+    quality: 0.9,
   })
   if (result.canceled) return null
   const a = result.assets?.[0]
@@ -209,7 +209,7 @@ async function pickFromLibrary(): Promise<PickedImage | null> {
   if (!(await ensureMediaPermission('library'))) return null
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
-    quality: 0.8,
+    quality: 0.9,
   })
   if (result.canceled) return null
   const a = result.assets?.[0]

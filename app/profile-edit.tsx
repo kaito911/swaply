@@ -101,7 +101,7 @@ export default function ProfileEditScreen() {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.8,
+      quality: 0.9,
     })
     if (result.canceled) return
     const asset = result.assets?.[0]

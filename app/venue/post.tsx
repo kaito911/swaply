@@ -114,7 +114,7 @@ export default function VenuePostScreen() {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [3, 4],
-      quality: 0.8,
+      quality: 0.9,
     })
     if (result.canceled) return
     const asset = result.assets?.[0]

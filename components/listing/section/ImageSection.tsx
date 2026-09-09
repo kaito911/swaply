@@ -45,7 +45,7 @@ async function pickFromCamera(): Promise<string | null> {
     mediaTypes: ['images'],
     // ★E: 自由な縦横比を許可 (切らない)。トレカ/生写真/アクスタ等の縦長を全体保持。
     //   一覧カードは表示側で中央クロップ正方形、詳細は全体表示 (contain) にする。
-    quality: 0.8,
+    quality: 0.9,
   })
   if (result.canceled) return null
   const asset = result.assets?.[0]
@@ -61,7 +61,7 @@ async function pickFromLibrary(): Promise<string | null> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     // ★E: 自由な縦横比を許可 (切らない)。
-    quality: 0.8,
+    quality: 0.9,
   })
   if (result.canceled) return null
   const asset = result.assets?.[0]

@@ -823,7 +823,7 @@ export default function OfferCreateScreen() {
               )}
             </View>
             <Text style={styles.checkText}>
-              同時発送・5日以内の発送・追跡番号必須のルールに同意します
+              双方が同時期に発送する・5日以内の発送・追跡番号の入力に同意します
             </Text>
           </Pressable>
         </View>

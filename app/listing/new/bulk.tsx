@@ -48,6 +48,7 @@ import { supabase, uploadCardImage } from '@/lib/supabase'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
+import { prepareImageForUpload, LISTING_IMAGE_MAX_LONG_EDGE } from '@/lib/imageProcessing'
 import { router } from 'expo-router'
 import React, { useEffect, useRef, useState } from 'react'
 import {
@@ -201,8 +202,14 @@ async function pickFromCamera(): Promise<PickedImage | null> {
   if (result.canceled) return null
   const a = result.assets?.[0]
   if (a?.uri == null) return null
-  const size = await resolveImageSize(a.uri, a.width, a.height)
-  return { uri: a.uri, width: size.width, height: size.height }
+  // ★JPEG統一 + 長辺2000リサイズ。以降のタップUI/保存は「変換後」の uri・寸法のみを使う
+  //   (変換前の寸法が混ざると bbox 割合の contain 計算がズレる)。
+  const prepared = await prepareImageForUpload(
+    { uri: a.uri, width: a.width, height: a.height },
+    { maxLongEdge: LISTING_IMAGE_MAX_LONG_EDGE },
+  )
+  const size = await resolveImageSize(prepared.uri, prepared.width, prepared.height)
+  return { uri: prepared.uri, width: size.width, height: size.height }
 }
 
 async function pickFromLibrary(): Promise<PickedImage | null> {
@@ -214,8 +221,14 @@ async function pickFromLibrary(): Promise<PickedImage | null> {
   if (result.canceled) return null
   const a = result.assets?.[0]
   if (a?.uri == null) return null
-  const size = await resolveImageSize(a.uri, a.width, a.height)
-  return { uri: a.uri, width: size.width, height: size.height }
+  // ★JPEG統一 + 長辺2000リサイズ。以降のタップUI/保存は「変換後」の uri・寸法のみを使う
+  //   (変換前の寸法が混ざると bbox 割合の contain 計算がズレる)。
+  const prepared = await prepareImageForUpload(
+    { uri: a.uri, width: a.width, height: a.height },
+    { maxLongEdge: LISTING_IMAGE_MAX_LONG_EDGE },
+  )
+  const size = await resolveImageSize(prepared.uri, prepared.width, prepared.height)
+  return { uri: prepared.uri, width: size.width, height: size.height }
 }
 
 export default function ListingNewBulkScreen() {

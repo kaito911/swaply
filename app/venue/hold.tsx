@@ -23,6 +23,7 @@ import { useAuthContext } from '@/providers/AuthProvider'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
+import { prepareImageForUpload, LISTING_IMAGE_MAX_LONG_EDGE } from '@/lib/imageProcessing'
 import { router, useLocalSearchParams } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
@@ -108,7 +109,13 @@ export default function VenueHoldScreen() {
     })
     if (result.canceled) return
     const asset = result.assets?.[0]
-    if (asset?.uri != null) setHoldImageUri(asset.uri)
+    if (asset?.uri != null) {
+      const prepared = await prepareImageForUpload(
+        { uri: asset.uri, width: asset.width, height: asset.height },
+        { maxLongEdge: LISTING_IMAGE_MAX_LONG_EDGE },
+      )
+      setHoldImageUri(prepared.uri)
+    }
   }
 
   const handleSubmitHold = async () => {

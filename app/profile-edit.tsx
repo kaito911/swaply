@@ -6,6 +6,7 @@ import { useAuthContext } from '@/providers/AuthProvider'
 import { router } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
 import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
+import { prepareImageForUpload, AVATAR_IMAGE_MAX_LONG_EDGE } from '@/lib/imageProcessing'
 import { readAsStringAsync } from 'expo-file-system/legacy'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
@@ -106,7 +107,11 @@ export default function ProfileEditScreen() {
     if (result.canceled) return
     const asset = result.assets?.[0]
     if (!asset?.uri) return
-    setLocalAvatarUri(asset.uri)
+    const prepared = await prepareImageForUpload(
+      { uri: asset.uri, width: asset.width, height: asset.height },
+      { maxLongEdge: AVATAR_IMAGE_MAX_LONG_EDGE },
+    )
+    setLocalAvatarUri(prepared.uri)
   }
 
   const handleSave = async () => {

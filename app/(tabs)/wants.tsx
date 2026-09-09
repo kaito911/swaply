@@ -25,6 +25,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { Image } from 'expo-image'
 import * as ImagePicker from 'expo-image-picker'
 import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
+import { prepareImageForUpload, LISTING_IMAGE_MAX_LONG_EDGE } from '@/lib/imageProcessing'
 import { useFocusEffect } from 'expo-router'
 import React, { useCallback, useEffect, useState } from 'react'
 import {
@@ -88,7 +89,9 @@ async function pickFromLibrary(): Promise<string | null> {
     Alert.alert('画像エラー', '画像を取得できませんでした。')
     return null
   }
-  return asset.uri
+  return (
+    await prepareImageForUpload(asset, { maxLongEdge: LISTING_IMAGE_MAX_LONG_EDGE })
+  ).uri
 }
 
 async function pickFromCamera(): Promise<string | null> {
@@ -105,7 +108,9 @@ async function pickFromCamera(): Promise<string | null> {
     Alert.alert('画像エラー', '画像を取得できませんでした。')
     return null
   }
-  return asset.uri
+  return (
+    await prepareImageForUpload(asset, { maxLongEdge: LISTING_IMAGE_MAX_LONG_EDGE })
+  ).uri
 }
 
 export default function WantsScreen() {

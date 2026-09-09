@@ -903,7 +903,7 @@ function getFooterNote(
   tradeStatus?: TradeStatus | null
 ): string {
   if (tradeStatus === 'pending') {
-    return '両者の発送登録を待っています（72時間以内）。'
+    return '両者の発送登録を待っています（5日以内）。'
   }
 
   if (tradeStatus === 'in_transit') {

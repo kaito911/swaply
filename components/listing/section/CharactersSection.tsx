@@ -20,6 +20,7 @@ import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import {
   getCharacterById,
   getCharacterSuggestions,
+  normalizeCharacterInput,
   recordListingKeyword,
 } from '@/lib/master'
 import type { MasterCharacter } from '@/lib/types'
@@ -82,15 +83,32 @@ export function CharactersSection({
   }
 
   const handleFreeText = (text: string) => {
-    const trimmed = text.trim()
-    if (trimmed === '') return
-    if (freeTexts.includes(trimmed)) return
-    const next = [...freeTexts, trimmed]
-    setFreeTexts(next)
-    notify(masters, next)
-    if (userId != null) {
-      void recordListingKeyword(userId, trimmed)
+    // ★「,」「、」で分割し、各要素を同一 work 内 master と exact 照合する。
+    //   一致 → master id に変換、非一致 → 自由入力のまま。誤 id 化を防ぐため完全一致のみ。
+    const { masterIds, freeTexts: unmatched } = normalizeCharacterInput(text, workId)
+    if (masterIds.length === 0 && unmatched.length === 0) return
+
+    // 一致した master を追加 (既存選択との重複を除去)。
+    let nextMasters = masters
+    for (const id of masterIds) {
+      if (nextMasters.some((m) => m.id === id)) continue
+      const m = getCharacterById(id)
+      if (m != null) nextMasters = [...nextMasters, m]
     }
+
+    // 非一致は自由入力のまま追加 (重複除去)。master 追加判断のため履歴記録は非一致分のみ。
+    let nextFreeTexts = freeTexts
+    for (const ft of unmatched) {
+      if (nextFreeTexts.includes(ft)) continue
+      nextFreeTexts = [...nextFreeTexts, ft]
+      if (userId != null) {
+        void recordListingKeyword(userId, ft)
+      }
+    }
+
+    if (nextMasters !== masters) setMasters(nextMasters)
+    if (nextFreeTexts !== freeTexts) setFreeTexts(nextFreeTexts)
+    notify(nextMasters, nextFreeTexts)
   }
 
   const removeFreeText = (text: string) => {

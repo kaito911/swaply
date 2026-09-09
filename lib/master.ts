@@ -499,6 +499,75 @@ export function findItemTypeIdsByText(text: string): string[] {
 }
 
 // ─────────────────────────────────────────
+// 出品メンバー欄フリーテキストの master 照合・正規化
+//   CharactersSection.handleFreeText から呼ぶ。自由入力を「,」「、」で分割し、各要素を
+//   同一 work_id 内の master_characters と「正規化 exact」照合 (display_name_ja /
+//   display_name_en / aliases、大小・カタカナ↔ひらがな無視)。
+//   一致 → master id に変換。非一致 → 自由入力のまま残す (master 未整備の作品を出品可能に
+//   保つため。console.warn で運用検出できるようにする)。
+//   ★部分一致 (fuzzy includes) では変換しない。誤 id 化を防ぐため完全一致のみ。
+// ─────────────────────────────────────────
+
+/** 照合用に trim + toLowerCase + カタカナ→ひらがな 正規化した文字列を返す。 */
+function normalizeForMatch(s: string): string {
+  return toHiragana(s.trim().toLowerCase())
+}
+
+/** 同一 work_id 内で name に完全一致する master_character を返す (ja/en/aliases、正規化 exact)。 */
+function resolveCharacterExact(
+  name: string,
+  workId: string,
+): MasterCharacter | null {
+  const target = normalizeForMatch(name)
+  if (target === '') return null
+  const pool = cache.charactersByWork.get(workId) ?? []
+  for (const c of pool) {
+    if (normalizeForMatch(c.display_name_ja) === target) return c
+    if (
+      c.display_name_en != null &&
+      normalizeForMatch(c.display_name_en) === target
+    ) {
+      return c
+    }
+    for (const a of c.aliases) {
+      if (normalizeForMatch(a) === target) return c
+    }
+  }
+  return null
+}
+
+/**
+ * 出品メンバー欄のフリーテキスト 1 入力を正規化する。
+ *   - 「,」「、」で分割 → trim → 空要素除去
+ *   - 各要素を workId 内 master と exact 照合。一致 = master id、非一致 = 生テキスト。
+ *   - 非一致は console.warn (master 未整備を運用で検出できるようにする)。
+ * 返り値の重複除去 (既存選択との突合) は呼出側 (CharactersSection) が行う。
+ */
+export function normalizeCharacterInput(
+  input: string,
+  workId: string,
+): { masterIds: string[]; freeTexts: string[] } {
+  const parts = input
+    .split(/[,、]/)
+    .map((s) => s.trim())
+    .filter((s) => s !== '')
+  const masterIds: string[] = []
+  const freeTexts: string[] = []
+  for (const part of parts) {
+    const m = resolveCharacterExact(part, workId)
+    if (m != null) {
+      masterIds.push(m.id)
+    } else {
+      console.warn(
+        `[normalizeCharacterInput] master 未一致 (work=${workId}): "${part}"`,
+      )
+      freeTexts.push(part)
+    }
+  }
+  return { masterIds, freeTexts }
+}
+
+// ─────────────────────────────────────────
 // 統合検索サジェスト (master_works + master_characters + master_item_types)
 //
 // 検索画面 (app/(tabs)/search.tsx TextSearchPane) で type 付きの統合候補を返す。

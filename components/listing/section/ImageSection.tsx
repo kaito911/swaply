@@ -16,13 +16,14 @@
 //     - 既存: pickFromCamera / pickFromLibrary helper は完全流用
 //     - 既存: value = {frontUri, backUri} 契約は不変 (親 reducer への影響ゼロ)
 
-import { colors, fontWeight, radius, spacing } from '@/constants/theme'
+import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { ensureMediaPermission } from '@/lib/ensureMediaPermission'
 import { prepareImageForUpload, LISTING_IMAGE_MAX_LONG_EDGE } from '@/lib/imageProcessing'
-import React from 'react'
+import React, { useState } from 'react'
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Pressable,
@@ -78,11 +79,34 @@ async function pickFromLibrary(): Promise<string | null> {
 }
 
 export function ImageSection({ value, onChange }: ImageSectionProps) {
+  // ★変換中フラグ: 変換完了まで別画像の再選択を防ぐ (競合防止)。
+  const [processing, setProcessing] = useState(false)
   const applyToSlot = (slot: Slot, uri: string | null) => {
     if (slot === 'front') {
       onChange({ ...value, frontUri: uri })
     } else {
       onChange({ ...value, backUri: uri })
+    }
+  }
+
+  // ★選択〜変換完了を processing で囲み、その間は再選択を無効化する。
+  //   変換失敗 (ImagePreparationError) は catch し、画像を採用せず再試行を促す。
+  const runPick = async (
+    slot: Slot,
+    pick: () => Promise<string | null>,
+  ) => {
+    if (processing) return
+    setProcessing(true)
+    try {
+      const uri = await pick()
+      if (uri != null) applyToSlot(slot, uri)
+    } catch {
+      Alert.alert(
+        '画像エラー',
+        '画像を処理できませんでした。もう一度お試しください。',
+      )
+    } finally {
+      setProcessing(false)
     }
   }
 
@@ -93,17 +117,11 @@ export function ImageSection({ value, onChange }: ImageSectionProps) {
       [
         {
           text: 'カメラで撮る',
-          onPress: async () => {
-            const uri = await pickFromCamera()
-            if (uri != null) applyToSlot(slot, uri)
-          },
+          onPress: () => void runPick(slot, pickFromCamera),
         },
         {
           text: 'アルバムから選ぶ',
-          onPress: async () => {
-            const uri = await pickFromLibrary()
-            if (uri != null) applyToSlot(slot, uri)
-          },
+          onPress: () => void runPick(slot, pickFromLibrary),
         },
         { text: 'キャンセル', style: 'cancel' },
       ],
@@ -115,22 +133,32 @@ export function ImageSection({ value, onChange }: ImageSectionProps) {
   }
 
   return (
-    <View style={styles.row}>
-      <Thumbnail
-        slot="front"
-        uri={value.frontUri}
-        label="表面"
-        required
-        onPress={() => openPicker('front')}
-        onRemove={() => removeSlot('front')}
-      />
-      <Thumbnail
-        slot="back"
-        uri={value.backUri}
-        label="裏面"
-        onPress={() => openPicker('back')}
-        onRemove={() => removeSlot('back')}
-      />
+    <View>
+      <View style={styles.row}>
+        <Thumbnail
+          slot="front"
+          uri={value.frontUri}
+          label="表面"
+          required
+          disabled={processing}
+          onPress={() => openPicker('front')}
+          onRemove={() => removeSlot('front')}
+        />
+        <Thumbnail
+          slot="back"
+          uri={value.backUri}
+          label="裏面"
+          disabled={processing}
+          onPress={() => openPicker('back')}
+          onRemove={() => removeSlot('back')}
+        />
+      </View>
+      {processing && (
+        <View style={styles.processingRow}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={styles.processingText}>画像を処理中…</Text>
+        </View>
+      )}
     </View>
   )
 }
@@ -143,6 +171,7 @@ function Thumbnail({
   uri,
   label,
   required = false,
+  disabled = false,
   onPress,
   onRemove,
 }: {
@@ -150,6 +179,7 @@ function Thumbnail({
   uri: string | null
   label: string
   required?: boolean
+  disabled?: boolean
   onPress: () => void
   onRemove: () => void
 }) {
@@ -157,6 +187,7 @@ function Thumbnail({
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       style={({ pressed }) => [
         styles.thumb,
         hasImage && styles.thumbFilled,
@@ -203,6 +234,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
     flexWrap: 'wrap',
+  },
+  processingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  processingText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
   },
   thumb: {
     width: THUMB_SIZE,

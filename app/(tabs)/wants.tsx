@@ -130,6 +130,8 @@ export default function WantsScreen() {
   const [formMemberName, setFormMemberName] = useState('')
   const [formSeries, setFormSeries] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // ★参考画像の変換中フラグ。変換完了まで再選択を防ぐ (競合防止)。
+  const [imageProcessing, setImageProcessing] = useState(false)
   // WantSuggestInput の入力欄テキスト (4 form fields とは独立、suggestion 検索専用)
   const [suggestInput, setSuggestInput] = useState('')
   // item_type は wanted_cards にカラムなし (B-0 スコープ外)、UI state のみで保持して
@@ -206,16 +208,25 @@ export default function WantsScreen() {
   }
 
   // 参考画像 picker handlers (Phase B-1)
-  const handlePickFromLibrary = async () => {
-    if (submitting) return
-    const uri = await pickFromLibrary()
-    if (uri != null) setSelectedImageUri(uri)
+  //   ★選択〜JPEG変換完了を imageProcessing で囲み、その間は再選択を無効化。
+  //   ★変換失敗 (ImagePreparationError) は catch し、画像を採用せず再試行を促す。
+  const runPickWant = async (pick: () => Promise<string | null>) => {
+    if (submitting || imageProcessing) return
+    setImageProcessing(true)
+    try {
+      const uri = await pick()
+      if (uri != null) setSelectedImageUri(uri)
+    } catch {
+      Alert.alert(
+        '画像エラー',
+        '画像を処理できませんでした。もう一度お試しください。',
+      )
+    } finally {
+      setImageProcessing(false)
+    }
   }
-  const handlePickFromCamera = async () => {
-    if (submitting) return
-    const uri = await pickFromCamera()
-    if (uri != null) setSelectedImageUri(uri)
-  }
+  const handlePickFromLibrary = () => void runPickWant(pickFromLibrary)
+  const handlePickFromCamera = () => void runPickWant(pickFromCamera)
   const handleRemoveImage = () => {
     if (submitting) return
     setSelectedImageUri(null)
@@ -565,10 +576,10 @@ export default function WantsScreen() {
                     style={({ pressed }) => [
                       styles.imagePickButton,
                       pressed && styles.imagePickButtonPressed,
-                      submitting && styles.imagePickButtonDisabled,
+                      (submitting || imageProcessing) && styles.imagePickButtonDisabled,
                     ]}
                     onPress={handlePickFromLibrary}
-                    disabled={submitting}
+                    disabled={submitting || imageProcessing}
                   >
                     <Ionicons name="image-outline" size={16} color={colors.primary} />
                     <Text style={styles.imagePickButtonText}>
@@ -579,10 +590,10 @@ export default function WantsScreen() {
                     style={({ pressed }) => [
                       styles.imagePickButton,
                       pressed && styles.imagePickButtonPressed,
-                      submitting && styles.imagePickButtonDisabled,
+                      (submitting || imageProcessing) && styles.imagePickButtonDisabled,
                     ]}
                     onPress={handlePickFromCamera}
-                    disabled={submitting}
+                    disabled={submitting || imageProcessing}
                   >
                     <Ionicons name="camera-outline" size={16} color={colors.primary} />
                     <Text style={styles.imagePickButtonText}>
@@ -590,6 +601,12 @@ export default function WantsScreen() {
                     </Text>
                   </Pressable>
                 </View>
+                {imageProcessing && (
+                  <View style={styles.imageProcessingRow}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    <Text style={styles.imageProcessingText}>画像を処理中…</Text>
+                  </View>
+                )}
               </View>
             </ScrollView>
 
@@ -861,6 +878,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginTop: 8,
+  },
+  imageProcessingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  imageProcessingText: {
+    fontSize: 13,
+    color: colors.textSecondary,
   },
   imagePickButton: {
     flex: 1,

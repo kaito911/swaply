@@ -50,6 +50,8 @@ export default function VenuePostScreen() {
   const [postWantItemTypesDirty, setPostWantItemTypesDirty] = useState(false)
   const [postImageUri, setPostImageUri] = useState<string | null>(null)
   const [posting, setPosting] = useState(false)
+  // ★画像の変換中フラグ。変換完了まで再選択を防ぐ (競合防止)。
+  const [pickingImage, setPickingImage] = useState(false)
 
   const [postCharacters, setPostCharacters] = useState<MasterCharacter[]>([])
   const [postCharacterFreeTexts, setPostCharacterFreeTexts] = useState<string[]>([])
@@ -110,6 +112,7 @@ export default function VenuePostScreen() {
     }
 
   const handlePickImage = async () => {
+    if (pickingImage || posting) return
     if (!(await ensureMediaPermission('library'))) return
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -119,12 +122,19 @@ export default function VenuePostScreen() {
     })
     if (result.canceled) return
     const asset = result.assets?.[0]
-    if (asset?.uri != null) {
+    if (asset?.uri == null) return
+    // ★JPEG変換 (失敗時は採用しない)。変換中は再選択を無効化。
+    setPickingImage(true)
+    try {
       const prepared = await prepareImageForUpload(
         { uri: asset.uri, width: asset.width, height: asset.height },
         { maxLongEdge: LISTING_IMAGE_MAX_LONG_EDGE },
       )
       setPostImageUri(prepared.uri)
+    } catch {
+      Alert.alert('画像エラー', '画像を処理できませんでした。もう一度お試しください。')
+    } finally {
+      setPickingImage(false)
     }
   }
 
@@ -194,8 +204,8 @@ export default function VenuePostScreen() {
           <View style={styles.imagePreviewWrap}>
             <Image source={{ uri: postImageUri }} style={styles.imagePreview} resizeMode="cover" />
             <View style={styles.imageActions}>
-              <Pressable style={styles.imageActionButton} onPress={handlePickImage}>
-                <Text style={styles.imageActionText}>変更</Text>
+              <Pressable style={styles.imageActionButton} onPress={handlePickImage} disabled={pickingImage}>
+                <Text style={styles.imageActionText}>{pickingImage ? '処理中…' : '変更'}</Text>
               </Pressable>
               <Pressable style={styles.imageActionButton} onPress={() => setPostImageUri(null)}>
                 <Text style={styles.imageActionText}>削除</Text>
@@ -203,9 +213,9 @@ export default function VenuePostScreen() {
             </View>
           </View>
         ) : (
-          <Pressable style={styles.imagePickerButton} onPress={handlePickImage}>
+          <Pressable style={styles.imagePickerButton} onPress={handlePickImage} disabled={pickingImage}>
             <Ionicons name="image-outline" size={20} color={colors.primary} />
-            <Text style={styles.imagePickerText}>画像を選択</Text>
+            <Text style={styles.imagePickerText}>{pickingImage ? '処理中…' : '画像を選択'}</Text>
           </Pressable>
         )}
       </View>

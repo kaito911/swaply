@@ -96,7 +96,10 @@ export default function ProfileEditScreen() {
 
   const canSave = handle.trim().length >= 3 && !saving
 
+  // ★アバターの変換中フラグ。変換完了まで再選択を防ぐ (競合防止)。
+  const [pickingAvatar, setPickingAvatar] = useState(false)
   const handlePickAvatar = async () => {
+    if (pickingAvatar) return
     if (!(await ensureMediaPermission('library'))) return
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -107,11 +110,19 @@ export default function ProfileEditScreen() {
     if (result.canceled) return
     const asset = result.assets?.[0]
     if (!asset?.uri) return
-    const prepared = await prepareImageForUpload(
-      { uri: asset.uri, width: asset.width, height: asset.height },
-      { maxLongEdge: AVATAR_IMAGE_MAX_LONG_EDGE },
-    )
-    setLocalAvatarUri(prepared.uri)
+    // ★JPEG変換 (失敗時は何も変えない)。変換中は再選択を無効化。
+    setPickingAvatar(true)
+    try {
+      const prepared = await prepareImageForUpload(
+        { uri: asset.uri, width: asset.width, height: asset.height },
+        { maxLongEdge: AVATAR_IMAGE_MAX_LONG_EDGE },
+      )
+      setLocalAvatarUri(prepared.uri)
+    } catch {
+      Alert.alert('画像エラー', '画像を処理できませんでした。もう一度お試しください。')
+    } finally {
+      setPickingAvatar(false)
+    }
   }
 
   const handleSave = async () => {
@@ -212,7 +223,7 @@ export default function ProfileEditScreen() {
 
           {/* アバター */}
           <View style={styles.avatarWrap}>
-            <Pressable style={styles.avatarCircle} onPress={handlePickAvatar}>
+            <Pressable style={styles.avatarCircle} onPress={handlePickAvatar} disabled={pickingAvatar}>
               {avatarDisplayUri != null ? (
                 <Image
                   source={{ uri: avatarDisplayUri }}
@@ -223,7 +234,11 @@ export default function ProfileEditScreen() {
                 <Text style={styles.avatarChar}>{avatarChar}</Text>
               )}
               <View style={styles.cameraOverlay}>
-                <Ionicons name="camera" size={14} color="#FFFFFF" />
+                {pickingAvatar ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="camera" size={14} color="#FFFFFF" />
+                )}
               </View>
             </Pressable>
           </View>

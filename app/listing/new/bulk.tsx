@@ -256,6 +256,8 @@ export default function ListingNewBulkScreen() {
   // 補足チップ用の履歴 (自分の listing_note keyword、直近 unique)。
   const [history, setHistory] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
+  // ★写真の変換中フラグ。変換完了まで再選択を防ぐ (競合防止)。
+  const [imageProcessing, setImageProcessing] = useState(false)
   // 出品前の最終確認画面を表示中か (STEP 4)。
   const [reviewMode, setReviewMode] = useState(false)
   // per-item 求 個別編集モーダル (PR-1b-2)。draft-commit 方式で「開いただけで override 化」を防ぐ:
@@ -305,28 +307,28 @@ export default function ListingNewBulkScreen() {
   const activePoint = points.find((p) => p.id === activePointId) ?? null
   const workId = work?.workId ?? ''
 
+  // ★選択〜JPEG変換完了を imageProcessing で囲み、その間は再選択を無効化 (競合防止)。
+  //   ★変換失敗 (ImagePreparationError) は catch し、写真を採用しない (STEP1 に留まり出品不可)。
+  const runPickImage = async (pick: () => Promise<PickedImage | null>) => {
+    if (imageProcessing) return
+    setImageProcessing(true)
+    try {
+      const picked = await pick()
+      if (picked != null) {
+        setImage(picked)
+        setPoints([]) // 写真を替えたら点をリセット
+      }
+    } catch {
+      Alert.alert('画像エラー', '画像を処理できませんでした。もう一度お試しください。')
+    } finally {
+      setImageProcessing(false)
+    }
+  }
   const handlePickImage = () => {
+    if (imageProcessing) return
     Alert.alert('写真を選ぶ', undefined, [
-      {
-        text: 'カメラで撮る',
-        onPress: async () => {
-          const picked = await pickFromCamera()
-          if (picked != null) {
-            setImage(picked)
-            setPoints([]) // 写真を替えたら点をリセット
-          }
-        },
-      },
-      {
-        text: 'アルバムから選ぶ',
-        onPress: async () => {
-          const picked = await pickFromLibrary()
-          if (picked != null) {
-            setImage(picked)
-            setPoints([])
-          }
-        },
-      },
+      { text: 'カメラで撮る', onPress: () => void runPickImage(pickFromCamera) },
+      { text: 'アルバムから選ぶ', onPress: () => void runPickImage(pickFromLibrary) },
       { text: 'キャンセル', style: 'cancel' },
     ])
   }
@@ -604,7 +606,7 @@ export default function ListingNewBulkScreen() {
           {/* 非公式サービス免責 (常時1行・控えめ・著作権 Day1) */}
           <Text style={styles.disclaimer}>公式グッズのみ対象・非公式サービスです</Text>
           <View style={styles.pickCtaWrap}>
-            <PrimaryCTA label="写真を選ぶ" onPress={handlePickImage} size="lg" />
+            <PrimaryCTA label="写真を選ぶ" onPress={handlePickImage} loading={imageProcessing} size="lg" />
           </View>
         </View>
       </SafeAreaView>
@@ -1016,9 +1018,9 @@ export default function ListingNewBulkScreen() {
       </Pressable>
 
       {/* 写真を撮り直す */}
-      <Pressable onPress={handleRetakePhoto} style={styles.retakeRow} hitSlop={8}>
+      <Pressable onPress={handleRetakePhoto} style={styles.retakeRow} hitSlop={8} disabled={imageProcessing}>
         <Ionicons name="camera-reverse-outline" size={16} color={colors.primary} />
-        <Text style={styles.retakeText}>写真を選び直す</Text>
+        <Text style={styles.retakeText}>{imageProcessing ? '処理中…' : '写真を選び直す'}</Text>
       </Pressable>
 
       {/* 求の入力へ (PR-B: タップ属性が全点埋まったら求ステップへ) */}

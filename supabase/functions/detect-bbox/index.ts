@@ -85,6 +85,9 @@ const VISION_TIMEOUT_MS = 60000
 // Vision 応答検証のしきい値。
 const VALIDATION_EPS = 0.005 // はみ出し判定の微小許容 (丸め誤差)
 const AREA_MAX = 0.9 // 矩形面積が画像の 9 割以上 → 全体被覆とみなし reject
+// ★検出矩形の各辺に足す余白 (矩形サイズ比)。切り抜きが窮屈にならないための装飾。
+//   ★検証 (validateBox) は「余白前」の raw 矩形に対して全項目行い、通過した矩形にのみ加算する。
+const BBOX_PADDING_RATIO = 0.08
 
 // SSRF 検証: 許可するパスの接頭辞 (★card-images のみ。seed-card-images/avatars/外部URLは弾く)。
 const STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/card-images/'
@@ -483,20 +486,23 @@ async function processImage(
       continue
     }
     const frac = toFraction(boxPx, W, H)
+    // ★検証は Vision が返した矩形 (余白前・raw) に対して全項目行う。
     if (!validateBox(frac, p.bbox_x, p.bbox_y)) {
       skipped += 1
       continue
     }
+    // 検証通過後にのみ余白を加算 (各辺 8%、0〜1 クランプ)。
+    const padded = applyPadding(frac)
     // ★UPDATE は 4 列のみ。WHERE に bbox_w IS NULL を含め既値を上書きしない。
     //   bbox_x / bbox_y / image_url / その他は SET に含めない。
     const { error: updErr, count } = await admin
       .from('cards')
       .update(
         {
-          bbox_left: frac.left,
-          bbox_top: frac.top,
-          bbox_w: frac.w,
-          bbox_h: frac.h,
+          bbox_left: padded.left,
+          bbox_top: padded.top,
+          bbox_w: padded.w,
+          bbox_h: padded.h,
         },
         { count: 'exact' },
       )
@@ -685,6 +691,19 @@ function validateBox(f: BoxFrac, bbox_x: number, bbox_y: number): boolean {
   // ⑤ 全体被覆でない
   if (f.w * f.h >= AREA_MAX) return false
   return true
+}
+
+// ★検証を通過した矩形にのみ余白を加算する (各辺 w*RATIO / h*RATIO)。
+//   加算後に 0〜1 へクランプ。端のグッズは、はみ出す側の余白のみ削られ反対側は保持される。
+//   ★余白は「装飾」であり、validateBox は必ず余白前 (raw) に対して行うこと。
+function applyPadding(f: BoxFrac): BoxFrac {
+  const padX = f.w * BBOX_PADDING_RATIO
+  const padY = f.h * BBOX_PADDING_RATIO
+  const left = Math.max(0, f.left - padX)
+  const top = Math.max(0, f.top - padY)
+  const right = Math.min(1, f.left + f.w + padX)
+  const bottom = Math.min(1, f.top + f.h + padY)
+  return { left, top, w: right - left, h: bottom - top }
 }
 
 // ─────────────────────────────────────────

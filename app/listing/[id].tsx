@@ -67,12 +67,13 @@ function getDiffInfo(card: Card): DiffInfo {
 }
 
 // ─────────────────────────────────────────
-// bbox 位置マーカー用ヘルパー
+// bbox 枠 / 位置マーカー用ヘルパー
 //
 // ★出品詳細の譲写真は contentFit="contain" 固定 (styles.image)。
-//   cards.bbox_x / bbox_y は「元画像基準 (レターボックス除外) の 0〜1 割合」で、
-//   一括出品のタップ時に app/listing/new/bulk.tsx が contain 変換して保存している。
-//   したがって表示側でも同じ contain 矩形を復元し、その矩形内の割合として配置する必要がある。
+//   cards.bbox_* は「元画像基準 (レターボックス除外) の 0〜1 割合」。
+//     bbox_x / bbox_y      = タップ点 (後方互換の円マーカー用)
+//     bbox_left/top/w/h    = detect-bbox の検出矩形 (枠用)
+//   いずれも同じ contain 矩形を復元し、その矩形内の割合として配置する必要がある。
 //   単純に「割合 × View 全体」で置くと、元画像が正方形でない限りレターボックス分ズレる。
 //   ※ contentFit を将来 cover 等に変えるとこの計算は成立しなくなる (contain 前提)。
 //
@@ -643,14 +644,43 @@ export default function ListingDetailScreen() {
       ? card.image_back_url
       : card.image_url
 
-  // bbox 位置マーカー: bbox_x/y が両方あり (=一括出品) かつ 表面表示中 かつ
-  //   コンテナ実寸・元画像サイズが揃ったときのみ表示。裏面には bbox がないため出さない。
+  // bbox 表示の前提: 表面表示中 かつ コンテナ実寸・元画像サイズが揃っていること。
+  //   裏面には bbox がないため出さない (現在の点マーカーと同じ挙動)。
+  const bboxReady =
+    imageSide === 'front' && imageContainerSize != null && frontNaturalSize != null
+
+  // ★検出矩形の枠 (border only): bbox_left/top/w/h が 4 つとも非 null のときのみ。
+  //   contain 計算 (computeContainRect) をそのまま流用し、矩形を写真上に重ねる。
+  //   中は透明・縁だけで囲み絵柄を隠さない。
+  const showBboxFrame =
+    bboxReady &&
+    card.bbox_left != null &&
+    card.bbox_top != null &&
+    card.bbox_w != null &&
+    card.bbox_h != null
+  let bboxFrame = { left: 0, top: 0, width: 0, height: 0 }
+  if (showBboxFrame && imageContainerSize != null && frontNaturalSize != null) {
+    const rect = computeContainRect(
+      imageContainerSize.w,
+      imageContainerSize.h,
+      frontNaturalSize.w,
+      frontNaturalSize.h,
+    )
+    bboxFrame = {
+      left: rect.x + (card.bbox_left ?? 0) * rect.w,
+      top: rect.y + (card.bbox_top ?? 0) * rect.h,
+      width: (card.bbox_w ?? 0) * rect.w,
+      height: (card.bbox_h ?? 0) * rect.h,
+    }
+  }
+
+  // 位置マーカー (円ドット): 後方互換。矩形の枠が出せないとき (bbox_left/top/w/h の
+  //   いずれかが null) かつ タップ点 bbox_x/y が両方あるときだけ従来どおり表示する。
   const showBboxMarker =
-    imageSide === 'front' &&
+    !showBboxFrame &&
+    bboxReady &&
     card.bbox_x != null &&
-    card.bbox_y != null &&
-    imageContainerSize != null &&
-    frontNaturalSize != null
+    card.bbox_y != null
   let bboxMarkerLeft = 0
   let bboxMarkerTop = 0
   if (showBboxMarker && imageContainerSize != null && frontNaturalSize != null) {
@@ -776,8 +806,25 @@ export default function ListingDetailScreen() {
                 </View>
               )}
 
-              {/* bbox 位置マーカー: 一括出品でカード位置が保存されている出品のみ、
-                  表面写真上の該当位置に円マーカーを表示 (表示専用・タップ不可)。 */}
+              {/* bbox 検出枠: 一括出品で検出矩形が保存されている出品のみ、表面写真上の
+                  該当矩形を「縁だけ」の枠で囲う (中は透明・絵柄を隠さない・タップ不可)。 */}
+              {showBboxFrame && (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.bboxFrame,
+                    {
+                      left: bboxFrame.left,
+                      top: bboxFrame.top,
+                      width: bboxFrame.width,
+                      height: bboxFrame.height,
+                    },
+                  ]}
+                />
+              )}
+
+              {/* bbox 位置マーカー (後方互換): 検出矩形が無い旧出品のみ、タップ点に
+                  円マーカーを表示 (表示専用・タップ不可)。 */}
               {showBboxMarker && (
                 <View
                   pointerEvents="none"
@@ -1342,6 +1389,14 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  // bbox 検出枠: 中は透明・縁だけで囲む (絵柄を隠さない)。写真上の検出矩形を明示する。
+  bboxFrame: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: radius.sm,
+    backgroundColor: 'transparent',
   },
   // bbox 位置マーカー: 円形・白縁取り＋濃い塗り (colors.primary)。写真上のカード位置を指す。
   bboxMarker: {

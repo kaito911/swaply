@@ -4,6 +4,7 @@
 // 求 (want_description) を「求: XXX」全体同サイズ太字で大強調、商品名は補助的に小さく。
 // 写真右上に LikeButton (size=small) overlay。Trust は出品詳細画面で密度確保 (機能 H 戦略)。
 
+import { CroppedCardImage, bboxRectFromCard } from '@/components/CroppedCardImage'
 import { GiveWantBlock } from '@/components/GiveWantBlock'
 import { LikeButton } from '@/components/LikeButton'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
@@ -11,7 +12,6 @@ import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card } from '@/lib/types'
 import { formatStructuredGive, formatStructuredWantFields } from '@/lib/master'
 import { useMasterCache } from '@/hooks/useMasterCache'
-import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import React from 'react'
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
@@ -56,15 +56,9 @@ export function HomeLargeCard({ card, isOwn = false, isLiked = false, onToggleLi
       {/* Image area */}
       <View style={styles.imageWrap}>
         {card.image_url ? (
-          <Image
-            source={{ uri: card.image_url }}
-            style={styles.image}
-            // ★E: 一覧カードは中央クロップで正方形に見せる (cover)。新旧混在でも
-            //   正方形 (aspectRatio 1) に統一され一覧の高さは崩れない。
-            contentFit="cover"
-            transition={200}
-            cachePolicy="memory-disk"
-          />
+          // ★bbox 4 値が揃う出品は検出矩形だけを拡大表示 (1 グッズ = 1 枚の商品写真)。
+          //   矩形が無い / 未検出の出品は従来どおり全体を cover で中央クロップ (正方形統一)。
+          <CroppedCardImage uri={card.image_url} bbox={bboxRectFromCard(card)} />
         ) : (
           <View style={styles.imagePlaceholder}>
             <Ionicons name="image-outline" size={32} color={colors.border} />
@@ -148,10 +142,6 @@ const styles = StyleSheet.create({
   placeholderText: {
     fontSize: 11,
     color: colors.border,
-  },
-  image: {
-    width: '100%',
-    height: '100%',
   },
   likeOverlay: {
     position: 'absolute',

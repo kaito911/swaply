@@ -273,7 +273,10 @@ const CARD_WANT_LINKS_SELECT =
   'card_wanted_links(wanted_card:wanted_cards(card_name, group_name, member_name, series))'
 // ★owner profile は id/handle/display_name のみ (owner の消費は handle/display_name 表示 +
 //   listing/[id] の owner.id のみ。avatar_url/mode/trust列/住所列は未使用=egress/PII 削減で除外)。
-const CARD_FEED_SELECT = `*, owner:profiles(id, handle, display_name), ${CARD_WANT_LINKS_SELECT}`
+// ★bbox_left/top/w/h: 一覧カードの検出矩形クロップ表示 (CroppedCardImage) の前提列。
+//   `*` に含まれるが、この機能の必須依存であることを明示するため列挙する
+//   (4 列すべて非 null の出品のみカード側で切り抜く / 詳細で枠を出す)。
+const CARD_FEED_SELECT = `*, bbox_left, bbox_top, bbox_w, bbox_h, owner:profiles(id, handle, display_name), ${CARD_WANT_LINKS_SELECT}`
 
 export async function fetchNewCards(
   limit = 20,

@@ -144,8 +144,15 @@ export interface Card {
   want_image_url?: string | null
   want_image_back_url?: string | null
   // bbox 6 列 (3.5c bbox spike + expo-image-manipulator クロップ画像生成):
+  //   bbox_x / bbox_y      = ユーザーがタップした点
+  //   bbox_left / bbox_top = detect-bbox が検出した外接矩形の左上
+  //   bbox_w / bbox_h      = 検出矩形の幅・高さ
+  //   すべて「元画像基準 (レターボックス除外)・0〜1 の割合」。座標規約の正は
+  //   supabase/functions/detect-bbox/index.ts のヘッダに一元記載。
   bbox_x?: number | null
   bbox_y?: number | null
+  bbox_left?: number | null
+  bbox_top?: number | null
   bbox_w?: number | null
   bbox_h?: number | null
   image_url_cropped?: string | null

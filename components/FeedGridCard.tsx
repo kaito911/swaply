@@ -3,13 +3,13 @@
 // 「すべて見る」一覧 (app/list/[section].tsx) の 2 列グリッド用カード。
 // 写真主役・提案ボタンなし (押しても写真押してもカード全体で詳細に飛ぶ = HomeLargeCard の
 // 提案 CTA は独自機能がなく撤去した方針と同じ)。FlatList numColumns=2 のセルとして flex:1。
+import { CroppedCardImage, bboxRectFromCard } from '@/components/CroppedCardImage'
 import { GiveWantBlock } from '@/components/GiveWantBlock'
 import { LikeButton } from '@/components/LikeButton'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card } from '@/lib/types'
 import { formatStructuredGive, formatStructuredWantFields } from '@/lib/master'
 import { useMasterCache } from '@/hooks/useMasterCache'
-import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import React from 'react'
@@ -50,15 +50,9 @@ export function FeedGridCard({
     >
       <View style={styles.imageWrap}>
         {card.image_url ? (
-          <Image
-            source={{ uri: card.image_url }}
-            style={styles.image}
-            // ★E: 一覧カードは中央クロップで正方形に見せる (cover)。新旧混在でも
-            //   正方形 (aspectRatio 1) に統一され一覧の高さは崩れない。
-            contentFit="cover"
-            transition={200}
-            cachePolicy="memory-disk"
-          />
+          // ★bbox 4 値が揃う出品は検出矩形だけを拡大表示 (1 グッズ = 1 枚の商品写真)。
+          //   矩形が無い / 未検出の出品は従来どおり全体を cover で中央クロップ (正方形統一)。
+          <CroppedCardImage uri={card.image_url} bbox={bboxRectFromCard(card)} />
         ) : (
           <View style={styles.imagePlaceholder}>
             <Ionicons name="image-outline" size={28} color={colors.border} />
@@ -124,7 +118,6 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     backgroundColor: colors.backgroundMuted,
   },
-  image: { width: '100%', height: '100%' },
   imagePlaceholder: {
     width: '100%',
     height: '100%',

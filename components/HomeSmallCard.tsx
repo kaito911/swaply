@@ -3,11 +3,11 @@
 // 3.5a (機能 H 真意): TrustBadge overlay 完全削除、求 or matchReason を大強調、商品名は補助。
 // 写真右上に LikeButton (size=small) overlay。
 
+import { CroppedCardImage, bboxRectFromCard } from '@/components/CroppedCardImage'
 import { LikeButton } from '@/components/LikeButton'
 import { FEATURE_FLAGS } from '@/constants/feature-flags'
 import { colors, fontWeight, radius, spacing } from '@/constants/theme'
 import { Card } from '@/lib/types'
-import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import React from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
@@ -46,13 +46,9 @@ export function HomeSmallCard({
     <Pressable style={styles.card} onPress={handlePress}>
       <View style={styles.imageWrap}>
         {card.image_url ? (
-          <Image
-            source={{ uri: card.image_url }}
-            style={styles.image}
-            contentFit="cover"
-            transition={200}
-            cachePolicy="memory-disk"
-          />
+          // ★bbox 4 値が揃う出品は検出矩形だけを拡大表示 (1 グッズ = 1 枚の商品写真)。
+          //   矩形が無い / 未検出の出品は従来どおり全体を cover 表示。
+          <CroppedCardImage uri={card.image_url} bbox={bboxRectFromCard(card)} />
         ) : (
           <View style={styles.imagePlaceholder}>
             <Ionicons name="image-outline" size={20} color={colors.border} />
@@ -137,10 +133,6 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
   },
   likeOverlay: {
     position: 'absolute',

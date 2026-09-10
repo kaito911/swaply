@@ -1,31 +1,33 @@
 // components/CroppedCardImage.tsx
 //
-// 一覧カード (HomeLargeCard / HomeSmallCard / FeedGridCard) の出品画像を、
-// detect-bbox が検出した外接矩形の範囲だけ拡大して「1 枚の独立した商品写真」のように
-// 見せる表示専用コンポーネント。1 枚の写真から複数のグッズを一括出品したとき、各カードが
-// それぞれのグッズだけを主役として並ぶことを目的とする。
+// 一覧カード (HomeLargeCard / HomeSmallCard / FeedGridCard) の出品画像を、detect-bbox が
+// 検出した外接矩形の範囲だけ拡大して「1 枚の独立した商品写真」のように見せる表示専用
+// コンポーネント。1 枚の写真から複数のグッズを一括出品したとき、各カードがそれぞれのグッズ
+// だけを主役として並ぶことを目的とする。
 //
 // ★座標規約: bbox_left / bbox_top / bbox_w / bbox_h は「元画像基準 (レターボックス除外)・
 //   0〜1 の割合」(正は supabase/functions/detect-bbox/index.ts のヘッダ)。
 //
-// ★画像そのものは加工しない。overflow:hidden の窓 (window) の中で Image を実サイズに拡大 +
-//   平行移動し、矩形が窓に収まる (案B = contain) ように配置する。歪みなく切り抜くには元画像の
-//   縦横比が必要なため onLoad で natural サイズを取得する。
-//   ・矩形 (bbox) が無い出品        → 全体を cover 表示 (= 従来挙動)
-//   ・natural / 窓サイズ取得前       → 全体を cover 表示 (揃った時点で切り抜きへ切替)
+// ★画像そのものは加工しない。overflow:hidden の窓 (window) の中で Image を絶対配置し、実サイズ
+//   に拡大 + 平行移動 (= scale/translate 相当) して見せる。歪みなく切り抜くには元画像の縦横比が
+//   必要なため onLoad で natural サイズを取得する。
 //
-// ★案B (contain) 採用理由: 交換判断にはグッズ全体が見えることが必要。cover だと矩形の縦横比
-//   (本番実データで約 1:1.9) がカード枠と食い違い上下/左右が欠け絵柄が判断できなくなる。
-//   contain は矩形全体を必ず表示し、余白 (レターボックス) には窓の背景 (既存 theme トークン
-//   colors.backgroundMuted) を出す。
+// ★④-2 カード切り抜き仕様 (縦長矩形基準):
+//   トレカ等の「縦長矩形」を主対象とし、矩形の高さがカード高さを埋めるよう拡大する:
+//       scale = cardHeight / (bbox_h × imgH)
+//   縦は矩形がちょうど収まり (上下の余白/隣接物なし)、横ははみ出しをクランプして矩形を中央寄せ
+//   する (画像がカードより広い通常ケースでは背景を出さず隣接領域でカード幅を満たす)。
+//   ・横長矩形 (rectPxW > rectPxH) → ★現状はログのみで対処保留。全体を cover 表示に fallback。
+//   ・矩形 (bbox) が無い出品 / natural・窓サイズ取得前 → 全体を cover 表示 (= 従来挙動)。
 //
 // bbox_left/top/w/h が 4 つとも非 null のときだけ切り抜く。呼び出し側は bboxRectFromCard で
 // 4 値の非 null 判定を一元化して渡す (どれか 1 つでも null なら null = 全体表示)。
+// ※ detect-bbox は 4 列を 1 文で同時に埋めるため「一部だけ null」は本番に存在しない前提。
 
 import { colors } from '@/constants/theme'
 import { Card } from '@/lib/types'
 import { Image } from 'expo-image'
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, View } from 'react-native'
 
 export type BboxRect = { left: number; top: number; w: number; h: number }
@@ -53,17 +55,27 @@ interface CroppedCardImageProps {
   bbox: BboxRect | null
 }
 
+type CropStyle = {
+  position: 'absolute'
+  width: number
+  height: number
+  left: number
+  top: number
+}
+
 export function CroppedCardImage({ uri, bbox }: CroppedCardImageProps) {
   // 窓 (コンテナ) の実寸と元画像の natural サイズ。両方揃うまでは全体表示に fallback。
   const [container, setContainer] = useState<{ w: number; h: number } | null>(null)
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
+  // 横長矩形の警告ログを 1 度だけ出すためのガード。
+  const landscapeLoggedRef = useRef(false)
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout
     if (width > 0 && height > 0) setContainer({ w: width, h: height })
   }
 
-  const canCrop =
+  const ready =
     bbox != null &&
     bbox.w > 0 &&
     bbox.h > 0 &&
@@ -74,18 +86,42 @@ export function CroppedCardImage({ uri, bbox }: CroppedCardImageProps) {
     natural.w > 0 &&
     natural.h > 0
 
-  // 切り抜き時の Image レイアウト (px 絶対配置)。案B (contain): 矩形が窓に「収まる」よう
-  // 全体画像の表示サイズ (DW×DH, 縦横比 r 維持) を決め、矩形を窓の中央に置く (余白は窓の背景)。
-  let cropStyle: { position: 'absolute'; width: number; height: number; left: number; top: number } | null =
-    null
+  // 検出矩形の px 寸法 (元画像基準)。縦長 (rectPxH >= rectPxW) を切り抜き対象とする。
+  const rectPxW = bbox != null && natural != null ? bbox.w * natural.w : 0
+  const rectPxH = bbox != null && natural != null ? bbox.h * natural.h : 0
+  const isLandscapeRect = ready && rectPxW > rectPxH
+
+  // ★横長矩形は現状ログのみで対処保留 (縦長=トレカ等を主対象に設計)。
+  useEffect(() => {
+    if (isLandscapeRect && !landscapeLoggedRef.current) {
+      landscapeLoggedRef.current = true
+      console.warn(
+        '[CroppedCardImage] landscape bbox detected; crop deferred, showing full image',
+        { rectPxW: Math.round(rectPxW), rectPxH: Math.round(rectPxH) },
+      )
+    }
+  }, [isLandscapeRect, rectPxW, rectPxH])
+
+  // 縦長矩形のみ切り抜き (横長・未準備・矩形なしは全体 cover 表示に fallback)。
+  const canCrop = ready && !isLandscapeRect
+
+  let cropStyle: CropStyle | null = null
   if (canCrop && bbox != null && container != null && natural != null) {
-    const r = natural.w / natural.h // 元画像の縦横比 (歪ませない)
     const CW = container.w
     const CH = container.h
-    const DH = Math.min(CW / (bbox.w * r), CH / bbox.h)
-    const DW = r * DH
-    const left = -bbox.left * DW + (CW - bbox.w * DW) / 2
-    const top = -bbox.top * DH + (CH - bbox.h * DH) / 2
+    // ★scale = cardHeight / (bbox_h × imgH)。全体画像の表示サイズ = 元画像 px × scale。
+    //   矩形高さがちょうど CH を埋める (DH = CH / bbox.h、上下は矩形で満ちる)。
+    const scale = CH / (bbox.h * natural.h)
+    const DW = natural.w * scale
+    const DH = natural.h * scale
+    // 矩形を水平中央に。画像がカードより広ければ左右のはみ出しをクランプし背景を出さない。
+    const centerLeft = -bbox.left * DW + (CW - bbox.w * DW) / 2
+    const left =
+      DW >= CW
+        ? Math.min(0, Math.max(CW - DW, centerLeft)) // 画像でカード幅を満たす (背景を出さない)
+        : (CW - DW) / 2 // 画像がカードより狭い稀ケースは中央 (左右に背景トークンが出る)
+    // 矩形上端を 0 に。矩形が縦を満たすため上下に背景は出ない。
+    const top = -bbox.top * DH
     cropStyle = { position: 'absolute', width: DW, height: DH, left, top }
   }
 
@@ -93,8 +129,8 @@ export function CroppedCardImage({ uri, bbox }: CroppedCardImageProps) {
     <View style={styles.window} onLayout={onLayout}>
       <Image
         source={{ uri }}
-        // 切り抜き時は縦横比 r ちょうどの枠に置くため contentFit は無関係 (歪まない)。
-        // 全体表示 fallback では従来どおり cover で正方枠を中央クロップ。
+        // 切り抜き時は元画像を実寸配置 (縦横比維持) するため contentFit は無関係 (歪まない)。
+        // 全体表示 fallback では従来どおり cover で枠を中央クロップ。
         style={cropStyle ?? styles.full}
         contentFit="cover"
         transition={200}
@@ -116,7 +152,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     overflow: 'hidden',
-    // contain の余白 (レターボックス) に出る背景。新規カラーは定義せず既存トークンを使用。
+    // 画像がカードより狭い稀ケースで出る余白の背景。新規カラーは定義せず既存トークンを使用。
     backgroundColor: colors.backgroundMuted,
   },
   full: {

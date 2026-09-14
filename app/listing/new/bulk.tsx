@@ -36,6 +36,7 @@ import {
 } from '@/components/KeyboardAwareScroll'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
+import { useNumberedSeriesLabels } from '@/hooks/useNumberedSeriesLabels'
 import {
   fetchListingKeywordHistory,
   getCharacterById,
@@ -306,6 +307,8 @@ export default function ListingNewBulkScreen() {
 
   const activePoint = points.find((p) => p.id === activePointId) ?? null
   const workId = work?.workId ?? ''
+  // JO1 / INI 選択時のみシリーズ欄を「通し番号」案内にする (対象外は null → 既存文言)。
+  const numberedSeries = useNumberedSeriesLabels(work?.workId ?? null)
 
   // ★選択〜JPEG変換完了を imageProcessing で囲み、その間は再選択を無効化 (競合防止)。
   //   ★変換失敗 (ImagePreparationError) は catch し、写真を採用しない (STEP1 に留まり出品不可)。
@@ -667,10 +670,14 @@ export default function ListingNewBulkScreen() {
           {/* シリーズ・公演名 (任意・譲側の共通情報)。求の直上に置き single-page の
               「種別→シリーズ→求」順と揃える。全 cards に同一値を保存 (共通値パターン)。 */}
           <View style={styles.seriesBlock}>
-            <Text style={styles.seriesLabel}>シリーズ・公演名（任意）</Text>
+            <Text style={styles.seriesLabel}>
+              {numberedSeries ? `${numberedSeries.label}（任意）` : 'シリーズ・公演名（任意）'}
+            </Text>
             <TextInput
               style={styles.seriesInput}
-              placeholder="例：CHOOM TOUR、2026 TOUR ○○、一番くじ○○"
+              placeholder={
+                numberedSeries?.placeholder ?? '例：CHOOM TOUR、2026 TOUR ○○、一番くじ○○'
+              }
               value={bulkSeries}
               onChangeText={setBulkSeries}
               maxLength={100}

@@ -49,6 +49,7 @@ import {
 import { WorkSection } from '@/components/listing/section/WorkSection'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/constants/theme'
 import { useAuth } from '@/hooks/useAuth'
+import { useNumberedSeriesLabels } from '@/hooks/useNumberedSeriesLabels'
 import { deleteDraft, isMeaningfulDraft, loadDraft, saveDraft } from '@/lib/listingDrafts'
 import { useToast } from '@/providers/ToastProvider'
 import {
@@ -236,6 +237,9 @@ export default function ListingNewSinglePageScreen() {
   // ② 出品前の確認画面を表示中か (bulk の STEP4 確認と体験を揃える)。
   //   「出品する」で true → 確認ビュー → 「この内容で出品する」で既存 handleSubmit を呼ぶ。
   const [confirming, setConfirming] = useState(false)
+
+  // JO1 / INI 選択時のみシリーズ欄を「通し番号」案内にする (対象外は null → 既存文言)。
+  const numberedSeries = useNumberedSeriesLabels(state.work?.workId ?? null)
 
   // reducer state を常に最新の ref で保持 (unmount 時の flush 用)
   const stateRef = useRef(state)
@@ -605,13 +609,15 @@ export default function ListingNewSinglePageScreen() {
           {/* ⑤ シリーズ・公演名 (任意・譲側情報。種別の直後・求の前にまとめる) */}
           <SectionHeader
             index={5}
-            title="シリーズ・公演名"
+            title={numberedSeries?.label ?? 'シリーズ・公演名'}
             done={state.series.trim() !== ''}
             optional
           />
           <TextInput
             style={styles.seriesInput}
-            placeholder="例：CHOOM TOUR、2026 TOUR ○○、一番くじ○○"
+            placeholder={
+              numberedSeries?.placeholder ?? '例：CHOOM TOUR、2026 TOUR ○○、一番くじ○○'
+            }
             value={state.series}
             onChangeText={(v) => dispatch({ type: 'SET_SERIES', value: v })}
             maxLength={100}
